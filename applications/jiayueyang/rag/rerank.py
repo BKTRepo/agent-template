@@ -4,6 +4,7 @@
 接入 naive_query 流水线: 向量检索之后、token 截断之前, 由重排器对分块重新打分。
 """
 
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
@@ -14,6 +15,18 @@ from configure import LOGGER, PROJECT_CONFIG
 # ==================== 重排用的文档切块 (长文档超出 token 上限时拆分) ====================
 
 _CHARS_PER_TOKEN = 1.8  # 中英文混合文本的保守估算
+
+# 表格解析器为可追溯性写入的“第 N 行/共 M 行”不是业务内容。若用户查询
+# 本身包含代码值（例如 Visa DE39=11），这些序号会让重排模型把“第 11 行”
+# 误判成精确命中。只在送给重排服务的副本中移除序号，引用原文保持不变。
+_TABLE_ROW_ORDINAL_RE = re.compile(
+    r"第\s*\d+\s*行(?:\s*/\s*共\s*\d+\s*行|中)?"
+)
+
+
+def _sanitize_for_rerank(text: str) -> str:
+    """移除解析器生成、会污染数值相关性的表格行序号。"""
+    return _TABLE_ROW_ORDINAL_RE.sub("表格行", text)
 
 
 def _chunk_documents_for_rerank(
@@ -162,7 +175,7 @@ async def rerank_chunks(
 
     # 提取文档文本
     document_texts: List[str] = [
-        c.get("content", "") or str(c) for c in chunks
+        _sanitize_for_rerank(c.get("content", "") or str(c)) for c in chunks
     ]
 
     # 可选: 长文档切块

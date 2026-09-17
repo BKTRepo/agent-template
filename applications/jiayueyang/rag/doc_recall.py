@@ -24,11 +24,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from configure import LOGGER, PROJECT_CONFIG
 
-# 按配置选择向量库后端（与 query.py 同口径: milvus 走 Celery RPC）
-if PROJECT_CONFIG.VECTOR_BACKEND == "milvus":
-    from applications.jiayueyang.rag.vector_rpc import query_chunks_by_doc
-else:
-    from applications.jiayueyang.rag.vector_store import query_chunks_by_doc
+from applications.jiayueyang.rag.milvus_store import query_chunks_by_doc
 
 # ==================== 摘要索引缓存 ====================
 

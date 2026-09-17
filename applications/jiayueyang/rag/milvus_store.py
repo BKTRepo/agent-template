@@ -1,11 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Milvus 持久化向量存储，接口设计参考 LightRAG
-
-vector_store.py（ChromaDB）的直接替换实现，对外暴露同名的 4 个公共函数。
-"""
+"""Milvus Server 持久化向量存储与内置 BM25 混合检索。"""
 
 import hashlib
-import os
+import re
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -17,7 +14,11 @@ try:
         CollectionSchema,
         DataType,
         FieldSchema,
+        Function,
+        FunctionType,
         MilvusClient,
+        AnnSearchRequest,
+        RRFRanker,
     )
     _HAS_PYMILVUS = True
 except ImportError:
@@ -25,55 +26,7 @@ except ImportError:
     MilvusClient = None  # type: ignore
 
 from configure import LOGGER, PROJECT_CONFIG
-
-# ---------------------------------------------------------------------------
-# milvus-lite Windows 兼容补丁
-# ---------------------------------------------------------------------------
-
-def _patch_milvus_lite_windows_rename() -> None:
-    """修复 milvus-lite 在 Windows 上 manifest 保存必然失败的问题。
-
-    milvus_lite/storage/manifest.py 的 Manifest.save() 走"写 .tmp →
-    os.rename(tmp, target)": POSIX 的 rename 会原子覆盖已存在的目标,
-    而 Windows 上目标存在时抛 FileExistsError([WinError 183])。持久化
-    的 .milvus.db 中 manifest.json 必然已存在（上一次会话所建）, 于是
-    任何触发 manifest 保存的 flush（大批量 upsert/delete）都会失败——
-    小文档因不触发中途 flush 而侥幸躲过, 大文档必中。
-
-    修复: 把该模块命名空间内的 os 替换为代理, 仅将 rename 重定向到
-    覆盖语义的 os.replace（POSIX 上 os.replace 与 os.rename 完全等价,
-    Linux 部署零行为变化）, 其余属性原样委托, 不影响其他模块。
-    幂等: 重复导入/调用只打一次补丁。
-    """
-    if os.name != "nt":
-        return
-    try:
-        from milvus_lite.storage import manifest as _manifest_mod
-    except ImportError:
-        return  # 未安装 milvus-lite（独立服务端模式）时无需补丁
-    if getattr(_manifest_mod, "_win_rename_patched", False):
-        return
-
-    class _OsReplaceRename:
-        """os 模块代理: 仅 rename 重定向为 os.replace, 其余委托真实 os。"""
-
-        def __init__(self, real_os):
-            self._real = real_os
-
-        def rename(self, src, dst):
-            return os.replace(src, dst)
-
-        def __getattr__(self, name):
-            return getattr(self._real, name)
-
-    _manifest_mod.os = _OsReplaceRename(os)
-    _manifest_mod._win_rename_patched = True
-    LOGGER.info("已补丁 milvus-lite manifest.save 的 Windows 不兼容（rename → replace）")
-
-
-# 模块导入即打补丁（本模块仅在 milvus 后端被导入, 先于任何 Milvus 操作）
-_patch_milvus_lite_windows_rename()
-
+from common.milvus_pool import get_milvus_client_pool
 
 # ---------------------------------------------------------------------------
 # 常量
@@ -82,17 +35,9 @@ _COLLECTION_NAME = "rag_chunks"
 
 
 def is_remote_milvus_uri(uri: str | None = None) -> bool:
-    """判断是否连接独立的 Milvus Server。
-
-    HTTP(S) URI 表示客户端通过网络访问 Milvus Server；本地文件路径
-    表示 Milvus Lite，只允许由 Worker 独占访问。
-    """
+    """判断 URI 是否为独立 Milvus Server 地址。"""
     value = str(uri if uri is not None else PROJECT_CONFIG.MILVUS_URI).strip().lower()
     return value.startswith(("http://", "https://"))
-
-# Milvus Lite 单进程锁冲突的退避重试参数
-_LOCK_RETRY_TIMES = 5
-_LOCK_RETRY_INTERVAL = 1.0
 
 # VARCHAR 最大字节长度（Milvus 上限为 65535 字节）
 _MAX_CONTENT_BYTES = 65535
@@ -100,6 +45,25 @@ _MAX_FILE_PATH_BYTES = 1024
 _MAX_FILE_NAME_BYTES = 512
 _MAX_DOC_ID_BYTES = 256
 _MAX_MODALITY_BYTES = 64
+_MAX_LANGUAGE_BYTES = 8
+
+# 每个分块按 language 字段选择 analyzer；技术型混合文本使用 Jieba 兜底，
+# 同时保留中文、拉丁字母、数字和连字符标识，并统一英文大小写。
+_MULTI_ANALYZER_PARAMS: Dict[str, Any] = {
+    "analyzers": {
+        "chinese": {
+            "tokenizer": "jieba",
+            "filter": ["cnalphanumonly", "lowercase"],
+        },
+        "english": {"type": "english"},
+        "default": {
+            "tokenizer": "jieba",
+            "filter": ["cnalphanumonly", "lowercase"],
+        },
+    },
+    "by_field": "language",
+    "alias": {"cn": "chinese", "en": "english", "mixed": "default"},
+}
 
 # ---------------------------------------------------------------------------
 # 客户端管理（每次操作短连接）
@@ -109,62 +73,41 @@ _collection_ready: bool = False
 
 @contextmanager
 def _milvus_client() -> Iterator[MilvusClient]:  # type: ignore
-    """按操作创建短连接, 用完即关闭（接口设计参考 LightRAG）。
-
-    Milvus Lite 为单进程嵌入式数据库, 同一时刻仅允许一个进程打开数据目录。
-    采用"每操作短连接"策略及时释放文件锁, 并对瞬时锁冲突做退避重试,
-    以容纳 Web 与 Celery Worker 之间的短暂操作重叠。
-    （MILVUS_URI 指向独立 Milvus 服务端时不受上述限制。）
-    """
+    """按操作创建 Milvus Server 短连接，用完即关闭。"""
     if not _HAS_PYMILVUS:
         raise ImportError(
-            "pymilvus 未安装, 请执行: pip install pymilvus>=2.6.2"
+            "pymilvus 未安装, 请执行: pip install pymilvus==2.6.4"
+        )
+    if not is_remote_milvus_uri():
+        raise ValueError(
+            "仅支持 Milvus C/S 架构；MILVUS_URI 必须是 http:// 或 https:// 服务端地址"
         )
 
-    # 配置 gRPC 保活，避免 Milvus Lite 返回 "too_many_pings" GOAWAY。
-    # 默认 20 秒；提高到 120 秒可避免被服务端限流。
+    # 配置 gRPC 保活，降低长时间解析/嵌入后复用连接时被服务端断开的概率。
     import os as _os
     _os.environ.setdefault("GRPC_ARG_KEEPALIVE_TIME_MS", "120000")
     _os.environ.setdefault("GRPC_ARG_KEEPALIVE_TIMEOUT_MS", "30000")
     _os.environ.setdefault("GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS", "1")
     _os.environ.setdefault("GRPC_ARG_HTTP2_MIN_RECV_PING_INTERVAL_WITHOUT_DATA_MS", "60000")
 
-    kwargs: Dict[str, Any] = {"uri": PROJECT_CONFIG.MILVUS_URI}
-    if PROJECT_CONFIG.MILVUS_USER:
-        kwargs["user"] = PROJECT_CONFIG.MILVUS_USER
-    if PROJECT_CONFIG.MILVUS_PASSWORD:
-        kwargs["password"] = PROJECT_CONFIG.MILVUS_PASSWORD
-    if PROJECT_CONFIG.MILVUS_TOKEN:
-        kwargs["token"] = PROJECT_CONFIG.MILVUS_TOKEN
-
-    # 瞬时锁冲突退避重试（另一进程正在操作 Milvus Lite 数据目录）
-    last_error: Optional[Exception] = None
-    for attempt in range(_LOCK_RETRY_TIMES):
-        try:
-            client = MilvusClient(**kwargs)
-            break
-        except Exception as e:
-            last_error = e
-            if attempt < _LOCK_RETRY_TIMES - 1:
-                LOGGER.warning(f"Milvus 连接被占用, 第 {attempt + 1} 次重试: {e}")
-                time.sleep(_LOCK_RETRY_INTERVAL)
-    else:
-        raise RuntimeError(f"Milvus 连接失败（已重试 {_LOCK_RETRY_TIMES} 次）: {last_error}")
-
-    try:
+    pool = get_milvus_client_pool(
+        uri=PROJECT_CONFIG.MILVUS_URI,
+        user=PROJECT_CONFIG.MILVUS_USER or "",
+        password=PROJECT_CONFIG.MILVUS_PASSWORD or "",
+        token=PROJECT_CONFIG.MILVUS_TOKEN or "",
+        max_size=PROJECT_CONFIG.MILVUS_POOL_SIZE,
+        acquire_timeout=PROJECT_CONFIG.MILVUS_POOL_ACQUIRE_TIMEOUT,
+        client_cls=MilvusClient,
+    )
+    with pool.connection() as client:
         yield client
-    finally:
-        try:
-            client.close()
-        except Exception:
-            pass
 
 
 def _ensure_collection(client: MilvusClient) -> None:  # type: ignore
     """集合与索引不存在时创建，随后加载（接口设计参考 LightRAG）。"""
     global _collection_ready
     if _collection_ready:
-        # 短连接模式下每个新客户端（Milvus Lite 每次启动独立实例）重新加载集合
+        # 短连接模式下每个新客户端都确保集合已经加载。
         try:
             client.load_collection(_COLLECTION_NAME)
         except Exception:
@@ -172,7 +115,7 @@ def _ensure_collection(client: MilvusClient) -> None:  # type: ignore
         return
 
     if client.has_collection(_COLLECTION_NAME):
-        _verify_collection_dim(client)
+        _verify_collection_schema(client)
         client.load_collection(_COLLECTION_NAME)
         _collection_ready = True
         return
@@ -199,6 +142,22 @@ def _ensure_collection(client: MilvusClient) -> None:  # type: ignore
                 name="content",
                 dtype=DataType.VARCHAR,
                 max_length=_MAX_CONTENT_BYTES,
+            ),
+            FieldSchema(
+                name="language",
+                dtype=DataType.VARCHAR,
+                max_length=_MAX_LANGUAGE_BYTES,
+            ),
+            FieldSchema(
+                name="search_text",
+                dtype=DataType.VARCHAR,
+                max_length=_MAX_CONTENT_BYTES,
+                enable_analyzer=True,
+                multi_analyzer_params=_MULTI_ANALYZER_PARAMS,
+            ),
+            FieldSchema(
+                name="sparse_vector",
+                dtype=DataType.SPARSE_FLOAT_VECTOR,
             ),
             FieldSchema(
                 name="file_path",
@@ -231,39 +190,26 @@ def _ensure_collection(client: MilvusClient) -> None:  # type: ignore
         ],
         enable_dynamic_field=True,
     )
+    schema.add_function(
+        Function(
+            name="search_text_bm25",
+            function_type=FunctionType.BM25,
+            input_field_names=["search_text"],
+            output_field_names=["sparse_vector"],
+        )
+    )
 
     try:
         client.create_collection(collection_name=_COLLECTION_NAME, schema=schema)
     except Exception as create_err:
-        # Milvus Lite 可能丢失元数据（has_collection 返回 False），
-        # 而操作系统层面的集合目录仍然存在 → 仅此一种场景删除后重建。
-        #
-        # ⚠️ 原实现对 create_collection 的任何异常都 rmtree 集合目录——
-        # 该目录存放的是全部文档的向量, 并发竞争/权限/磁盘等偶发失败
-        # 会静默删库。收窄后的判定:
-        # 1) has_collection 为 True → 并发竞争（另一进程刚建好）, 直接
-        #    加载即可, 绝不动磁盘;
-        # 2) has_collection 为 False 且本地残留目录存在 → 元数据丢失,
-        #    目录中的向量本就已不可达, 删除重建;
-        # 3) 其他情形（含服务端模式无本地目录）→ 原样上抛。建集合失败
-        #    只会让当前文档 failed（可重试）, 绝不破坏存量数据。
+        # 多进程首次写入时可能并发建集合；仅在另一进程已经创建成功时接管。
         if client.has_collection(_COLLECTION_NAME):
             LOGGER.info(f"集合已由其他进程创建, 直接加载: {create_err}")
+            _verify_collection_schema(client)
             client.load_collection(_COLLECTION_NAME)
             _collection_ready = True
             return
-
-        stale_dir = _stale_collection_dir()
-        if stale_dir is None or not stale_dir.exists():
-            raise
-
-        LOGGER.error(
-            f"检测到集合元数据丢失且残留目录存在 ({stale_dir}), "
-            f"删除残留后重建: {type(create_err).__name__}: {create_err}"
-        )
-        import shutil
-        shutil.rmtree(str(stale_dir), ignore_errors=True)
-        client.create_collection(collection_name=_COLLECTION_NAME, schema=schema)
+        raise
 
     # 创建向量索引
     from pymilvus.milvus_client.index import IndexParams
@@ -274,6 +220,15 @@ def _ensure_collection(client: MilvusClient) -> None:  # type: ignore
         metric_type="COSINE",
     )
     client.create_index(collection_name=_COLLECTION_NAME, index_params=_v_idx)
+
+    _bm25_idx = IndexParams()
+    _bm25_idx.add_index(
+        field_name="sparse_vector",
+        index_type="SPARSE_INVERTED_INDEX",
+        metric_type="BM25",
+        params={"inverted_index_algo": "DAAT_MAXSCORE"},
+    )
+    client.create_index(collection_name=_COLLECTION_NAME, index_params=_bm25_idx)
 
     # 为 doc_id 创建标量索引，加速按文档删除
     try:
@@ -290,8 +245,8 @@ def _ensure_collection(client: MilvusClient) -> None:  # type: ignore
 # ---------------------------------------------------------------------------
 # 截断保护
 # ---------------------------------------------------------------------------
-def _verify_collection_dim(client: MilvusClient) -> None:  # type: ignore
-    """校验已有集合的向量维度与 ``EMBEDDING_DIM`` 配置一致。
+def _verify_collection_schema(client: MilvusClient) -> None:  # type: ignore
+    """校验已有集合具备当前维度、BM25 字段和 analyzer schema。
 
     维度不一致（更换嵌入模型 / 改过配置）会使后续全部 upsert 失败——
     前置校验把"流水线最后一步才失败"变成秒级失败。仅在进程内首次
@@ -302,7 +257,15 @@ def _verify_collection_dim(client: MilvusClient) -> None:  # type: ignore
     """
     try:
         desc = client.describe_collection(_COLLECTION_NAME)
-        for field in desc.get("fields", []):
+        fields = {field.get("name"): field for field in desc.get("fields", [])}
+        required = {"id", "vector", "content", "language", "search_text", "sparse_vector"}
+        missing = sorted(required - set(fields))
+        if missing:
+            raise RuntimeError(
+                f"Milvus 集合 {_COLLECTION_NAME} 是旧 schema，缺少字段: {', '.join(missing)}。"
+                "当前版本不做迁移，请删除该集合后重新解析文档"
+            )
+        for field in fields.values():
             if field.get("name") != "vector":
                 continue
             dim = field.get("dim") or (field.get("params") or {}).get("dim")
@@ -317,17 +280,7 @@ def _verify_collection_dim(client: MilvusClient) -> None:  # type: ignore
     except RuntimeError:
         raise  # 维度不一致是确定性配置错误, 必须上抛
     except Exception as e:
-        LOGGER.debug(f"集合维度校验跳过（describe 未取到维度信息）: {e}")
-
-
-def _stale_collection_dir() -> Optional[Path]:
-    """解析 Milvus Lite 集合在磁盘上的目录; 服务端模式（非 file URI）无本地目录, 返回 None。"""
-    if not PROJECT_CONFIG.MILVUS_URI.startswith("file"):
-        return None
-    db_dir = Path(
-        PROJECT_CONFIG.MILVUS_URI.replace("file://", "").replace("file:", "")
-    )
-    return db_dir / "collections" / _COLLECTION_NAME
+        LOGGER.debug(f"集合 schema 校验跳过（describe 未取到字段信息）: {e}")
 
 
 def _truncate_bytes(value: str, max_bytes: int) -> str:
@@ -345,8 +298,55 @@ def _truncate_bytes(value: str, max_bytes: int) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 公共 API —— 与 vector_store.py 签名完全一致（同名同参的直接替换）
+# 文本规范化与公共 API
 # ---------------------------------------------------------------------------
+
+_CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+_TECH_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_.:/-]{2,}")
+_TABLE_ROW_ORDINAL_RE = re.compile(
+    r"第\s*\d+\s*行(?:\s*/\s*共\s*\d+\s*行|中)?"
+)
+
+
+def _detect_language(text: str) -> str:
+    """按字符比例判定分块主语言；技术标识不会被当作中文或英文句子。"""
+    cjk = len(re.findall(r"[\u3400-\u9fff]", text))
+    latin = len(re.findall(r"[A-Za-z]", text))
+    total = cjk + latin
+    if total == 0:
+        return "mixed"
+    ratio = cjk / total
+    if cjk and latin and 0.15 <= ratio <= 0.85:
+        return "mixed"
+    return "cn" if ratio > 0.5 else "en"
+
+
+def _build_search_text(content: str) -> str:
+    """保留原文并追加技术词规范化变体，提升字段名/编号的 BM25 召回。
+
+    例如 ``responseCode`` 追加 ``response Code``，``ISO-8583`` 追加
+    ``ISO8583`` 与 ``ISO 8583``。原文不被改写，引用仍使用 content 字段。
+    """
+    # 解析器生成的行序号用于展示溯源，不是业务词项。否则查询代码值 11 时，
+    # 大量“第 11 行”的无关表格行会在 BM25 中获得虚假精确匹配。
+    searchable_content = _TABLE_ROW_ORDINAL_RE.sub("表格行", content)
+    variants: List[str] = []
+    seen = set()
+    for token in _TECH_TOKEN_RE.findall(searchable_content):
+        candidates = [
+            _CAMEL_BOUNDARY_RE.sub(" ", token),
+            re.sub(r"[_.:/-]+", "", token),
+            re.sub(r"[_.:/-]+", " ", token),
+        ]
+        for value in candidates:
+            value = " ".join(value.split())
+            key = value.casefold()
+            if value and value != token and key not in seen:
+                seen.add(key)
+                variants.append(value)
+    if not variants:
+        return searchable_content
+    return f"{searchable_content}\n{' '.join(variants)}"
 
 def upsert_chunks(
         chunks: List[Dict[str, Any]],
@@ -371,11 +371,17 @@ def upsert_chunks(
         chunk_id = f"{doc_id}-chunk-{i:04d}" if doc_id else f"chunk-{i:04d}"
         vec = c.get("vector", [])
         content = c.get("content", "")
+        language = c.get("language") or _detect_language(content)
+        if language not in {"cn", "en", "mixed"}:
+            language = "mixed"
+        search_text = c.get("search_text") or _build_search_text(content)
         records.append({
             "id": chunk_id,
             "vector": vec,
             "created_at": now,
             "content": _truncate_bytes(content, _MAX_CONTENT_BYTES),
+            "language": language,
+            "search_text": _truncate_bytes(search_text, _MAX_CONTENT_BYTES),
             "file_path": _truncate_bytes(file_path, _MAX_FILE_PATH_BYTES),
             "file_name": _truncate_bytes(file_name, _MAX_FILE_NAME_BYTES),
             "doc_id": _truncate_bytes(doc_id, _MAX_DOC_ID_BYTES),
@@ -418,9 +424,12 @@ def _search_chunks(
     search_kwargs: Dict[str, Any] = {
         "collection_name": _COLLECTION_NAME,
         "data": query_vectors,  # Milvus 期望传入向量列表; 单个查询向量也需包装成列表
+        # rag_chunks 同时包含 dense vector 与 BM25 sparse_vector。Milvus 2.6
+        # 在多向量字段集合中不会猜测目标字段，必须显式指定 dense 字段。
+        "anns_field": "vector",
         "limit": top_k,
         "output_fields": output_fields,
-        "search_params": {"metric_type": "COSINE"},
+        "search_params": {"metric_type": "COSINE", "params": {}},
     }
     if filter_expr:
         search_kwargs["filter"] = filter_expr
@@ -450,6 +459,98 @@ def _search_chunks(
     return chunks
 
 
+def hybrid_query_chunks(
+        query_vectors: List[List[float]],
+        chinese_query: str,
+        english_query: str = "",
+        *,
+        top_k: int = 100,
+        dense_top_k: int = 60,
+        bm25_top_k: int = 60,
+        filter_expr: str = "",
+) -> List[Dict[str, Any]]:
+    """使用 Milvus 内置 BM25 + Dense + RRF 执行中英双语混合检索。"""
+    if not query_vectors or not chinese_query.strip():
+        return []
+
+    output_fields = [
+        "id", "content", "file_path", "file_name", "doc_id", "tokens",
+        "modality", "chunk_order_index", "created_at", "language",
+    ]
+    expr = filter_expr or None
+    requests = [
+        AnnSearchRequest(
+            data=query_vectors,
+            anns_field="vector",
+            param={"metric_type": "COSINE", "params": {}},
+            limit=dense_top_k,
+            expr=expr,
+        ),
+        AnnSearchRequest(
+            data=[chinese_query.strip()],
+            anns_field="sparse_vector",
+            param={
+                "metric_type": "BM25",
+                "params": {"drop_ratio_search": 0.1},
+                "analyzer_name": "cn",
+            },
+            limit=bm25_top_k,
+            expr=expr,
+        ),
+    ]
+    english_query = english_query.strip()
+    if english_query and english_query.casefold() != chinese_query.strip().casefold():
+        requests.append(
+            AnnSearchRequest(
+                data=[english_query],
+                anns_field="sparse_vector",
+                param={
+                    "metric_type": "BM25",
+                    "params": {"drop_ratio_search": 0.1},
+                    "analyzer_name": "en",
+                },
+                limit=bm25_top_k,
+                expr=expr,
+            )
+        )
+
+    try:
+        with _milvus_client() as client:
+            _ensure_collection(client)
+            results = client.hybrid_search(
+                collection_name=_COLLECTION_NAME,
+                reqs=requests,
+                ranker=RRFRanker(60),
+                limit=top_k,
+                output_fields=output_fields,
+            )
+    except Exception as exc:
+        LOGGER.error(f"Milvus 混合检索失败: {type(exc).__name__}: {exc}")
+        return []
+
+    if not results:
+        return []
+    chunks: List[Dict[str, Any]] = []
+    for hit in results[0]:
+        entity = hit.get("entity", {})
+        chunks.append({
+            "id": hit["id"],
+            "chunk_id": hit["id"],
+            "content": entity.get("content", ""),
+            "file_path": entity.get("file_path", "unknown_source"),
+            "file_name": entity.get("file_name", ""),
+            "doc_id": entity.get("doc_id", ""),
+            "tokens": entity.get("tokens", 0),
+            "modality": entity.get("modality", "text"),
+            "order": entity.get("chunk_order_index", 0),
+            "distance": hit.get("distance"),
+            "created_at": entity.get("created_at"),
+            "language": entity.get("language", "mixed"),
+            "source": "milvus_hybrid",
+        })
+    return chunks
+
+
 def query_chunks(
         query_vectors: List[List[float]], top_k: int = 60
 ) -> List[Dict[str, Any]]:
@@ -457,7 +558,7 @@ def query_chunks(
 
     :param query_vectors: 一个或多个查询向量。
     :param top_k: 返回的结果数量上限。
-    :return: 分块字典列表，键与 ChromaDB 版本完全一致：
+    :return: 统一格式的分块字典列表：
         ``id``、``chunk_id``、``content``、``file_path``、``file_name``、``doc_id``、
         ``tokens``、``modality``、``order``、``distance``、``created_at``。
     """

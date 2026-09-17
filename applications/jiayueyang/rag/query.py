@@ -17,7 +17,6 @@ import asyncio
 import hashlib
 import json
 import re
-import time as _time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional, Set, Tuple
@@ -27,41 +26,19 @@ from configure import LOGGER, PROJECT_CONFIG, RAG_PROMPTS
 from applications.jiayueyang.rag.embedding import embed_texts
 from applications.jiayueyang.rag.llm import chat_completion
 from applications.jiayueyang.rag.rerank import rerank_chunks
-from applications.jiayueyang.rag.bm25 import BM25Searcher
 from applications.jiayueyang.rag.doc_recall import recall_doc_chunks
 from applications.jiayueyang.rag.memory import estimate_tokens, history_token_count
-from applications.jiayueyang.rag.query_rewriter import resolve_query_with_history, rewrite_query
+from applications.jiayueyang.rag.query_rewriter import (
+    BilingualQuery,
+    resolve_query_with_history,
+    rewrite_query_bilingual,
+)
 from applications.jiayueyang.rag.subquery import decompose_query
-
-# 按配置选择向量库后端: milvus 或本地 vector_store
-# 注意: 两套实现的公共函数均为同步语义（milvus 走 Celery RPC 阻塞等待,
-# chroma 走本地 sqlite）, 在 async 调用点必须经 asyncio.to_thread 移交
-# 线程池, 否则会阻塞 Web 事件循环、拖住全体并发 HTTP 请求
-if PROJECT_CONFIG.VECTOR_BACKEND == "milvus":
-    # Milvus Lite 单进程限制: Web 端经由 Celery RPC 委托 Worker 访问
-    from applications.jiayueyang.rag.vector_rpc import (
-        get_all_chunks,
-        get_collection_fingerprint,
-        get_collection_stats,
-        query_chunks,
-    )
-else:
-    from applications.jiayueyang.rag.vector_store import (
-        get_all_chunks,
-        get_collection_fingerprint,
-        get_collection_stats,
-        query_chunks,
-    )
-
-# ==================== BM25 关键词检索 (懒加载) ====================
-_bm25: Optional[BM25Searcher] = None
-_bm25_fingerprint: str = ""  # 全部分块 ID 的哈希, 用于判断索引是否过期
-
-# 指纹缓存: 原实现每次查询都全量拉取全部分块（跨进程数十 MB）只为算
-# 指纹判断新鲜度; 改为"轻量指纹（Worker 内算, 回传短串）+ TTL 缓存"
-# 两级判据, 稳态查询不再触发全量传输
-_bm25_fp_cached: str = ""
-_bm25_fp_expires_at: float = 0.0
+from applications.jiayueyang.rag.milvus_store import (
+    get_collection_stats,
+    hybrid_query_chunks,
+    query_chunks,
+)
 
 # ==================== 数据结构 ====================
 
@@ -186,94 +163,7 @@ async def _warn_if_store_unreachable(context: str) -> None:
         pass  # 诊断逻辑自身失败不得影响主流程
 
 
-# ==================== 混合检索 (Dense + BM25 → RRF 融合) ====================
-
-def _current_chunks_fingerprint() -> str:
-    """当前分块集合指纹（ID 集 + 最新写入时间, 带 TTL 缓存）。
-
-    milvus 路径: 指纹在 Worker 内计算, RPC 仅回传短字符串;
-    chroma 路径: 本地取 ID 与 created_at 元数据。指纹含 created_at,
-    "内容更新但分块数不变"的增量更新同样触发索引重建。
-    失败返回空串且不写缓存, 由调用方决定降级策略。
-    """
-    global _bm25_fp_cached, _bm25_fp_expires_at
-    now = _time.time()
-    if _bm25_fp_cached and now < _bm25_fp_expires_at:
-        return _bm25_fp_cached
-    fp = get_collection_fingerprint()
-    if fp:
-        _bm25_fp_cached = fp
-        _bm25_fp_expires_at = now + PROJECT_CONFIG.BM25_FINGERPRINT_TTL
-    return fp
-
-
-def _get_bm25() -> BM25Searcher:
-    """懒加载 BM25 检索器; 仅在分块指纹变化时全量拉取并重建索引。
-
-    两级新鲜度判据（替代"每次查询都全量拉取全部分块算指纹"）:
-    1. 轻量指纹（ID 集合 + 最新写入时间的 md5）+ TTL 缓存——稳态查询
-       不触发全量传输;
-    2. 指纹变化（新增/删除/替换分块, 含同块数内容更新）才全量拉取重建索引。
-    指纹获取失败时: 有旧索引则继续用旧索引（优于返回空）, 冷启动
-    则回退到全量拉取并按全量数据计算指纹（与旧实现行为一致）。
-    """
-    global _bm25, _bm25_fingerprint
-
-    current_fp = _current_chunks_fingerprint()
-
-    if _bm25 is not None and (not current_fp or current_fp == _bm25_fingerprint):
-        return _bm25
-
-    all_chunks = get_all_chunks()
-    if not current_fp:
-        # 指纹服务不可用: 从全量数据现算, 保持与旧实现一致的语义
-        current_fp = hashlib.md5(
-            "|".join(sorted(c.get("id", "") for c in all_chunks)).encode()
-        ).hexdigest()
-        if _bm25 is not None and current_fp == _bm25_fingerprint:
-            return _bm25
-
-    contents = [c.get("content", "") for c in all_chunks]
-    # 保存元数据用于检索结果映射
-    chunk_meta = [
-        {
-            "id": c.get("id", ""),
-            "file_path": c.get("file_path", ""),
-            "file_name": c.get("file_name", ""),
-            "doc_id": c.get("doc_id", ""),
-            "tokens": c.get("tokens", 0),
-            "modality": c.get("modality", "text"),
-            "order": c.get("order", 0),
-        }
-        for c in all_chunks
-    ]
-    searcher = BM25Searcher()
-    searcher.index(contents, chunk_meta=chunk_meta)
-    _bm25 = searcher
-    _bm25_fingerprint = current_fp
-
-    return _bm25
-
-
-def _bm25_search(query: str, top_k: int) -> List[Dict[str, Any]]:
-    """关键词检索, 返回与向量库格式一致的分块。"""
-    try:
-        bm25 = _get_bm25()
-    except Exception:
-        return []
-
-    results = bm25.search(query, top_k=top_k)
-    meta = bm25.chunk_meta
-
-    chunks: List[Dict[str, Any]] = []
-    for idx, score in results:
-        if idx < len(meta):
-            c = dict(meta[idx])
-            c["content"] = bm25.get_document(idx)
-            c["score"] = score
-            c["source"] = "bm25"
-            chunks.append(c)
-    return chunks
+# ==================== 混合检索 (Milvus Dense + 内置 BM25 → RRF) ====================
 
 
 def _rrf_merge(
@@ -334,15 +224,16 @@ def _rrf_merge(
 async def _retrieve_ranked_lists(
         queries: List[str],
         *,
+        english_query: str = "",
+        fusion_top_k: int,
         dense_top_k: int,
-        bm25_top_k: Optional[int] = None,
+        bm25_top_k: int,
         enable_doc_recall: bool = False,
 ) -> List[List[Dict[str, Any]]]:
-    """多查询 × 多通道并行召回, 返回排名列表集合（由调用方融合）。
+    """多查询并行调用 Milvus Dense + 双语 BM25 + RRF 混合检索。
 
-    每个查询走一路 Dense（bm25_top_k 给定再加一路 BM25）; 文档级召回用
-    **主查询向量**匹配文档摘要索引, 命中文档的定向分块作为独立一路排名
-    列表注入。各路失败均被内部容忍, 整体零命中返回空集合。
+    主查询同时走中文/英文 BM25，子查询走 Dense + 自身词项 BM25；文档级
+    召回仍用主查询向量匹配摘要，并作为独立候选列表参与外层 RRF。
 
     :param queries: 检索查询集合, ``queries[0]`` 为主查询（改写后原句）,
         其余为子查询分解产物。
@@ -352,19 +243,26 @@ async def _retrieve_ranked_lists(
     # 主查询嵌入只算一次: Dense 召回与文档级召回（摘要余弦）共享
     main_vecs = await embed_texts([queries[0]], quick=True)
 
-    async def _dense_and_collect(q: str, vecs: List[List[float]]) -> None:
-        chunks = await _get_vector_context(q, dense_top_k, query_vecs=vecs)
+    async def _hybrid_and_collect(
+            q: str,
+            vecs: List[List[float]],
+            english: str = "",
+    ) -> None:
+        chunks = await asyncio.to_thread(
+            hybrid_query_chunks,
+            vecs,
+            q,
+            english,
+            top_k=fusion_top_k,
+            dense_top_k=dense_top_k,
+            bm25_top_k=bm25_top_k,
+        )
         if chunks:
             ranked_lists.append(chunks)
 
-    async def _embed_and_dense(q: str) -> None:
+    async def _embed_and_hybrid(q: str) -> None:
         vecs = await embed_texts([q], quick=True)
-        await _dense_and_collect(q, vecs)
-
-    async def _bm25_and_collect(q: str) -> None:
-        chunks = await asyncio.to_thread(_bm25_search, q, bm25_top_k)
-        if chunks:
-            ranked_lists.append(chunks)
+        await _hybrid_and_collect(q, vecs)
 
     async def _doc_recall_and_collect() -> None:
         chunks = await recall_doc_chunks(main_vecs)
@@ -372,13 +270,10 @@ async def _retrieve_ranked_lists(
             ranked_lists.append(chunks)
 
     tasks: List[asyncio.Task[None]] = [
-        asyncio.create_task(_dense_and_collect(queries[0], main_vecs)),
+        asyncio.create_task(_hybrid_and_collect(queries[0], main_vecs, english_query)),
     ]
     for q in queries[1:]:
-        tasks.append(asyncio.create_task(_embed_and_dense(q)))
-    if bm25_top_k:
-        for q in queries:
-            tasks.append(asyncio.create_task(_bm25_and_collect(q)))
+        tasks.append(asyncio.create_task(_embed_and_hybrid(q)))
     if enable_doc_recall:
         tasks.append(asyncio.create_task(_doc_recall_and_collect()))
     await asyncio.gather(*tasks)
@@ -400,7 +295,7 @@ def _merge_retrieval_queries(main_query: str, sub_queries: List[str]) -> List[st
 
 
 async def _get_hybrid_context(
-        query: str,
+        query: BilingualQuery,
         merge_top_k: int,
         *,
         dense_top_k: Optional[int] = None,
@@ -413,7 +308,7 @@ async def _get_hybrid_context(
     Dense 擅长语义泛化, BM25 擅长精确关键词, 文档级召回补位被 top-k
     稀释掉的涉及文档, 全部候选经 RRF 融合为统一候选池。
 
-    :param query: 主查询（改写后的检索查询字符串）。
+    :param query: 主查询（含中文/英文分路检索词）。
     :param merge_top_k: RRF 融合后返回的分块数。
     :param dense_top_k: 每路稠密检索取多少分块。
     :param bm25_top_k: 每路 BM25 检索取多少分块。
@@ -422,9 +317,11 @@ async def _get_hybrid_context(
     dk = dense_top_k or PROJECT_CONFIG.HYBRID_DENSE_TOP_K
     bk = bm25_top_k or PROJECT_CONFIG.HYBRID_BM25_TOP_K
 
-    queries = _merge_retrieval_queries(query, sub_queries or [])
+    queries = _merge_retrieval_queries(query.primary_query, sub_queries or [])
     ranked_lists = await _retrieve_ranked_lists(
         queries,
+        english_query=query.english_query,
+        fusion_top_k=merge_top_k,
         dense_top_k=dk,
         bm25_top_k=bk,
         enable_doc_recall=PROJECT_CONFIG.DOC_RECALL_ENABLED,
@@ -639,25 +536,12 @@ def _build_llm_context(
 ) -> str:
     """由分块与引用列表构建 LLM 提示词上下文字符串。
 
-    分块按"引用列表顺序（即文档相关性降序）+ 文档内分块顺序"排序:
-    与问题最相关的文档证据排在上下文前部（长上下文下 LLM 对前部注意力
-    更集中）, 同一文档内保持原文顺序, 保证上下文连贯。引用列表行附
-    相关性档位标注, 给 LLM 提供显式的证据权重提示。
+    保留上游重排的相关性顺序。旧实现会按“文档 + 原文顺序”重新排序，
+    导致精确命中的高分块被同文档中较早但无关的分块挤到上下文后部。
+    原文位置仍通过 chunk_order 提供，引用列表单独按文档相关性展示。
     """
-    # 引用列表顺序 = 文档相关性降序; 未出现在引用列表中的文档排在最后
-    fp_rank: Dict[str, int] = {
-        r["file_path"]: i for i, r in enumerate(reference_list)
-    }
-    chunks_sorted = sorted(
-        chunks,
-        key=lambda c: (
-            fp_rank.get(_chunk_doc_key(c), len(fp_rank)),
-            c.get("order", 0),
-        ),
-    )
-
     chunks_context: List[Dict[str, str]] = []
-    for c in chunks_sorted:
+    for c in chunks:
         entry: Dict[str, str] = {
             "reference_id": c.get("reference_id", ""),
             "content": c["content"],
@@ -750,9 +634,9 @@ async def naive_query(
     # 阶段 0a: 历史感知改写（指代消解）——多轮时用最近历史把当前问题消解为
     # 自包含查询, 仅用于检索（生成回答仍用原始问题 + 完整历史）
     resolved_query = await resolve_query_with_history(query, query_param.conversation_history)
-    # 阶段 0b: 术语改写（词典富集 + LLM 术语展开）
-    rewritten_query = await rewrite_query(resolved_query)
-    query_for_search = rewritten_query if rewritten_query != resolved_query else resolved_query
+    # 阶段 0b: 术语改写 + 英文检索词扩展（无术语索引时也生成英文查询）
+    bilingual_query = await rewrite_query_bilingual(resolved_query)
+    query_for_search = bilingual_query.primary_query
 
     search_top_k = query_param.chunk_top_k or PROJECT_CONFIG.CHUNK_TOP_K
 
@@ -765,7 +649,10 @@ async def naive_query(
     # 时结果与旧版 top-k 语义一致, 多路命中经 RRF 融合为候选池
     ranked_lists = await _retrieve_ranked_lists(
         queries,
+        english_query=bilingual_query.english_query,
+        fusion_top_k=search_top_k,
         dense_top_k=search_top_k,
+        bm25_top_k=PROJECT_CONFIG.HYBRID_BM25_TOP_K,
         enable_doc_recall=PROJECT_CONFIG.DOC_RECALL_ENABLED,
     )
 
@@ -783,7 +670,7 @@ async def naive_query(
     if query_param.enable_rerank:
         try:
             reranked = await asyncio.wait_for(
-                rerank_chunks(query=query_for_search, chunks=chunks, top_n=PROJECT_CONFIG.RERANK_TOP_K),
+                rerank_chunks(query=bilingual_query.rerank_query, chunks=chunks, top_n=PROJECT_CONFIG.RERANK_TOP_K),
                 timeout=20.0,
             )
             if reranked:
@@ -792,6 +679,9 @@ async def naive_query(
             LOGGER.warning("重排超时 (20 秒), 使用原始分块")
         except Exception:
             LOGGER.opt(exception=True).warning("重排失败, 使用原始分块")
+
+    total_chunks_found = len(chunks)
+    chunks = chunks[:PROJECT_CONFIG.RAG_CONTEXT_TOP_K]
 
     # 计算动态 token 预算（历史窗口 + 滚动摘要计入预算）
     available_tokens = _compute_token_budget(
@@ -828,9 +718,14 @@ async def naive_query(
         },
         "metadata": {
             "query_mode": "naive",
-            "total_chunks_found": len(chunks),
+            "total_chunks_found": total_chunks_found,
+            "context_candidate_count": len(chunks),
             "final_chunks_count": len(processed_chunks),
-            "rewritten_query": rewritten_query if rewritten_query != query else None,
+            "rewritten_query": (
+                bilingual_query.primary_query
+                if bilingual_query.primary_query != query
+                else None
+            ),
             "sub_queries": sub_queries or None,
         },
     }
@@ -901,22 +796,22 @@ async def hybrid_query(
     # 阶段 0a: 历史感知改写（指代消解）——多轮时用最近历史把当前问题消解为
     # 自包含查询, 仅用于检索（生成回答仍用原始问题 + 完整历史）
     resolved_query = await resolve_query_with_history(query, query_param.conversation_history)
-    # 阶段 0b: 基于术语索引改写查询
-    rewritten_query = await rewrite_query(resolved_query)
+    # 阶段 0b: 术语改写 + 英文检索词扩展
+    bilingual_query = await rewrite_query_bilingual(resolved_query)
 
     # 阶段 1: 混合检索（仅改写查询 → Dense + BM25 → RRF 融合）。
     # 刻意不用原文查询召回: 口语原文（如 "3域"）词项与文档词汇脱节,
     # 并行召回会把无关块灌进候选池、稀释 RRF 排名; 改写查询已承载
     # 术语桥接, 原文意图仍用于最终 LLM 作答（见阶段 6 的 query 传参）
     merge_top_k = query_param.rrf_top_k or PROJECT_CONFIG.RRF_TOP_K
-    query_for_search = rewritten_query if rewritten_query != resolved_query else resolved_query
+    query_for_search = bilingual_query.primary_query
 
     # 阶段 0c: 子查询分解——复合问题拆为单面查询, 每面独立走双通道召回;
     # 原查询保留在检索集合中作为兜底（分解不当不丢原始召回面）
     sub_queries = await decompose_query(query_for_search)
 
     chunks = await _get_hybrid_context(
-        query_for_search,
+        bilingual_query,
         merge_top_k=merge_top_k,
         dense_top_k=query_param.dense_top_k,
         bm25_top_k=query_param.bm25_top_k,
@@ -931,7 +826,7 @@ async def hybrid_query(
     if query_param.enable_rerank:
         try:
             reranked = await asyncio.wait_for(
-                rerank_chunks(query=query_for_search, chunks=chunks, top_n=PROJECT_CONFIG.RERANK_TOP_K),
+                rerank_chunks(query=bilingual_query.rerank_query, chunks=chunks, top_n=PROJECT_CONFIG.RERANK_TOP_K),
                 timeout=20.0,
             )
             if reranked:
@@ -940,6 +835,9 @@ async def hybrid_query(
             LOGGER.warning("重排超时 (20 秒), 使用原始分块")
         except Exception:
             LOGGER.opt(exception=True).warning("重排失败, 使用原始分块")
+
+    total_chunks_found = len(chunks)
+    chunks = chunks[:PROJECT_CONFIG.RAG_CONTEXT_TOP_K]
 
     # 计算动态 token 预算 (用户可见的提示词使用原始查询; 历史窗口 + 滚动摘要计入预算)
     available_tokens = _compute_token_budget(
@@ -976,9 +874,14 @@ async def hybrid_query(
         },
         "metadata": {
             "query_mode": "hybrid",
-            "total_chunks_found": len(chunks),
+            "total_chunks_found": total_chunks_found,
+            "context_candidate_count": len(chunks),
             "final_chunks_count": len(processed_chunks),
-            "rewritten_query": rewritten_query if rewritten_query != query else None,
+            "rewritten_query": (
+                bilingual_query.primary_query
+                if bilingual_query.primary_query != query
+                else None
+            ),
             "sub_queries": sub_queries or None,
         },
     }

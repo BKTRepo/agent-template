@@ -8,7 +8,7 @@
 组件一览:
 - llm / embedding / rerank / vlm: OpenAI 兼容模型客户端
 - chunker: 文档分块（R 递归字符）
-- vector_store / milvus_store: 向量库双后端（同构接口, 由 VECTOR_BACKEND 配置切换）
+- milvus_store: Milvus Server C/S 向量存储与内置 BM25
 - query: 检索问答引擎（naive / hybrid / bypass）
 - bm25 / query_rewriter / terminology: 稀疏检索、查询改写与术语库
 - multimodal / sidecar: 多模态分析与 LightRAG 兼容侧车文件

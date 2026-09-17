@@ -496,8 +496,7 @@ class RagDocumentService:
         removed_docs = await self.crud.fetch_and_remove(ids)
         removed_job_ids = [d.job_id for d in removed_docs]
 
-        # 副作用（文件删除 / 向量删除）为同步阻塞 IO, 移交线程池执行;
-        # 向量删除经 Celery RPC（Milvus Lite 单进程限制）
+        # 副作用（文件删除 / Milvus 向量删除）为同步阻塞 IO, 移交线程池执行。
         snapshots = [self.model_to_dict(d) for d in removed_docs]
         await asyncio.to_thread(self._cleanup_artifacts, snapshots)
         return {"deleted": removed_job_ids, "failed": []}
@@ -595,11 +594,7 @@ class RagDocumentService:
     def _delete_vectors(doc_id: str) -> None:
         """删除向量库中指定文档的全部分块（尽力而为, 失败仅告警）。"""
         try:
-            if PROJECT_CONFIG.VECTOR_BACKEND == "milvus":
-                # Milvus Lite 单进程限制: Web 端经由 Celery RPC 委托 Worker 访问
-                from applications.jiayueyang.rag.vector_rpc import delete_by_doc_id
-            else:
-                from applications.jiayueyang.rag.vector_store import delete_by_doc_id
+            from applications.jiayueyang.rag.milvus_store import delete_by_doc_id
             delete_by_doc_id(doc_id)
         except Exception as e:
             LOGGER.warning(f"删除文档向量失败（{doc_id}）: {e}")

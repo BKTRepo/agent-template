@@ -23,6 +23,7 @@ import hashlib
 import json
 import re
 import time as _time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple, Union
 
@@ -39,6 +40,35 @@ _indices: Dict[str, Dict[str, Any]] = {}
 _cache: Dict[str, str] = {}
 _cache_ttl: float = 3600.0  # 1 小时
 _cache_times: Dict[str, float] = {}
+
+
+@dataclass(frozen=True)
+class BilingualQuery:
+    """供 Dense、中文 BM25、英文 BM25 分路使用的查询。"""
+
+    original_query: str
+    primary_query: str
+    english_query: str
+    identifiers: Tuple[str, ...] = ()
+
+    @property
+    def rerank_query(self) -> str:
+        if self.english_query and self.english_query.casefold() != self.primary_query.casefold():
+            return f"{self.primary_query} | {self.english_query}"
+        return self.primary_query
+
+
+_bilingual_cache: Dict[str, BilingualQuery] = {}
+
+# 中文业务口语中有少量高频术语并不总能被通用翻译模型稳定映射到卡组织
+# 规范中的固定说法。这里仅补充检索同义词，不改写用户原意，也不向最终
+# 回答注入事实。尤其是“追加授权”若没有 incremental authorization，英文
+# BM25 会完全错过 Visa 规范中的专门章节。
+_CANONICAL_ENGLISH_ALIASES: Tuple[Tuple[Tuple[str, ...], str], ...] = (
+    (("追加授权", "增量授权"), "incremental authorization"),
+    (("预授权",), "preauthorization"),
+    (("余额查询",), "balance inquiry"),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +199,26 @@ Terminology Reference (broader context):
 User Query: {query}
 
 Rewritten Query (single line, no answer):"""
+
+_ENGLISH_QUERY_PROMPT = """You are a bilingual search-query translator for technical documentation.
+Translate the retrieval query below into concise English search language.
+
+STRICT RULES:
+- Output only one English query line, no explanation, markdown, label, or answer.
+- Preserve every identifier, field number, acronym, API path, error code, and product name exactly.
+- Do not invent facts, values, message names, or topics not present in the query.
+- Prefer canonical technical terms over conversational wording.
+- Maximum 60 words.
+
+Retrieval query: {query}
+
+English retrieval query:"""
+
+_IDENTIFIER_RE = re.compile(
+    r"(?<![\w])(?:[A-Za-z]{2,}\s*-?\s*\d[A-Za-z0-9_.:/-]*|"
+    r"/[A-Za-z0-9_./-]+|[A-Za-z]+_[A-Za-z0-9_]+|"
+    r"[a-z]+(?:[A-Z][A-Za-z0-9]*)+)(?![\w])"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -630,15 +680,17 @@ def _normalize(text: str) -> str:
     return result
 
 
-def _has_bigram_overlap(term: str, query: str, threshold: float = 0.4) -> bool:
+def _has_bigram_overlap(term: str, query: str, threshold: float = 0.6) -> bool:
     """检查术语与查询是否共享足够多的字符二元组（覆盖率 ≥ threshold）。
 
     在查询上滑动窗口，围绕术语长度尝试若干窗口大小，处理**保留字符
     相邻关系**的部分匹配: 漏写尾字（"图神经网" → "图神经网络"）、
     查询带多余后缀（"图神经网络模型"）、相邻字符笔误等。
 
-    能力边界（实测）: 真缩写（"图网络" 对 "图神经网络"）相邻关系被
-    破坏, 二元组覆盖率仅 0.25 < 0.4, 本级匹配不到——此类缩写要么靠
+    阈值使用 0.6，避免“发起方式”误命中“发起方指示符”、以及“处理逻辑”
+    误命中“处理码”这类只共享一个常见二元组的污染。能力边界（实测）:
+    真缩写（"图网络" 对 "图神经网络"）相邻关系被破坏, 二元组覆盖率
+    仅 0.25 < 0.6, 本级匹配不到——此类缩写要么靠
     术语索引直接收录该别名（走 L1/L2 精确/归一化匹配）, 要么靠 LLM
     基于全量术语表自行联想。不降低阈值: 低阈值会让相近但不同的术语
     （"授权请求" 对 "授权完成", 覆盖率 0.33）误命中, 污染匹配提示。
@@ -669,6 +721,27 @@ def _has_bigram_overlap(term: str, query: str, threshold: float = 0.4) -> bool:
     return best >= threshold
 
 
+_CJK_BOUNDARY_CHARS = frozenset(
+    "的是了和与及或在为对中上下内外、，。？！?：:；;（）()[]【】 \t\r\n"
+)
+
+
+def _contains_exact_term(term: str, query: str) -> bool:
+    """精确包含检查，并阻止短中文词在另一个词内部误命中。"""
+    if term not in query:
+        return False
+    if len(term) > 3 or not re.fullmatch(r"[\u3400-\u9fff]+", term):
+        return True
+    for match in re.finditer(re.escape(term), query):
+        before = query[match.start() - 1] if match.start() else ""
+        after = query[match.end()] if match.end() < len(query) else ""
+        before_ok = not before or before in _CJK_BOUNDARY_CHARS or not re.match(r"[\u3400-\u9fff]", before)
+        after_ok = not after or after in _CJK_BOUNDARY_CHARS or not re.match(r"[\u3400-\u9fff]", after)
+        if before_ok and after_ok:
+            return True
+    return False
+
+
 def _match_terms(
     query: str,
     indices: List[Dict[str, Any]],
@@ -694,7 +767,16 @@ def _match_terms(
         if term_key in matched_keys:
             continue
         norm_key = _normalize(term_key)
-        if term_key in query:                       # L1: 精确匹配
+        # 术语抽取偶尔会把代码值拆成单个字母/数字（如 ``D``、``9``）。
+        # 对普通查询做子串匹配会让 ``DE39`` 同时命中这些无意义条目，污染
+        # LLM 改写提示；仅当用户查询本身就是该单字符代码时才允许命中。
+        if (
+            len(term_key.strip()) == 1
+            and re.fullmatch(r"[A-Za-z0-9]", term_key.strip())
+            and norm_query != norm_key
+        ):
+            continue
+        if _contains_exact_term(term_key, query):   # L1: 精确匹配（短中文词带边界）
             hit = True
         elif norm_key and norm_key in norm_query:   # L2: 归一化匹配
             hit = True
@@ -832,6 +914,87 @@ async def rewrite_query(
     return result
 
 
+def _extract_identifiers(*texts: str) -> Tuple[str, ...]:
+    """确定性提取技术编号、接口路径、snake_case 与 camelCase 标识。"""
+    values: List[str] = []
+    seen = set()
+    for text in texts:
+        for match in _IDENTIFIER_RE.finditer(text or ""):
+            value = " ".join(match.group(0).split())
+            key = value.casefold()
+            if value and key not in seen:
+                seen.add(key)
+                values.append(value)
+    return tuple(values)
+
+
+def _append_missing_identifiers(query: str, identifiers: Tuple[str, ...]) -> str:
+    """保证 LLM 翻译未误删用户给出的精确技术标识。"""
+    normalized = query.casefold()
+    missing = [item for item in identifiers if item.casefold() not in normalized]
+    if not missing:
+        return query
+    return f"{query} {' '.join(missing)}".strip()
+
+
+def _append_canonical_english_aliases(source_query: str, english_query: str) -> str:
+    """为明确出现的中文术语补齐规范英文同义词。"""
+    additions: List[str] = []
+    normalized_english = english_query.casefold()
+    for source_terms, canonical in _CANONICAL_ENGLISH_ALIASES:
+        if any(term in source_query for term in source_terms):
+            if canonical.casefold() not in normalized_english:
+                additions.append(canonical)
+                normalized_english += f" {canonical.casefold()}"
+    if not additions:
+        return english_query
+    return " ".join(part for part in (english_query.strip(), *additions) if part)
+
+
+async def rewrite_query_bilingual(
+    query: str,
+    *,
+    doc_ids: Optional[FrozenSet[str]] = None,
+) -> BilingualQuery:
+    """生成主查询与英文查询；即使术语索引为空也执行英文扩展。"""
+    doc_ids = doc_ids or frozenset()
+    cache_key = _cache_key(f"bilingual:{query}", doc_ids)
+    cached = _bilingual_cache.get(cache_key)
+    if cached and _time.time() - _cache_times.get(cache_key, 0) < _cache_ttl:
+        return cached
+
+    primary = await rewrite_query(query, doc_ids=doc_ids)
+    # 主查询也必须携带规范英文术语：子查询分解基于 primary，若只在独立的
+    # english_query 中补词，子查询仍会沿用“追加授权(Authorization)”这一
+    # 模糊说法，外层 RRF 反而把只在主查询命中的精确证据稀释掉。
+    primary = _append_canonical_english_aliases(query, primary)
+    identifiers = _extract_identifiers(query, primary)
+    primary = _append_missing_identifiers(primary, identifiers)
+
+    english = ""
+    try:
+        english = await _llm_translate_query(primary) or ""
+    except Exception as exc:
+        LOGGER.warning(f"英文检索词生成失败: {exc}——保留中文与 Dense 检索")
+    if english:
+        english = _append_missing_identifiers(english, identifiers)
+    english = _append_canonical_english_aliases(query, english)
+
+    result = BilingualQuery(
+        original_query=query,
+        primary_query=primary,
+        english_query=english,
+        identifiers=identifiers,
+    )
+    _bilingual_cache[cache_key] = result
+    _cache_times[cache_key] = _time.time()
+    LOGGER.info(
+        f"双语检索词: primary='{primary[:160]}', english='{english[:160]}', "
+        f"identifiers={list(identifiers)}"
+    )
+    return result
+
+
 # ---------------------------------------------------------------------------
 # LLM 改写
 # ---------------------------------------------------------------------------
@@ -875,6 +1038,27 @@ async def _llm_rewrite(
     return None
 
 
+async def _llm_translate_query(query: str) -> Optional[str]:
+    """将主检索查询转换为英文关键词查询，不依赖术语索引。"""
+    from applications.jiayueyang.rag.llm import chat_completion
+
+    response = await chat_completion(
+        messages=_ENGLISH_QUERY_PROMPT.format(query=query),
+        stream=False,
+        max_tokens=120,
+        temperature=0.0,
+    )
+    if not isinstance(response, str) or not response.strip():
+        return None
+    result = _clean_markers(response.strip().splitlines()[0].strip())
+    for prefix in ("English retrieval query:", "English query:", "Translation:"):
+        if result.lower().startswith(prefix.lower()):
+            result = result[len(prefix):].strip()
+    if 2 <= len(result) <= 300:
+        return result
+    return None
+
+
 def _clean_markers(text: str) -> str:
     """去除 LLM 输出中残留的标记: [ ... ] 块、** 加粗符、多余空白。"""
     text = re.sub(r"\[[^\]]*\]", " ", text)
@@ -889,4 +1073,5 @@ def _clean_markers(text: str) -> str:
 def clear_rewrite_cache() -> None:
     """清空改写结果缓存。"""
     _cache.clear()
+    _bilingual_cache.clear()
     _cache_times.clear()

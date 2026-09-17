@@ -5,7 +5,7 @@ RAG 智能文档解析与问答应用 - jiayueyang 个人模块。
 功能:
 - PDF 文档上传与智能解析（基于 IBM Docling）
 - 多策略文档分块（P/R/F/V）
-- 向量嵌入与存储（ChromaDB / Milvus）
+- 向量嵌入与存储（Milvus Server C/S）
 - RAG 问答（naive / hybrid / bypass 模式）
 - SSE 流式响应
 

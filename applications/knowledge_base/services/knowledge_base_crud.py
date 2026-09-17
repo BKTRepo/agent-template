@@ -9,7 +9,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from tortoise.exceptions import IntegrityError
 from tortoise.expressions import Q
 
-from applications.base.rag.chroma_store import chroma_store
+from applications.base.rag.milvus_store import milvus_store
 from applications.base.rag.embeddings import get_embedding
 from applications.base.services.scaffold import ScaffoldCrud
 from applications.knowledge_base.models.knowledge_base_model import (
@@ -261,13 +261,13 @@ class KnowledgeBaseCrud(ScaffoldCrud[KnowledgeBase, KnowledgeBaseCreate, Knowled
         if not kb:
             raise NotFoundException(message="知识库不存在")
         self.check_write(kb, user)
-        chroma_store.delete_by_kb(kb_id)
+        milvus_store.delete_by_kb(kb_id)
         kb.state = 1
         await kb.save()
 
     async def _purge_document(self, doc: Document) -> None:
         """物理删除文档及其分块、向量与本地文件"""
-        chroma_store.delete_by_doc(doc.id)
+        milvus_store.delete_by_doc(doc.id)
         await DocumentChunk.filter(document_id=doc.id).delete()
         if os.path.exists(doc.file_path):
             os.remove(doc.file_path)
@@ -275,7 +275,7 @@ class KnowledgeBaseCrud(ScaffoldCrud[KnowledgeBase, KnowledgeBaseCreate, Knowled
 
     async def _process_document(self, kb: KnowledgeBase, doc: Document) -> None:
         """解析文档、分块并写入向量库"""
-        chroma_store.delete_by_doc(doc.id)
+        milvus_store.delete_by_doc(doc.id)
         await DocumentChunk.filter(document_id=doc.id).delete()
 
         doc.status = DocumentStatus.PROCESSING
@@ -318,7 +318,7 @@ class KnowledgeBaseCrud(ScaffoldCrud[KnowledgeBase, KnowledgeBaseCreate, Knowled
             await self.chunk.bulk_create_chunks(chunk_models)
 
             embeddings = get_embedding([c.content for c in chunk_models])
-            chroma_chunks = [
+            milvus_chunks = [
                 {
                     "doc_id": doc.id,
                     "chunk_id": chunk.id,
@@ -330,17 +330,17 @@ class KnowledgeBaseCrud(ScaffoldCrud[KnowledgeBase, KnowledgeBaseCreate, Knowled
                 }
                 for chunk, emb in zip(chunk_models, embeddings)
             ]
-            chroma_ids = chroma_store.upsert_chunks(kb.id, chroma_chunks)
+            vector_ids = milvus_store.upsert_chunks(kb.id, milvus_chunks)
 
-            for chunk, chroma_id in zip(chunk_models, chroma_ids):
-                chunk.chroma_id = chroma_id
+            for chunk, vector_id in zip(chunk_models, vector_ids):
+                chunk.chroma_id = vector_id
             await DocumentChunk.bulk_update(chunk_models, fields=["chroma_id"])
 
             doc.status = DocumentStatus.COMPLETED
             doc.chunk_count = len(chunk_models)
             await doc.save()
         except Exception as e:
-            chroma_store.delete_by_doc(doc.id)
+            milvus_store.delete_by_doc(doc.id)
             await DocumentChunk.filter(document_id=doc.id).delete()
             doc.status = DocumentStatus.FAILED
             doc.error_message = str(e)
@@ -421,7 +421,7 @@ class KnowledgeBaseCrud(ScaffoldCrud[KnowledgeBase, KnowledgeBaseCreate, Knowled
         return self._to_document_out(doc)
 
     async def reindex_kb_vectors(self, kb_id: str, user_id: int) -> dict:
-        """全量重建知识库向量：清空 Chroma 索引后重新处理所有可用文档。"""
+        """全量重建知识库向量：清空 Milvus 索引后重新处理所有可用文档。"""
         from applications.user.models.user_model import User
 
         user = await User.get_or_none(id=user_id)
@@ -432,7 +432,7 @@ class KnowledgeBaseCrud(ScaffoldCrud[KnowledgeBase, KnowledgeBaseCreate, Knowled
             raise NotFoundException(message="知识库不存在")
         self.check_write(kb, user)
 
-        chroma_store.delete_by_kb(kb_id)
+        milvus_store.delete_by_kb(kb_id)
         docs = await self.document.list_by_knowledge_base(kb_id)
         result = {"total": 0, "success": 0, "failed": 0, "skipped": 0, "errors": []}
 
@@ -518,7 +518,7 @@ class KnowledgeBaseCrud(ScaffoldCrud[KnowledgeBase, KnowledgeBaseCreate, Knowled
         doc = await self.document.get_by_knowledge_base(kb_id, doc_id)
         if not doc:
             raise NotFoundException(message="文档不存在")
-        chroma_store.delete_by_doc(doc_id)
+        milvus_store.delete_by_doc(doc_id)
         if os.path.exists(doc.file_path):
             os.remove(doc.file_path)
         await doc.delete()
@@ -567,10 +567,10 @@ class KnowledgeBaseCrud(ScaffoldCrud[KnowledgeBase, KnowledgeBaseCreate, Knowled
         chunk.content = data.content
         embedding = get_embedding([data.content])[0]
         if chunk.chroma_id:
-            chroma_store.delete_by_vector_id(chunk.chroma_id)
+            milvus_store.delete_by_vector_id(chunk.chroma_id)
         filename = chunk.document.filename if chunk.document else None
         embedding_model = chunk.document.embedding_model if chunk.document else None
-        chroma_ids = chroma_store.upsert_chunks(
+        vector_ids = milvus_store.upsert_chunks(
             kb_id,
             [
                 {
@@ -584,7 +584,7 @@ class KnowledgeBaseCrud(ScaffoldCrud[KnowledgeBase, KnowledgeBaseCreate, Knowled
                 }
             ],
         )
-        chunk.chroma_id = chroma_ids[0]
+        chunk.chroma_id = vector_ids[0]
         await chunk.save()
         return self._to_chunk_out(chunk)
 
@@ -598,7 +598,7 @@ class KnowledgeBaseCrud(ScaffoldCrud[KnowledgeBase, KnowledgeBaseCreate, Knowled
         if not chunk:
             raise NotFoundException(message="知识块不存在")
         if chunk.chroma_id:
-            chroma_store.delete_by_vector_id(chunk.chroma_id)
+            milvus_store.delete_by_vector_id(chunk.chroma_id)
         document_id = chunk.document_id
         await chunk.delete()
         doc = await self.document.get_by_knowledge_base(kb_id, document_id)

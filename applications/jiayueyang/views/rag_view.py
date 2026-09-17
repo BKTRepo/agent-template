@@ -861,13 +861,8 @@ async def query_stream_resume(conversation_id: int, index: int):
 async def query_models():
     """获取当前配置的 LLM 模型信息与向量库统计。"""
     try:
-        # 延迟导入: 按配置动态选择向量库后端
-        if PROJECT_CONFIG.VECTOR_BACKEND == "milvus":
-            # Milvus Lite 单进程限制: Web 端经由 Celery RPC 委托 Worker 访问
-            from applications.jiayueyang.rag.vector_rpc import get_collection_stats
-        else:
-            from applications.jiayueyang.rag.vector_store import get_collection_stats
-        # 同步 RPC/sqlite 调用移交线程池, 避免阻塞 Web 事件循环
+        from applications.jiayueyang.rag.milvus_store import get_collection_stats
+        # 同步 Milvus 调用移交线程池, 避免阻塞 Web 事件循环
         stats = await asyncio.to_thread(get_collection_stats)
         data = {"model": PROJECT_CONFIG.LLM_MODEL, "vector_store": stats}
         return SuccessResponse(data=data)

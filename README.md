@@ -2,7 +2,7 @@
 
 这是多个 Vibecoding 项目合并后的统一 FastAPI 后端。当前版本保留了原有的用户认证、知识库问答、任务中心、测试用例生成、工单预审、Code Server IDE 和用例推荐能力，并接入了 `applications/jiayueyang` 的文档解析与混合检索 RAG 流程。
 
-项目以 **Python 3.13** 为唯一支持版本，使用 MySQL 保存业务数据、Redis 承载缓存和 Celery 队列，并可选择 Milvus Lite 或 ChromaDB 作为向量存储。
+项目以 **Python 3.13** 为唯一支持版本，使用 MySQL 保存业务数据、Redis 承载缓存和 Celery 队列，并统一使用独立 Milvus Server 2.6.4 作为向量与全文检索存储。
 
 ## 功能模块
 
@@ -67,7 +67,7 @@ AUTH_SECRET_KEY=replace-with-a-random-secret-at-least-64-characters-long
 `.env.example` 同时保留了两套 RAG 配置：
 
 - 原知识库模块使用 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL_NAME` 等变量。
-- 增强文档 RAG 使用 `LLM_MODEL`、`EMBEDDING_*`、`RERANK_*`、`VLM_*` 和 `VECTOR_BACKEND` 等变量。
+- 增强文档 RAG 使用 `LLM_MODEL`、`EMBEDDING_*`、`RERANK_*`、`VLM_*` 和 `MILVUS_*` 等变量。
 
 如果两个模块连接同一服务，可以填写相同的 Base URL 和 API Key。不要提交真实密钥或 `.env` 文件。
 
@@ -136,12 +136,12 @@ Linux 也可使用统一脚本：
   -> Docling 清洗、表格与图片处理
   -> 分块、摘要和术语提取
   -> Embedding
-  -> Milvus Lite / ChromaDB
-  -> BM25 + 向量召回 + Rerank
+  -> Milvus Server（Dense 向量 + 内置 BM25）
+  -> 中文 BM25 + 英文 BM25 + Dense + RRF + Rerank
   -> LLM 流式回答
 ```
 
-`VECTOR_BACKEND=milvus` 是增强 RAG 的默认配置。Milvus Lite 的写操作由 Celery Worker 串行处理，因此只启动 API 而不启动 Worker 时，上传任务不会完成。切换到 ChromaDB 时也建议保留 Worker，以处理耗时的文档解析任务。
+向量后端固定为 Milvus C/S 架构，`MILVUS_URI` 必须配置为 `http://host:19530` 或 HTTPS 服务地址。客户端依赖锁定为 `pymilvus==2.6.4`，与服务端版本保持一致。文档解析仍由 Celery Worker 执行；Web 与 Worker 均通过进程内有界连接池连接 Milvus Server，可用 `MILVUS_POOL_SIZE` 和 `MILVUS_POOL_ACQUIRE_TIMEOUT` 调整池大小与等待时间。
 
 离线部署 Docling 时，将模型放到 `DOCLING_ARTIFACTS_PATH` 指定目录，并设置 `DOCLING_ALLOW_REMOTE_MODELS=false`。大文件上传受 `RAG_MAX_UPLOAD_MB` 限制，API 会同时校验请求头和实际读取字节数。
 
@@ -204,6 +204,6 @@ tests/                     单元和集成测试
 - **依赖安装异常**：确认 `python --version` 为 3.13，并删除后重新创建由旧 Python 版本生成的虚拟环境。
 - **启动时数据库连接失败**：确认 MySQL 已创建目标数据库，且 `DATABASE_*` 配置可从当前主机访问。
 - **上传后一直处于处理中**：检查 Redis、Celery Worker 和 Worker 队列是否已启动。
-- **向量写入失败或锁冲突**：Milvus Lite 模式不要绕过 Celery RPC 从多个 API 进程并发写入。
+- **向量写入或检索失败**：确认 Milvus Server 2.6.4 可从当前主机访问，并检查 `MILVUS_URI`、认证信息和 PyMilvus 版本。
 - **Docling 尝试联网下载**：准备完整的离线模型目录，并将 `DOCLING_ALLOW_REMOTE_MODELS` 设为 `false`。
 - **旧接口返回 401**：确认接口是否在认证白名单中；受保护接口需携带有效 Bearer Token。

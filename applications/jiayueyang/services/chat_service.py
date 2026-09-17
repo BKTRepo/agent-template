@@ -36,13 +36,13 @@ _TIME_FMT = "%Y-%m-%d %H:%M:%S"
 
 
 async def _delete_conversation_memory_bg(conversation_id: int) -> None:
-    """后台删除会话的 L4 向量记忆（经 RPC 委托 Worker; 异常吞掉, 不影响删除本身）。"""
+    """后台删除会话的 L4 向量记忆（直连 Milvus Server）。"""
     try:
         from applications.jiayueyang.rag.memory import _l4_enabled
         if not _l4_enabled():
             return
-        from applications.jiayueyang.rag.vector_rpc import delete_chat_memory
-        await asyncio.to_thread(delete_chat_memory, str(conversation_id))
+        from applications.jiayueyang.rag.milvus_store import delete_chat_memory_by_conv
+        await asyncio.to_thread(delete_chat_memory_by_conv, str(conversation_id))
     except Exception as e:
         LOGGER.warning(f"删除会话记忆向量失败（不影响）: {e}")
 

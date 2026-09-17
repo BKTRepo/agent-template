@@ -6,7 +6,7 @@ import re
 from collections.abc import AsyncIterator
 from typing import List, Dict, Any
 
-from applications.base.rag.chroma_store import chroma_store
+from applications.base.rag.milvus_store import milvus_store
 from applications.base.rag.embeddings import get_single_embedding, is_embedding_configured
 from applications.base.rag.llm import OpenAICompatibleLLM, format_messages
 from configure import PROJECT_CONFIG, RAG_SYSTEM_PROMPT, GENERAL_SYSTEM_PROMPT, GREETING_RESPONSE
@@ -92,8 +92,8 @@ def _retrieve_context(
         return [], ""
 
     query_embedding = get_single_embedding(question)
-    search_results = chroma_store.search(
-        knowledge_base_ids, query_embedding, top_k=top_k
+    search_results = milvus_store.search(
+        knowledge_base_ids, query_embedding, question, top_k=top_k
     )
     search_results = _filter_embedding_model_consistency(search_results)
     if score_threshold > 0:

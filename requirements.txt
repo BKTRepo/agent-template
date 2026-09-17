@@ -25,7 +25,6 @@ celery-redbeat==2.3.3
 certifi==2026.5.20
 cffi==2.0.0
 charset-normalizer==3.4.7
-chromadb==1.5.9
 claude-agent-sdk==0.2.96
 click==8.4.1
 click-didyoumean==0.3.1
@@ -149,7 +148,7 @@ PyJWT==2.13.0
 pylatexenc==2.10
 PyMuPDF==1.27.2.3
 PyMySQL==1.2.0
-pymilvus==3.0.0
+pymilvus==2.6.4
 pypdf==5.0.0
 pypdfium2==5.9.0
 PyPika==0.51.1
@@ -220,4 +219,3 @@ xlsxwriter==3.2.9
 xxhash==3.7.0
 yarl==1.24.2
 zstandard==0.25.0
-milvus-lite==3.1.0

@@ -753,16 +753,10 @@ class RagPipelineService:
             await self._update(job_id, {"status": "failed", "summary": "回滚失败: 上一版本向量产物不完整"})
             return {"success": False, "error": "prev embeddings.json 不完整"}
         try:
-            if PROJECT_CONFIG.VECTOR_BACKEND == "milvus":
-                from applications.jiayueyang.rag.milvus_store import (
-                    delete_by_doc_id,
-                    upsert_chunks as store_chunks,
-                )
-            else:
-                from applications.jiayueyang.rag.vector_store import (
-                    delete_by_doc_id,
-                    upsert_chunks as store_chunks,
-                )
+            from applications.jiayueyang.rag.milvus_store import (
+                delete_by_doc_id,
+                upsert_chunks as store_chunks,
+            )
             delete_by_doc_id(job_id)
             store_chunks(chunks, file_path=filename, doc_id=job_id)
         except Exception as e:
@@ -1668,17 +1662,10 @@ class RagPipelineService:
         await service.add_history(f"开始向量嵌入: {filename}")
 
         from applications.jiayueyang.rag.embedding import embed_chunks, save_embeddings
-        # 延迟导入: 按配置动态选择向量库后端
-        if PROJECT_CONFIG.VECTOR_BACKEND == "milvus":
-            from applications.jiayueyang.rag.milvus_store import (
-                delete_by_doc_id,
-                upsert_chunks as store_chunks,
-            )
-        else:
-            from applications.jiayueyang.rag.vector_store import (
-                delete_by_doc_id,
-                upsert_chunks as store_chunks,
-            )
+        from applications.jiayueyang.rag.milvus_store import (
+            delete_by_doc_id,
+            upsert_chunks as store_chunks,
+        )
 
         try:
             # 向量产物已存在（续跑场景: 嵌入成功但入库中断）→ 加载直接
@@ -1768,7 +1755,7 @@ class RagPipelineService:
             doc = await self._save(doc)
             await service.add_history(
                 f"向量嵌入完成"
-                f"（{len(embedded_chunks)} 个向量已写入 {PROJECT_CONFIG.VECTOR_BACKEND}）: {filename}"
+                f"（{len(embedded_chunks)} 个向量已写入 Milvus）: {filename}"
             )
             if prev_existed and emb_reused is not None:
                 await service.add_history(

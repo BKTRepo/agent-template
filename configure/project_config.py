@@ -10,7 +10,7 @@ import os.path
 import platform
 from functools import lru_cache
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Literal
 from urllib.parse import quote_plus
 
 from pydantic import Field, model_validator
@@ -102,7 +102,6 @@ class ProjectConfig(BaseSettings):
     STATIC_DIR: str = os.path.abspath(os.path.join(_BACKEND_PROJECT_ROOT, "static"))
     STATIC_IMG_DIR: str = os.path.abspath(os.path.join(STATIC_DIR, "image"))
     MIGRATION_DIR: str = os.path.abspath(os.path.join(_BACKEND_PROJECT_ROOT, "migrations"))
-    CHROMA_DIR: str = os.path.abspath(os.path.join(_BACKEND_PROJECT_ROOT, "core", "chroma_db"))
     DOCLING_OFFLINE_DIR: str = os.path.abspath(os.path.join(_BACKEND_PROJECT_ROOT, "docling_offline"))
     WORKSPACE_DIR: str = os.path.abspath(os.path.join(_BACKEND_PROJECT_ROOT, "workspace"))
 
@@ -196,6 +195,11 @@ class ProjectConfig(BaseSettings):
     RRF_TOP_K: int = Field(default=100, ge=1, description="混合检索(hybrid 模式) RRF 融合保留条数, 作为重排候选池")
     HYBRID_DENSE_TOP_K: int = Field(default=60, description="混合检索每路稠密检索的候选数（未显式传 dense_top_k 时生效）")
     HYBRID_BM25_TOP_K: int = Field(default=60, description="混合检索每路 BM25 检索的候选数（未显式传 bm25_top_k 时生效）")
+    RAG_CONTEXT_TOP_K: int = Field(
+        default=20,
+        ge=1,
+        description="重排后送入生成模型的最大分块数；候选池仍保留较大 top-k 供重排",
+    )
     DOC_BUDGET_MAX_SHARE: float = Field(
         default=0.6,
         ge=0.0,
@@ -335,21 +339,26 @@ class ProjectConfig(BaseSettings):
     )
 
     # ==================== 向量数据库配置 ====================
-    VECTOR_BACKEND: str = Field(default="milvus", description="向量库后端: milvus（Worker 独占 + RPC 桥接）/ chromadb（两端直连）")
+    VECTOR_BACKEND: Literal["milvus"] = Field(
+        default="milvus",
+        description="固定使用 Milvus Server C/S 后端",
+    )
     MILVUS_URI: str = Field(
-        default=os.path.abspath(os.path.join(_BACKEND_PROJECT_ROOT, ".milvus.db")),
-        description="Milvus 连接 URI（默认本地 Milvus Lite）"
+        default="http://127.0.0.1:19530",
+        description="Milvus Server URI；仅支持 C/S 架构"
     )
     MILVUS_USER: Optional[str] = Field(default=None, description="Milvus 用户名（可选）")
     MILVUS_PASSWORD: Optional[str] = Field(default=None, description="Milvus 密码（可选）")
     MILVUS_TOKEN: Optional[str] = Field(default=None, description="Milvus Token（可选）")
-    VECTOR_RPC_TIMEOUT: float = Field(
-        default=120.0,
-        description=(
-            "Web 端向量库操作经 Celery RPC 委托 Worker 执行的等待超时（秒）: "
-            "需覆盖 Worker 池排队 + 操作本身耗时; 大文档任务占满 Worker "
-            "槽位时 RPC 排队时间变长, 可按部署规模调高"
-        ),
+    MILVUS_POOL_SIZE: int = Field(
+        default=8,
+        ge=1,
+        description="单进程 Milvus 同步客户端连接池上限",
+    )
+    MILVUS_POOL_ACQUIRE_TIMEOUT: float = Field(
+        default=30.0,
+        gt=0,
+        description="等待 Milvus 连接池空闲连接的最长秒数",
     )
     VECTOR_UPSERT_BATCH_SIZE: int = Field(
         default=500,
@@ -368,7 +377,15 @@ class ProjectConfig(BaseSettings):
     EMBEDDING_BINDING_API_KEY: str = Field(default="", description="Embedding API Key")
     EMBEDDING_MODEL: str = Field(default="BAAI/bge-m3", description="默认 Embedding 模型")
     EMBEDDING_DIM: int = Field(default=1024, description="向量维度（Milvus 建集合使用）")
-    EMBEDDING_BATCH_NUM: int = Field(default=100, description="Embedding 批量请求大小")
+    EMBEDDING_BATCH_NUM: int = Field(
+        default=20,
+        ge=1,
+        le=20,
+        description=(
+            "Embedding 单次请求条数。当前百炼 OpenAI 兼容嵌入接口要求 "
+            "input.contents 不超过 20 条；在配置层强制上限，避免大文档到最后阶段才失败"
+        ),
+    )
     EMBEDDING_MAX_CONCURRENT: int = Field(
         default=10,
         description=(
@@ -404,7 +421,6 @@ class ProjectConfig(BaseSettings):
     VLM_MODEL: str = Field(default="gpt-4o", description="VLM 模型")
     VLM_API_KEY: str = Field(default="not-needed", description="VLM API Key")
     # RAG / LLM / Embedding
-    CHROMA_COLLECTION: str = "knowledge_base"
     LLM_API_KEY: str = Field(default="", description="LLM API Key")
     LLM_BASE_URL: str = Field(default="https://api.deepseek.com/v1", description="LLM API Base URL")
     LLM_MODEL_NAME: str = Field(default="deepseek-chat", description="LLM Model Name")
@@ -414,7 +430,7 @@ class ProjectConfig(BaseSettings):
 
     # RAG 分块 / 检索全局默认值（.env 可选；不写则用下列 default）
     # - CHUNK_SIZE / CHUNK_OVERLAP：KnowledgeBase.chunk_* 为空时回退；仅影响新上传/重处理文档
-    # - RETRIEVAL_TOP_K：chroma_store.search(top_k=None) 时兜底；聊天链路以 ModelConfig.top_k 为准
+    # - RETRIEVAL_TOP_K：旧知识库 Milvus 检索 top_k 为空时兜底；聊天链路以 ModelConfig.top_k 为准
     CHUNK_SIZE: int = Field(
         default=500,
         description="分块大小(字符数)；知识库未配置时回退，建议 200-2000",
@@ -643,12 +659,14 @@ class ProjectConfig(BaseSettings):
             if not getattr(self, field_name):
                 raise ValueError(f"{field_name} 配置为空，请检查.env文件或环境变量")
 
+        if not self.MILVUS_URI.strip().lower().startswith(("http://", "https://")):
+            raise ValueError("MILVUS_URI 必须是独立 Milvus Server 的 http(s) 地址")
+
         Path(self.OUTPUT_UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
         Path(self.OUTPUT_DATAGRAM_DIR).mkdir(parents=True, exist_ok=True)
         Path(self.OUTPUT_LOGS_DIR).mkdir(parents=True, exist_ok=True)
         Path(self.RAG_OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
         Path(self.RAG_INPUT_DIR).mkdir(parents=True, exist_ok=True)
-        Path(self.CHROMA_DIR).mkdir(parents=True, exist_ok=True)
         Path(self.TEST_CASE_OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
 
         return self.assemble_connection_urls()
@@ -702,10 +720,6 @@ class ProjectConfig(BaseSettings):
     @property
     def datagram_path(self) -> Path:
         return Path(self.OUTPUT_DATAGRAM_DIR)
-
-    @property
-    def chroma_path(self) -> Path:
-        return Path(self.CHROMA_DIR)
 
     @staticmethod
     def format_redis_url(*, username: str, password: str, host: str, port: str, db: int) -> str:

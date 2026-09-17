@@ -6,7 +6,7 @@ from applications.base.rag.chain import (
     rag_query,
     rag_stream,
 )
-from applications.base.rag.chroma_store import chroma_store
+from applications.base.rag.milvus_store import milvus_store
 from applications.base.rag.embeddings import (
     is_embedding_configured,
     get_embedding,
@@ -25,7 +25,7 @@ from applications.base.rag.loader import (
 __all__ = [
     "load_pdf", "load_all_pdfs", "split_documents",
     "is_irrelevant_question", "get_irrelevant_response", "format_context_from_results", "rag_query", "rag_stream",
-    "chroma_store",
+    "milvus_store",
     "is_embedding_configured", "get_embedding", "get_single_embedding",
     "OpenAICompatibleLLM", "format_messages",
 ]

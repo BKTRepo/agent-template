@@ -40,18 +40,10 @@ async def gc_orphan_chunks_task() -> Dict[str, Any]:
     """
     try:
         from applications.jiayueyang.models.rag_document_model import RagDocument
-        from configure import PROJECT_CONFIG
-
-        if PROJECT_CONFIG.VECTOR_BACKEND == "milvus":
-            from applications.jiayueyang.rag.milvus_store import (
-                delete_by_doc_id,
-                list_collection_doc_ids,
-            )
-        else:
-            from applications.jiayueyang.rag.vector_store import (
-                delete_by_doc_id,
-                list_collection_doc_ids,
-            )
+        from applications.jiayueyang.rag.milvus_store import (
+            delete_by_doc_id,
+            list_collection_doc_ids,
+        )
 
         # 同步向量库调用移交线程池, 不阻塞任务常驻事件循环
         collection_ids = await asyncio.to_thread(list_collection_doc_ids)

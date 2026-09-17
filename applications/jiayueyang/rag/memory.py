@@ -187,7 +187,7 @@ async def llm_fold_summary(
 
 # ---------------------------------------------------------------------------
 # L4 向量回忆——把历史轮次嵌入 Milvus 独立集合, 问答时按当前问题召回旧轮次。
-# 仅在 milvus 后端启用; 一切操作容错降级（失败不影响正常问答）。
+# 一切操作直接连接 Milvus Server，并容错降级（失败不影响正常问答）。
 # 参数写死（不进 .env）。
 # ---------------------------------------------------------------------------
 
@@ -197,9 +197,8 @@ MEMORY_EMBED_ANSWER_CHARS = 200  # 嵌入文本中回答的截断长度（问题
 
 
 def _l4_enabled() -> bool:
-    """L4 仅在 milvus 后端可用（向量回忆依赖 Milvus 独立集合）。"""
-    from configure import PROJECT_CONFIG
-    return PROJECT_CONFIG.VECTOR_BACKEND == "milvus"
+    """单一 Milvus C/S 架构下始终启用 L4。"""
+    return True
 
 
 def build_memory_text(question: str, answer: str) -> str:
@@ -215,7 +214,7 @@ async def upsert_turn_memory(
         question: str,
         answer: str,
 ) -> None:
-    """嵌入并写入一轮对话记忆（经 RPC 委托 Worker 写 Milvus）。异常吞掉, 不影响主流程。"""
+    """嵌入并直接写入 Milvus Server。异常吞掉, 不影响主流程。"""
     if not _l4_enabled():
         return
     text = build_memory_text(question, answer)
@@ -223,7 +222,7 @@ async def upsert_turn_memory(
         return
     try:
         from applications.jiayueyang.rag.embedding import embed_texts
-        from applications.jiayueyang.rag.vector_rpc import upsert_chat_memory
+        from applications.jiayueyang.rag.milvus_store import upsert_chat_memory
         vecs = await embed_texts([text], quick=True)
         if not vecs or not vecs[0]:
             return
@@ -253,7 +252,7 @@ async def recall_turn_memory(
         return ""
     try:
         from applications.jiayueyang.rag.embedding import embed_texts
-        from applications.jiayueyang.rag.vector_rpc import search_chat_memory
+        from applications.jiayueyang.rag.milvus_store import search_chat_memory
         vecs = await embed_texts([query], quick=True)
         if not vecs or not vecs[0]:
             return ""
