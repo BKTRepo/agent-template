@@ -11,6 +11,7 @@ from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from starlette.exceptions import HTTPException
 from starlette.middleware.cors import CORSMiddleware
 from starlette.staticfiles import StaticFiles
+from tortoise import Tortoise
 from tortoise.contrib.fastapi import register_tortoise
 from tortoise.exceptions import DoesNotExist
 
@@ -53,6 +54,26 @@ async def register_database(app: FastAPI) -> None:
         add_exception_handlers=PROJECT_CONFIG.SERVER_DEBUG,
     )
 
+    # 开发环境关闭迁移时完全不触碰 aerich（避免扫描旧格式迁移文件报错阻断启动）
+    if not PROJECT_CONFIG.aerich_should_run_on_startup:
+        LOGGER.warning(
+            "跳过 Aerich 数据迁移指令: \n"
+            f"操作系统: {PROJECT_CONFIG.SERVER_SYSTEM}, \n"
+            f"调试开关: {PROJECT_CONFIG.SERVER_DEBUG}, \n"
+            f"迁移开关: {PROJECT_CONFIG.DATABASE_AUTO_MIGRATION}, \n"
+            f"生产环境(Linux操作系统)始终执行迁移指令, 不提供关闭选项; "
+            f"开发环境(Windows操作系统)仅当显示打开[DATABASE_AUTO_MIGRATION]时执行迁移指令。"
+        )
+        # register_tortoise 在自定义 lifespan 内部调用时, 其包裹的 orm_lifespan 本次启动不会执行,
+        # 原本由 aerich 的 command.init() 负责初始化 Tortoise 连接。跳过 aerich 后需显式初始化,
+        # 否则后续 init_database_table / 模型查询会报 default_connection 为 None。
+        await Tortoise.init(config=config)
+        # 依据模型定义补齐缺失表(CREATE TABLE IF NOT EXISTS, 不影响已存在表),
+        # 使新增模型(如 term_mapping 两张表)无需 aerich 迁移即可建表并被读写。
+        await Tortoise.generate_schemas(safe=True)
+        LOGGER.info("已跳过 Aerich, 改为直接初始化 Tortoise 连接并按模型补齐缺失数据表")
+        return
+
     # 确保迁移目录存在
     if not os.path.exists(PROJECT_CONFIG.MIGRATION_DIR):
         os.makedirs(PROJECT_CONFIG.MIGRATION_DIR)
@@ -73,17 +94,6 @@ async def register_database(app: FastAPI) -> None:
         pass
 
     await command.init()
-
-    if not PROJECT_CONFIG.aerich_should_run_on_startup:
-        LOGGER.warning(
-            "跳过 Aerich 数据迁移指令: \n"
-            f"操作系统: {PROJECT_CONFIG.SERVER_SYSTEM}, \n"
-            f"调试开关: {PROJECT_CONFIG.SERVER_DEBUG}, \n"
-            f"迁移开关: {PROJECT_CONFIG.DATABASE_AUTO_MIGRATION}, \n"
-            f"生产环境(Linux操作系统)始终执行迁移指令, 不提供关闭选项; "
-            f"开发环境(Windows操作系统)仅当显示打开[DATABASE_AUTO_MIGRATION]时执行迁移指令。"
-        )
-        return
 
     # 生成迁移文件
     try:

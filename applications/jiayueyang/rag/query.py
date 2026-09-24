@@ -16,10 +16,11 @@ bypass 模式完全跳过检索 — 直接与 LLM 对话。
 import asyncio
 import hashlib
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, List, Optional, Set, Tuple
+from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional, Set, Tuple
 
 from configure import LOGGER, PROJECT_CONFIG, RAG_PROMPTS
 
@@ -39,6 +40,11 @@ from applications.jiayueyang.rag.milvus_store import (
     hybrid_query_chunks,
     query_chunks,
 )
+from applications.jiayueyang.rag.query_guidance import (
+    build_doc_filter,
+    recall_query_guidance,
+)
+from applications.jiayueyang.services.term_mapping_service import term_mapping_service
 
 # ==================== 数据结构 ====================
 
@@ -77,6 +83,38 @@ class QueryResult:
     response_iterator: Optional[AsyncIterator[str]] = None
     raw_data: Optional[Dict[str, Any]] = None
     is_streaming: bool = False
+
+
+async def _prepare_query_guidance(resolved_query: str) -> Tuple[Dict[str, Any], str, bool]:
+    """按开关准备查询经验指导，返回指导结果、过滤条件和影子模式标记。"""
+    should_recall = bool(
+        PROJECT_CONFIG.QUERY_MEMORY_ENABLED
+        and (
+            PROJECT_CONFIG.QUERY_MEMORY_SCOPED_SEARCH_ENABLED
+            or PROJECT_CONFIG.QUERY_MEMORY_SHADOW_MODE
+        )
+    )
+    guidance: Dict[str, Any] = {
+        "matched": False,
+        "matched_feedback_ids": [],
+        "feedback_scores": {},
+        "scope_doc_ids": [],
+        "fallback_reason": None,
+    }
+    if should_recall:
+        guidance = await recall_query_guidance(resolved_query)
+
+    candidate_filter = build_doc_filter(guidance.get("scope_doc_ids") or [])
+    guidance_shadow_mode = bool(
+        PROJECT_CONFIG.QUERY_MEMORY_SHADOW_MODE and candidate_filter
+    )
+    # 影子模式只保留观测数据，不把范围传给真实检索。
+    guidance_filter = (
+        candidate_filter
+        if PROJECT_CONFIG.QUERY_MEMORY_SCOPED_SEARCH_ENABLED and not guidance_shadow_mode
+        else ""
+    )
+    return guidance, guidance_filter, guidance_shadow_mode
 
 
 # ==================== Token 预算 (基于字符数估算 — 不依赖真实分词器) ====================
@@ -221,6 +259,100 @@ def _rrf_merge(
     return deduped
 
 
+def _blend_guided_candidates(
+        global_chunks: List[Dict[str, Any]],
+        guided_chunks: List[Dict[str, Any]],
+        guided_doc_ids: List[str],
+        top_k: int,
+) -> List[Dict[str, Any]]:
+    """历史范围适度加权，同时预留全库其他文档进入统一重排的机会。"""
+    scores: Dict[str, float] = {}
+    chunks: Dict[str, Dict[str, Any]] = {}
+    guided_docs = set(guided_doc_ids)
+
+    def key(chunk: Dict[str, Any]) -> str:
+        chunk_id = chunk.get("id") or chunk.get("chunk_id")
+        if chunk_id is not None:
+            return str(chunk_id)
+        content = str(chunk.get("content") or "")
+        return f"{chunk.get('doc_id', '')}:{hashlib.sha256(content.encode()).hexdigest()}"
+
+    for ranked, weight in (
+        (global_chunks, 1.0),
+        (guided_chunks, PROJECT_CONFIG.QUERY_MEMORY_GUIDED_WEIGHT),
+    ):
+        for rank, chunk in enumerate(ranked, start=1):
+            identity = key(chunk)
+            scores[identity] = scores.get(identity, 0.0) + weight / (60 + rank)
+            chunks.setdefault(identity, chunk)
+
+    ordered = sorted(scores, key=lambda identity: (-scores[identity], identity))
+    selected = ordered[:top_k]
+    # 只对全库召回中、历史范围之外的文档保留名额。若全库没有这类
+    # 文档，不强塞无关结果；重排仍可按当前问题过滤所有候选。
+    outside = [
+        key(chunk) for chunk in global_chunks
+        if chunk.get("doc_id") and chunk["doc_id"] not in guided_docs
+    ]
+    reserved = list(dict.fromkeys(outside))[:min(
+        len(outside), max(0, min(top_k - 1, math.ceil(
+            top_k * PROJECT_CONFIG.QUERY_MEMORY_GLOBAL_MIN_RATIO
+        ))),
+    )]
+    for identity in reserved:
+        if identity in selected:
+            continue
+        if len(selected) < top_k:
+            selected.append(identity)
+        else:
+            replace = next(
+                (candidate for candidate in reversed(selected) if candidate not in reserved),
+                None,
+            )
+            if replace is not None:
+                selected.remove(replace)
+                selected.append(identity)
+    selected.sort(key=lambda identity: (-scores[identity], identity))
+    return [dict(chunks[identity], _rrf_score=scores[identity]) for identity in selected]
+
+
+async def _retrieve_with_guidance(
+        retrieve: Callable[[str], Awaitable[List[Dict[str, Any]]]],
+        *,
+        guidance_filter: str,
+        guided_doc_ids: List[str],
+        top_k: int,
+) -> Tuple[List[Dict[str, Any]], bool, Optional[str], int, int]:
+    """全库和历史范围都召回候选，合并后交给同一次 Rerank。"""
+    if not guidance_filter:
+        global_chunks = await retrieve("")
+        return global_chunks, False, None, 0, len(global_chunks)
+
+    global_result, guided_result = await asyncio.gather(
+        retrieve(""), retrieve(guidance_filter), return_exceptions=True,
+    )
+    if isinstance(global_result, BaseException):
+        LOGGER.warning("全库检索失败，使用历史范围候选: %s", global_result)
+        global_chunks = []
+    else:
+        global_chunks = global_result
+    if isinstance(guided_result, BaseException):
+        LOGGER.warning("历史范围检索失败，使用全库候选: %s", guided_result)
+        guided_chunks = []
+        fallback_reason = "guided_search_failed"
+    else:
+        guided_chunks = guided_result
+        fallback_reason = "no_scoped_chunks" if not guided_chunks else None
+
+    if global_chunks and guided_chunks:
+        chunks = _blend_guided_candidates(
+            global_chunks, guided_chunks, guided_doc_ids, top_k,
+        )
+    else:
+        chunks = global_chunks or guided_chunks
+    return chunks, bool(guided_chunks), fallback_reason, len(guided_chunks), len(global_chunks)
+
+
 async def _retrieve_ranked_lists(
         queries: List[str],
         *,
@@ -229,6 +361,7 @@ async def _retrieve_ranked_lists(
         dense_top_k: int,
         bm25_top_k: int,
         enable_doc_recall: bool = False,
+        filter_expr: str = "",
 ) -> List[List[Dict[str, Any]]]:
     """多查询并行调用 Milvus Dense + 双语 BM25 + RRF 混合检索。
 
@@ -256,6 +389,7 @@ async def _retrieve_ranked_lists(
             top_k=fusion_top_k,
             dense_top_k=dense_top_k,
             bm25_top_k=bm25_top_k,
+            filter_expr=filter_expr,
         )
         if chunks:
             ranked_lists.append(chunks)
@@ -301,6 +435,7 @@ async def _get_hybrid_context(
         dense_top_k: Optional[int] = None,
         bm25_top_k: Optional[int] = None,
         sub_queries: Optional[List[str]] = None,
+        filter_expr: str = "",
 ) -> List[Dict[str, Any]]:
     """混合检索: 多查询 × 双通道（Dense + BM25）+ 文档级召回 → RRF 融合。
 
@@ -324,7 +459,8 @@ async def _get_hybrid_context(
         fusion_top_k=merge_top_k,
         dense_top_k=dk,
         bm25_top_k=bk,
-        enable_doc_recall=PROJECT_CONFIG.DOC_RECALL_ENABLED,
+        enable_doc_recall=PROJECT_CONFIG.DOC_RECALL_ENABLED and not filter_expr,
+        filter_expr=filter_expr,
     )
 
     # 至少有一路命中
@@ -576,6 +712,9 @@ async def _no_context_fallback(
         query: str,
         query_param: QueryParam,
         query_mode: str,
+        resolved_query: Optional[str] = None,
+        fallback_reason: str = "no_retrieval_results",
+        mapping_result: Optional[Dict[str, Any]] = None,
 ) -> QueryResult:
     """未检索到相关分块时的兜底通用对话（替代生硬拒绝）。
 
@@ -593,10 +732,26 @@ async def _no_context_fallback(
         temperature=query_param.temperature,
         model=query_param.model,
     )
+    mapping_result = mapping_result or {}
+    mapping_matches = mapping_result.get("matches") or []
     raw_data: Dict[str, Any] = {
         "data": {"entities": [], "relationships": [], "chunks": [], "references": []},
         "metadata": {
             "query_mode": query_mode,
+            "original_query": query,
+            "resolved_query": resolved_query or query,
+            "rewritten_query": None,
+            "english_query": "",
+            "sub_queries": [],
+            "matched_mapping_ids": [item.get("mapping_id") for item in mapping_matches],
+            "matched_mapping_source": [item.get("mapping_source") for item in mapping_matches],
+            "mapping_status": mapping_result.get("status", "unmatched"),
+            "mapping_conflicts": mapping_result.get("conflicts") or [],
+            "retrieval_route": f"{query_mode}:fallback",
+            "matched_feedback_ids": [],
+            "feedback_scores": {},
+            "scope_doc_ids": [],
+            "fallback_reason": fallback_reason,
             "total_chunks_found": 0,
             "final_chunks_count": 0,
         },
@@ -634,8 +789,12 @@ async def naive_query(
     # 阶段 0a: 历史感知改写（指代消解）——多轮时用最近历史把当前问题消解为
     # 自包含查询, 仅用于检索（生成回答仍用原始问题 + 完整历史）
     resolved_query = await resolve_query_with_history(query, query_param.conversation_history)
+    mapping_result = await term_mapping_service.resolve(resolved_query)
+    mapping_matches = mapping_result.get("matches") or []
     # 阶段 0b: 术语改写 + 英文检索词扩展（无术语索引时也生成英文查询）
-    bilingual_query = await rewrite_query_bilingual(resolved_query)
+    bilingual_query = await rewrite_query_bilingual(
+        resolved_query, mapping_matches=mapping_matches,
+    )
     query_for_search = bilingual_query.primary_query
 
     search_top_k = query_param.chunk_top_k or PROJECT_CONFIG.CHUNK_TOP_K
@@ -645,26 +804,42 @@ async def naive_query(
     sub_queries = await decompose_query(query_for_search)
     queries = _merge_retrieval_queries(query_for_search, sub_queries)
 
-    # 阶段 2: 多路召回（每查询一路 Dense + 文档级召回）; 单查询单路命中
-    # 时结果与旧版 top-k 语义一致, 多路命中经 RRF 融合为候选池
-    ranked_lists = await _retrieve_ranked_lists(
-        queries,
-        english_query=bilingual_query.english_query,
-        fusion_top_k=search_top_k,
-        dense_top_k=search_top_k,
-        bm25_top_k=PROJECT_CONFIG.HYBRID_BM25_TOP_K,
-        enable_doc_recall=PROJECT_CONFIG.DOC_RECALL_ENABLED,
+    guidance, guidance_filter, guidance_shadow_mode = await _prepare_query_guidance(
+        resolved_query,
     )
 
-    if not ranked_lists:
+    # 阶段 2: 历史范围与全库并行召回。两路各自融合后组成同一候选池，
+    # 旧文档获得适度权重，新问题涉及的其他文档仍能进入同一次重排。
+    async def retrieve_candidates(filter_expr: str) -> List[Dict[str, Any]]:
+        ranked_lists = await _retrieve_ranked_lists(
+            queries,
+            english_query=bilingual_query.english_query,
+            fusion_top_k=search_top_k,
+            dense_top_k=search_top_k,
+            bm25_top_k=PROJECT_CONFIG.HYBRID_BM25_TOP_K,
+            enable_doc_recall=PROJECT_CONFIG.DOC_RECALL_ENABLED and not filter_expr,
+            filter_expr=filter_expr,
+        )
+        if not ranked_lists:
+            return []
+        return ranked_lists[0] if len(ranked_lists) == 1 else _rrf_merge(ranked_lists, search_top_k)
+
+    chunks, used_guidance, retrieval_fallback, guided_count, global_count = (
+        await _retrieve_with_guidance(
+            retrieve_candidates,
+            guidance_filter=guidance_filter,
+            guided_doc_ids=guidance.get("scope_doc_ids") or [],
+            top_k=search_top_k,
+        )
+    )
+    guidance_fallback_reason = retrieval_fallback or guidance.get("fallback_reason")
+
+    if not chunks:
         await _warn_if_store_unreachable("naive 检索")
-        return await _no_context_fallback(query, query_param, "naive")
-
-    chunks = (
-        ranked_lists[0]
-        if len(ranked_lists) == 1
-        else _rrf_merge(ranked_lists, search_top_k)
-    )
+        return await _no_context_fallback(
+            query, query_param, "naive", resolved_query=resolved_query,
+            mapping_result=mapping_result,
+        )
 
     # 重排: 按改写后查询的相关性对分块重新打分（从候选池精选出最终检索窗口）
     if query_param.enable_rerank:
@@ -706,7 +881,11 @@ async def naive_query(
     )
 
     if not processed_chunks:
-        return await _no_context_fallback(query, query_param, "naive")
+        return await _no_context_fallback(
+            query, query_param, "naive", resolved_query=resolved_query,
+            fallback_reason="context_budget_empty",
+            mapping_result=mapping_result,
+        )
 
     # 构建响应的 raw_data
     raw_data: Dict[str, Any] = {
@@ -718,6 +897,8 @@ async def naive_query(
         },
         "metadata": {
             "query_mode": "naive",
+            "original_query": query,
+            "resolved_query": resolved_query,
             "total_chunks_found": total_chunks_found,
             "context_candidate_count": len(chunks),
             "final_chunks_count": len(processed_chunks),
@@ -726,7 +907,31 @@ async def naive_query(
                 if bilingual_query.primary_query != query
                 else None
             ),
+            "english_query": bilingual_query.english_query,
             "sub_queries": sub_queries or None,
+            "matched_mapping_ids": [item.get("mapping_id") for item in mapping_matches],
+            "matched_mapping_source": [item.get("mapping_source") for item in mapping_matches],
+            "mapping_status": mapping_result.get("status", "unmatched"),
+            "mapping_conflicts": mapping_result.get("conflicts") or [],
+            "retrieval_route": (
+                "naive:dense+bm25+rrf"
+                + (":guided+global" if used_guidance and global_count else (":guided" if used_guidance else (":fallback" if guidance_filter else "")))
+                + ("+doc_recall" if PROJECT_CONFIG.DOC_RECALL_ENABLED else "")
+                + ("+rerank" if query_param.enable_rerank else "")
+            ),
+            "feedback_scores": guidance.get("feedback_scores") or {},
+            "scope_doc_ids": sorted({
+                c.get("doc_id", "") for c in processed_chunks if c.get("doc_id")
+            }),
+            "matched_feedback_ids": guidance.get("matched_feedback_ids") or [],
+            "guidance_scope_doc_ids": guidance.get("scope_doc_ids") or [],
+            "guidance_shadow_mode": guidance_shadow_mode,
+            "scoped_search_enabled": PROJECT_CONFIG.QUERY_MEMORY_SCOPED_SEARCH_ENABLED,
+            "guided_candidate_count": guided_count,
+            "global_candidate_count": global_count,
+            "guided_weight": PROJECT_CONFIG.QUERY_MEMORY_GUIDED_WEIGHT if used_guidance else None,
+            "fallback_reason": None if used_guidance else guidance_fallback_reason,
+            "guidance_fallback": bool(guidance_filter and not used_guidance),
         },
     }
 
@@ -796,8 +1001,12 @@ async def hybrid_query(
     # 阶段 0a: 历史感知改写（指代消解）——多轮时用最近历史把当前问题消解为
     # 自包含查询, 仅用于检索（生成回答仍用原始问题 + 完整历史）
     resolved_query = await resolve_query_with_history(query, query_param.conversation_history)
+    mapping_result = await term_mapping_service.resolve(resolved_query)
+    mapping_matches = mapping_result.get("matches") or []
     # 阶段 0b: 术语改写 + 英文检索词扩展
-    bilingual_query = await rewrite_query_bilingual(resolved_query)
+    bilingual_query = await rewrite_query_bilingual(
+        resolved_query, mapping_matches=mapping_matches,
+    )
 
     # 阶段 1: 混合检索（仅改写查询 → Dense + BM25 → RRF 融合）。
     # 刻意不用原文查询召回: 口语原文（如 "3域"）词项与文档词汇脱节,
@@ -810,17 +1019,36 @@ async def hybrid_query(
     # 原查询保留在检索集合中作为兜底（分解不当不丢原始召回面）
     sub_queries = await decompose_query(query_for_search)
 
-    chunks = await _get_hybrid_context(
-        bilingual_query,
-        merge_top_k=merge_top_k,
-        dense_top_k=query_param.dense_top_k,
-        bm25_top_k=query_param.bm25_top_k,
-        sub_queries=sub_queries,
+    guidance, guidance_filter, guidance_shadow_mode = await _prepare_query_guidance(
+        resolved_query,
     )
+
+    async def retrieve_candidates(filter_expr: str) -> List[Dict[str, Any]]:
+        return await _get_hybrid_context(
+            bilingual_query,
+            merge_top_k=merge_top_k,
+            dense_top_k=query_param.dense_top_k,
+            bm25_top_k=query_param.bm25_top_k,
+            sub_queries=sub_queries,
+            filter_expr=filter_expr,
+        )
+
+    chunks, used_guidance, retrieval_fallback, guided_count, global_count = (
+        await _retrieve_with_guidance(
+            retrieve_candidates,
+            guidance_filter=guidance_filter,
+            guided_doc_ids=guidance.get("scope_doc_ids") or [],
+            top_k=merge_top_k,
+        )
+    )
+    guidance_fallback_reason = retrieval_fallback or guidance.get("fallback_reason")
 
     if not chunks:
         await _warn_if_store_unreachable("hybrid 检索")
-        return await _no_context_fallback(query, query_param, "hybrid")
+        return await _no_context_fallback(
+            query, query_param, "hybrid", resolved_query=resolved_query,
+            mapping_result=mapping_result,
+        )
 
     # 重排: 按改写后查询的相关性对分块重新打分（从候选池精选出最终检索窗口）
     if query_param.enable_rerank:
@@ -862,7 +1090,11 @@ async def hybrid_query(
     )
 
     if not processed_chunks:
-        return await _no_context_fallback(query, query_param, "hybrid")
+        return await _no_context_fallback(
+            query, query_param, "hybrid", resolved_query=resolved_query,
+            fallback_reason="context_budget_empty",
+            mapping_result=mapping_result,
+        )
 
     # 构建响应的 raw_data
     raw_data: Dict[str, Any] = {
@@ -874,6 +1106,8 @@ async def hybrid_query(
         },
         "metadata": {
             "query_mode": "hybrid",
+            "original_query": query,
+            "resolved_query": resolved_query,
             "total_chunks_found": total_chunks_found,
             "context_candidate_count": len(chunks),
             "final_chunks_count": len(processed_chunks),
@@ -882,7 +1116,31 @@ async def hybrid_query(
                 if bilingual_query.primary_query != query
                 else None
             ),
+            "english_query": bilingual_query.english_query,
             "sub_queries": sub_queries or None,
+            "matched_mapping_ids": [item.get("mapping_id") for item in mapping_matches],
+            "matched_mapping_source": [item.get("mapping_source") for item in mapping_matches],
+            "mapping_status": mapping_result.get("status", "unmatched"),
+            "mapping_conflicts": mapping_result.get("conflicts") or [],
+            "retrieval_route": (
+                "hybrid:dense+bm25+rrf"
+                + (":guided+global" if used_guidance and global_count else (":guided" if used_guidance else (":fallback" if guidance_filter else "")))
+                + ("+doc_recall" if PROJECT_CONFIG.DOC_RECALL_ENABLED else "")
+                + ("+rerank" if query_param.enable_rerank else "")
+            ),
+            "matched_feedback_ids": guidance.get("matched_feedback_ids") or [],
+            "feedback_scores": guidance.get("feedback_scores") or {},
+            "scope_doc_ids": sorted({
+                c.get("doc_id", "") for c in processed_chunks if c.get("doc_id")
+            }),
+            "guidance_scope_doc_ids": guidance.get("scope_doc_ids") or [],
+            "guidance_shadow_mode": guidance_shadow_mode,
+            "scoped_search_enabled": PROJECT_CONFIG.QUERY_MEMORY_SCOPED_SEARCH_ENABLED,
+            "guided_candidate_count": guided_count,
+            "global_candidate_count": global_count,
+            "guided_weight": PROJECT_CONFIG.QUERY_MEMORY_GUIDED_WEIGHT if used_guidance else None,
+            "fallback_reason": None if used_guidance else guidance_fallback_reason,
+            "guidance_fallback": bool(guidance_filter and not used_guidance),
         },
     }
 
@@ -951,10 +1209,32 @@ async def bypass_query(
         model=query_param.model,
     )
 
+    raw_data: Dict[str, Any] = {
+        "data": {"entities": [], "relationships": [], "chunks": [], "references": []},
+        "metadata": {
+            "query_mode": "bypass",
+            "original_query": query,
+            "resolved_query": query,
+            "rewritten_query": None,
+            "english_query": "",
+            "sub_queries": [],
+            "matched_mapping_ids": [],
+            "matched_mapping_source": [],
+            "mapping_status": "not_applicable",
+            "mapping_conflicts": [],
+            "retrieval_route": "bypass",
+            "matched_feedback_ids": [],
+            "feedback_scores": {},
+            "scope_doc_ids": [],
+            "fallback_reason": "bypass_mode",
+            "total_chunks_found": 0,
+            "final_chunks_count": 0,
+        },
+    }
     if isinstance(response, str):
-        return QueryResult(content=response)
+        return QueryResult(content=response, raw_data=raw_data)
     else:
-        return QueryResult(response_iterator=response, is_streaming=True)
+        return QueryResult(response_iterator=response, raw_data=raw_data, is_streaming=True)
 
 
 # ==================== 元问题路由（知识库目录类提问） ====================
@@ -1028,6 +1308,18 @@ async def _meta_catalog_response() -> Optional[QueryResult]:
         "data": {"entities": [], "relationships": [], "chunks": [], "references": []},
         "metadata": {
             "query_mode": "meta_catalog",
+            "original_query": query,
+            "resolved_query": query,
+            "rewritten_query": None,
+            "english_query": "",
+            "sub_queries": [],
+            "matched_mapping_ids": [],
+            "matched_mapping_source": [],
+            "retrieval_route": "meta_catalog",
+            "matched_feedback_ids": [],
+            "feedback_scores": {},
+            "scope_doc_ids": [],
+            "fallback_reason": None,
             "total_chunks_found": 0,
             "final_chunks_count": 0,
             "document_count": len(complete),
@@ -1057,7 +1349,13 @@ async def run_query(
                 content="混合检索未找到相关的文档分块。请尝试更换提问方式，或先上传相关文档。",
                 raw_data={
                     "data": {"entities": [], "relationships": [], "chunks": [], "references": []},
-                    "metadata": {"query_mode": "hybrid"},
+                    "metadata": {
+                        "query_mode": "hybrid",
+                        "original_query": query,
+                        "resolved_query": query,
+                        "retrieval_route": "hybrid:fallback",
+                        "fallback_reason": "query_result_none",
+                    },
                 },
             )
         return result
@@ -1069,7 +1367,13 @@ async def run_query(
                 content="知识库中未找到相关的文档分块。请尝试更换提问方式，或先上传相关文档。",
                 raw_data={
                     "data": {"entities": [], "relationships": [], "chunks": [], "references": []},
-                    "metadata": {"query_mode": query_param.mode},
+                    "metadata": {
+                        "query_mode": query_param.mode,
+                        "original_query": query,
+                        "resolved_query": query,
+                        "retrieval_route": f"{query_param.mode}:fallback",
+                        "fallback_reason": "query_result_none",
+                    },
                 },
             )
         return result

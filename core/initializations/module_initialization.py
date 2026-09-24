@@ -33,8 +33,26 @@ async def start_application_modules(app: FastAPI) -> None:
         raise RuntimeError(f"数据库连接失败，请检查主机地址是否可达: {exc}") from exc
 
     await init_database_table(app)
-    await start_ticket_review(app)
-    await start_code_server_ide(app)
+
+    if PROJECT_CONFIG.TICKET_REVIEW_ENABLED:
+        try:
+            await start_ticket_review(app)
+        except Exception as exc:
+            app.state.ticket_review_started = False
+            LOGGER.warning(f"ticket_review 模块启动失败（数据库未配置？），不影响其他模块: {exc}")
+    else:
+        app.state.ticket_review_started = False
+        LOGGER.info("ticket_review 模块已通过 TICKET_REVIEW_ENABLED=False 关闭，跳过启动")
+
+    if PROJECT_CONFIG.CODE_SERVER_IDE_ENABLED:
+        try:
+            await start_code_server_ide(app)
+        except Exception as exc:
+            app.state.code_server_ide_started = False
+            LOGGER.warning(f"code_server_ide 模块启动失败（数据库未配置？），不影响其他模块: {exc}")
+    else:
+        app.state.code_server_ide_started = False
+        LOGGER.info("code_server_ide 模块已通过 CODE_SERVER_IDE_ENABLED=False 关闭，跳过启动")
 
     # RAG 启动巡检与术语索引依赖主库，必须在数据库初始化后执行。
     # 两项均为可恢复的辅助初始化，失败时降级而不阻断其他已合并模块启动。

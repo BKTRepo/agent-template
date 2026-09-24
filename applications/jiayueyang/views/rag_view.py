@@ -7,6 +7,7 @@
 - rag_business: 业务路由（挂载处统一施加 DependAuth 鉴权）
 """
 import asyncio
+import hashlib
 import json
 import time
 from dataclasses import dataclass, field
@@ -480,32 +481,61 @@ async def _prepare_turn(
 
 
 def _build_retrieval_detail(raw_data: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """从 raw_data 中提取检索详情: 改写查询 + 带分数的召回分块。"""
+    """从 raw_data 中提取可持久化的完整检索轨迹。
+
+    保留旧字段，同时补充查询快照和分块溯源字段，兼容历史检索详情。
+    """
     if not raw_data:
         return None
     meta = raw_data.get("metadata", {})
     data = raw_data.get("data", {})
     chunks = data.get("chunks", [])
     return {
+        "original_query": meta.get("original_query"),
+        "resolved_query": meta.get("resolved_query"),
         "rewritten_query": meta.get("rewritten_query") or None,
+        "english_query": meta.get("english_query", ""),
+        "sub_queries": meta.get("sub_queries") or [],
         "query_mode": meta.get("query_mode", "naive"),
+        "matched_mapping_ids": meta.get("matched_mapping_ids") or [],
+        "matched_mapping_source": meta.get("matched_mapping_source") or [],
+        "mapping_status": meta.get("mapping_status", "unmatched"),
+        "mapping_conflicts": meta.get("mapping_conflicts") or [],
+        "retrieval_route": meta.get("retrieval_route"),
+        "matched_feedback_ids": meta.get("matched_feedback_ids") or [],
+        "feedback_scores": meta.get("feedback_scores") or {},
+        "scope_doc_ids": meta.get("scope_doc_ids") or [],
+        "guidance_scope_doc_ids": meta.get("guidance_scope_doc_ids") or [],
+        "guidance_shadow_mode": bool(meta.get("guidance_shadow_mode", False)),
+        "scoped_search_enabled": bool(meta.get("scoped_search_enabled", False)),
+        "fallback_reason": meta.get("fallback_reason"),
         "total_found": meta.get("total_chunks_found", 0),
         "final_count": meta.get("final_chunks_count", 0),
         "chunks": [
             {
                 "id": c.get("id", ""),
+                "doc_id": c.get("doc_id", ""),
+                "file_path": c.get("file_path", ""),
                 "content": c.get("content", ""),
                 "full_content": c.get("content", ""),
+                "content_sha256": hashlib.sha256(
+                    (c.get("content", "") or "").encode("utf-8")
+                ).hexdigest(),
                 # score 保持"召回/融合分"语义（RRF 或 BM25）; 开启重排时
                 # rerank_score 非空, 前端以它为准展示（分块顺序已是重排序,
                 # 列表下标即重排排名）
                 "score": c.get("_rrf_score") or c.get("score", 0),
+                "raw_score": c.get("score", 0),
+                "rrf_score": c.get("_rrf_score"),
                 "rerank_score": c.get("rerank_score"),
                 "source": c.get("source", "dense"),
+                "source_channel": c.get("source", "dense"),
                 "modality": c.get("modality", "text"),
                 "file_name": c.get("file_name", ""),
+                "file_sha256": c.get("file_sha256", ""),
                 "reference_id": c.get("reference_id", ""),
-                "order": c.get("order", 0),
+                "order": c.get("order", c.get("chunk_order_index", 0)),
+                "chunk_order_index": c.get("chunk_order_index", c.get("order", 0)),
             }
             for c in chunks
         ],

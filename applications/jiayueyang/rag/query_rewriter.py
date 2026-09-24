@@ -806,6 +806,69 @@ def _render_matched_terms(matches: List[Tuple[str, List[str]]]) -> str:
     return "\n".join(lines)
 
 
+def _render_mapping_hints(mapping_matches: List[Dict[str, Any]]) -> str:
+    """把数据库中的确定性映射渲染成 LLM 的高优先级参考。"""
+    lines: List[str] = []
+    for item in mapping_matches[:10]:
+        canonical = (item.get("canonical_zh") or "").strip()
+        if not canonical:
+            continue
+        english = [item.get("official_en") or "", *(item.get("aliases_en") or [])]
+        english = [str(value).strip() for value in english if str(value).strip()]
+        suffix = f" / {' / '.join(english[:4])}" if english else ""
+        scope = f"（适用范围：{item['scope']}）" if item.get("scope") else ""
+        matched = item.get("matched_value") or canonical
+        lines.append(f'- 确定映射："{matched}" → {canonical}{suffix}{scope}')
+    return "\n".join(lines)
+
+
+def _append_terms(query: str, terms: List[str]) -> str:
+    result = query.strip()
+    existing = result.casefold()
+    for term in terms:
+        term = (term or "").strip()
+        if term and term.casefold() not in existing:
+            result = f"{result} {term}".strip()
+            existing = result.casefold()
+    return result
+
+
+def _append_deterministic_mapping_terms(
+        query: str,
+        mapping_matches: List[Dict[str, Any]],
+) -> str:
+    """保证确定性标准词进入中文主查询，避免 LLM 改写时丢失。"""
+    terms: List[str] = []
+    for item in mapping_matches:
+        terms.append(item.get("canonical_zh") or "")
+        terms.append(item.get("official_en") or "")
+    return _append_terms(query, terms)
+
+
+def _append_deterministic_mapping_english(
+        english_query: str,
+        mapping_matches: List[Dict[str, Any]],
+) -> str:
+    """保证官方英文词和缩写进入英文 BM25 查询。"""
+    terms: List[str] = []
+    for item in mapping_matches:
+        terms.append(item.get("official_en") or "")
+        terms.extend(item.get("aliases_en") or [])
+    result = english_query.strip()
+    existing = result.casefold()
+    for term in terms:
+        term = (term or "").strip()
+        if not term:
+            continue
+        # “incremental auth” 是 “incremental authorization” 的前缀，
+        # 但它仍是用户提供的独立 BM25 别名，不能因为子串关系被吞掉。
+        pattern = rf"(?<![a-z0-9]){re.escape(term.casefold())}(?![a-z0-9])"
+        if not re.search(pattern, existing):
+            result = f"{result} {term}".strip()
+            existing = result.casefold()
+    return result
+
+
 def _build_terminology_context(indices: List[Dict[str, Any]]) -> str:
     """渲染术语上下文作为 LLM 广度上下文（分段预算）。
 
@@ -841,6 +904,7 @@ async def rewrite_query(
     query: str,
     *,
     doc_ids: Optional[FrozenSet[str]] = None,
+    mapping_hints: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     """使用匹配文档的术语索引改写用户查询（词典富集 → LLM 改写）。
 
@@ -857,7 +921,11 @@ async def rewrite_query(
     await _ensure_indices_fresh()
 
     # 1. 缓存检查
-    cached = _cache_get(query, doc_ids)
+    mapping_hints = mapping_hints or []
+    cache_query = query
+    if mapping_hints:
+        cache_query = f"{query}|mapping:{json.dumps(mapping_hints, ensure_ascii=False, sort_keys=True)}"
+    cached = _cache_get(cache_query, doc_ids)
     if cached is not None:
         LOGGER.info(f"改写缓存命中: '{query[:60]}' -> '{cached[:200]}'")
         return cached
@@ -889,6 +957,9 @@ async def rewrite_query(
     if anchor_matches:
         matches = anchor_matches + matches
     matched_terms = _render_matched_terms(matches)
+    mapping_terms = _render_mapping_hints(mapping_hints)
+    if mapping_terms:
+        matched_terms = "\n".join(part for part in (mapping_terms, matched_terms) if part)
     # 术语改写（词典富集 + 锚点）结果打印到后台日志
     LOGGER.info(
         f"术语富集结果: query='{query[:60]}' 匹配 {len(matches)} 项"
@@ -905,7 +976,7 @@ async def rewrite_query(
 
     # 5. 写入缓存并返回
     result = rewritten or query
-    _cache_set(query, doc_ids, result)
+    _cache_set(cache_query, doc_ids, result)
     # LLM 改写最终结果打印到后台日志（失败回退时也记录, 便于排查）
     if rewritten:
         LOGGER.info(f"LLM 改写结果: '{query[:60]}' -> '{result[:200]}'")
@@ -955,15 +1026,21 @@ async def rewrite_query_bilingual(
     query: str,
     *,
     doc_ids: Optional[FrozenSet[str]] = None,
+    mapping_matches: Optional[List[Dict[str, Any]]] = None,
 ) -> BilingualQuery:
     """生成主查询与英文查询；即使术语索引为空也执行英文扩展。"""
     doc_ids = doc_ids or frozenset()
-    cache_key = _cache_key(f"bilingual:{query}", doc_ids)
+    mapping_matches = mapping_matches or []
+    mapping_cache_suffix = json.dumps(mapping_matches, ensure_ascii=False, sort_keys=True)
+    cache_key = _cache_key(f"bilingual:{query}|mapping:{mapping_cache_suffix}", doc_ids)
     cached = _bilingual_cache.get(cache_key)
     if cached and _time.time() - _cache_times.get(cache_key, 0) < _cache_ttl:
         return cached
 
-    primary = await rewrite_query(query, doc_ids=doc_ids)
+    primary = await rewrite_query(
+        query, doc_ids=doc_ids, mapping_hints=mapping_matches,
+    )
+    primary = _append_deterministic_mapping_terms(primary, mapping_matches)
     # 主查询也必须携带规范英文术语：子查询分解基于 primary，若只在独立的
     # english_query 中补词，子查询仍会沿用“追加授权(Authorization)”这一
     # 模糊说法，外层 RRF 反而把只在主查询命中的精确证据稀释掉。
@@ -979,6 +1056,7 @@ async def rewrite_query_bilingual(
     if english:
         english = _append_missing_identifiers(english, identifiers)
     english = _append_canonical_english_aliases(query, english)
+    english = _append_deterministic_mapping_english(english, mapping_matches)
 
     result = BilingualQuery(
         original_query=query,

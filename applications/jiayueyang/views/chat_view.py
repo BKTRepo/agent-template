@@ -15,16 +15,63 @@ from applications.jiayueyang.schemas.chat_schema import (
     ConversationPin,
     ConversationRename,
 )
+from applications.jiayueyang.schemas.feedback_schema import FeedbackActionRequest
+from applications.jiayueyang.services.feedback_service import feedback_service
 from applications.jiayueyang.services.chat_service import ConversationService
 from configure import LOGGER
+from core.exceptions import NotFoundException, ParameterException
 from core.responses import (
     FailureResponse,
     NotFoundResponse,
+    ParameterResponse,
     SuccessResponse,
 )
 
 # 业务路由: 对话历史管理
 chat_business = APIRouter()
+
+
+@chat_business.put(
+    "/conversations/{conversation_id}/messages/{message_seq}/feedback",
+    summary="对话-采纳或取消采纳回答",
+)
+async def set_answer_feedback(
+        conversation_id: int,
+        message_seq: int,
+        request: FeedbackActionRequest = Body(...),
+):
+    """按服务端消息生成或更新反馈快照，前端不提交答案和检索数据。"""
+    try:
+        data = await feedback_service.set_feedback(
+            conversation_id, message_seq, request.action,
+        )
+        return SuccessResponse(data=data)
+    except NotFoundException as exc:
+        return NotFoundResponse(message=exc.message)
+    except ParameterException as exc:
+        return ParameterResponse(message=exc.message)
+    except Exception as exc:
+        LOGGER.error(f"更新回答采纳状态失败: {exc}")
+        return FailureResponse(message="更新回答采纳状态失败, 请稍后重试")
+
+
+@chat_business.get(
+    "/conversations/{conversation_id}/messages/{message_seq}/feedback",
+    summary="对话-查询回答采纳状态",
+)
+async def get_answer_feedback(conversation_id: int, message_seq: int):
+    """供重新打开会话时恢复前端采纳按钮状态。"""
+    try:
+        data = await feedback_service.get_feedback(conversation_id, message_seq)
+        return SuccessResponse(data=data or {
+            "conversation_id": conversation_id,
+            "message_seq": message_seq,
+            "action": None,
+            "effective": False,
+        })
+    except Exception as exc:
+        LOGGER.error(f"读取回答采纳状态失败: {exc}")
+        return FailureResponse(message="读取回答采纳状态失败, 请稍后重试")
 
 
 @chat_business.get("/conversations", summary="对话-获取会话列表")

@@ -13,6 +13,13 @@ from tenacity import (
 from configure import PROJECT_CONFIG
 
 
+def _provider_temperature(value: Any) -> float:
+    """Kimi Coding 端点只接受 temperature=1，其他 OpenAI 兼容端点保留原值。"""
+    if "api.kimi.com/coding" in PROJECT_CONFIG.LLM_BASE_URL.lower():
+        return 1.0
+    return float(value)
+
+
 class LLMTruncatedError(RuntimeError):
     """LLM 输出因触及 max_tokens 上限被截断（finish_reason == "length"）。
 
@@ -55,7 +62,7 @@ async def _chat_completion_inner(
         "model": PROJECT_CONFIG.LLM_MODEL,
         "messages": messages,
         "max_tokens": PROJECT_CONFIG.LLM_MAX_TOKENS,
-        "temperature": PROJECT_CONFIG.LLM_TEMPERATURE,
+        "temperature": _provider_temperature(PROJECT_CONFIG.LLM_TEMPERATURE),
         "stream": stream,
         **kwargs,
     }
@@ -162,7 +169,7 @@ async def chat_completion(
     if response_format:
         kwargs["response_format"] = response_format
     if temperature is not None:
-        kwargs["temperature"] = temperature
+        kwargs["temperature"] = _provider_temperature(temperature)
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
     if model:

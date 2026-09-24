@@ -71,6 +71,31 @@ _MULTI_ANALYZER_PARAMS: Dict[str, Any] = {
 _collection_ready: bool = False
 
 
+def _hit_value(hit: Any, key: str, default: Any = None) -> Any:
+    """兼容 MilvusClient 返回的 dict、Hit 和 NamedTuple 结果。"""
+    if isinstance(hit, dict):
+        return hit.get(key, default)
+    try:
+        return hit[key]
+    except (KeyError, IndexError, TypeError, AttributeError):
+        return getattr(hit, key, default)
+
+
+def _normalize_primary_key(value: Any) -> str:
+    """把 Milvus 的 int/str/numpy 标量主键统一成可序列化字符串。
+
+    旧版 pymilvus 在 hybrid_search 中可能返回 numpy 标量或 Hit 对象；
+    直接把这类对象传给下游重排、JSON 或删除接口会触发 ``unsupported ID
+    type``。当前 rag_chunks 的新 schema 主键是 VARCHAR，因此统一转成 str。
+    """
+    if value is None:
+        return ""
+    try:
+        return str(value.item())
+    except AttributeError:
+        return str(value)
+
+
 @contextmanager
 def _milvus_client() -> Iterator[MilvusClient]:  # type: ignore
     """按操作创建 Milvus Server 短连接，用完即关闭。"""
@@ -442,19 +467,20 @@ def _search_chunks(
     hits = results[0]
     chunks: List[Dict[str, Any]] = []
     for hit in hits:
-        entity = hit.get("entity", {})
+        entity = _hit_value(hit, "entity", {}) or {}
+        hit_id = _normalize_primary_key(_hit_value(hit, "id"))
         chunks.append({
-            "id": hit["id"],
-            "chunk_id": hit["id"],
-            "content": entity.get("content", ""),
-            "file_path": entity.get("file_path", "unknown_source"),
-            "file_name": entity.get("file_name", ""),
-            "doc_id": entity.get("doc_id", ""),
-            "tokens": entity.get("tokens", 0),
-            "modality": entity.get("modality", "text"),
-            "order": entity.get("chunk_order_index", 0),
-            "distance": hit.get("distance", None),
-            "created_at": entity.get("created_at"),
+            "id": hit_id,
+            "chunk_id": hit_id,
+            "content": _hit_value(entity, "content", ""),
+            "file_path": _hit_value(entity, "file_path", "unknown_source"),
+            "file_name": _hit_value(entity, "file_name", ""),
+            "doc_id": _hit_value(entity, "doc_id", ""),
+            "tokens": _hit_value(entity, "tokens", 0),
+            "modality": _hit_value(entity, "modality", "text"),
+            "order": _hit_value(entity, "chunk_order_index", 0),
+            "distance": _hit_value(hit, "distance", None),
+            "created_at": _hit_value(entity, "created_at"),
         })
     return chunks
 
@@ -517,6 +543,21 @@ def hybrid_query_chunks(
     try:
         with _milvus_client() as client:
             _ensure_collection(client)
+            # Milvus 2.6 在空集合上执行 hybrid_search 可能返回服务端
+            # ``unsupported ID type``，而不是空结果。先做一次轻量主键探测，
+            # 将空集合稳定地视为无召回，避免把正常的冷启动误报成 ID 错误。
+            try:
+                if not client.query(
+                    collection_name=_COLLECTION_NAME,
+                    filter="id != ''",
+                    output_fields=["id"],
+                    limit=1,
+                ):
+                    return []
+            except Exception:
+                # 探测接口在部分旧版服务不可用时，继续让 hybrid_search
+                # 执行；真正的检索错误仍由下方统一捕获并降级。
+                pass
             results = client.hybrid_search(
                 collection_name=_COLLECTION_NAME,
                 reqs=requests,
@@ -532,20 +573,21 @@ def hybrid_query_chunks(
         return []
     chunks: List[Dict[str, Any]] = []
     for hit in results[0]:
-        entity = hit.get("entity", {})
+        entity = _hit_value(hit, "entity", {}) or {}
+        hit_id = _normalize_primary_key(_hit_value(hit, "id"))
         chunks.append({
-            "id": hit["id"],
-            "chunk_id": hit["id"],
-            "content": entity.get("content", ""),
-            "file_path": entity.get("file_path", "unknown_source"),
-            "file_name": entity.get("file_name", ""),
-            "doc_id": entity.get("doc_id", ""),
-            "tokens": entity.get("tokens", 0),
-            "modality": entity.get("modality", "text"),
-            "order": entity.get("chunk_order_index", 0),
-            "distance": hit.get("distance"),
-            "created_at": entity.get("created_at"),
-            "language": entity.get("language", "mixed"),
+            "id": hit_id,
+            "chunk_id": hit_id,
+            "content": _hit_value(entity, "content", ""),
+            "file_path": _hit_value(entity, "file_path", "unknown_source"),
+            "file_name": _hit_value(entity, "file_name", ""),
+            "doc_id": _hit_value(entity, "doc_id", ""),
+            "tokens": _hit_value(entity, "tokens", 0),
+            "modality": _hit_value(entity, "modality", "text"),
+            "order": _hit_value(entity, "chunk_order_index", 0),
+            "distance": _hit_value(hit, "distance", None),
+            "created_at": _hit_value(entity, "created_at"),
+            "language": _hit_value(entity, "language", "mixed"),
             "source": "milvus_hybrid",
         })
     return chunks
@@ -607,7 +649,7 @@ def delete_by_doc_id(doc_id: str) -> int:
                     filter=f'doc_id == "{doc_id}"',
                     output_fields=["id"],
                 )
-                return [r["id"] for r in rows]
+                return [_normalize_primary_key(r.get("id")) for r in rows]
 
             # 按 doc_id 过滤查询
             pks = _query_pks()
@@ -632,26 +674,49 @@ def delete_by_doc_id(doc_id: str) -> int:
         return -1
 
 
+def _query_collection_all(
+        client: MilvusClient,
+        collection_name: str,
+        filter: str,
+        output_fields: List[str],
+        batch_size: int = 5000,
+) -> List[Dict[str, Any]]:
+    """通过 query_iterator 分批读取集合，兼容 Milvus 3 的 16384 窗口限制。"""
+    iterator = client.query_iterator(
+        collection_name=collection_name,
+        filter=filter,
+        output_fields=output_fields,
+        batch_size=batch_size,
+        limit=-1,
+    )
+    rows: List[Dict[str, Any]] = []
+    try:
+        while True:
+            batch = iterator.next()
+            if not batch:
+                break
+            rows.extend(batch)
+    finally:
+        close = getattr(iterator, "close", None)
+        if close:
+            close()
+    return rows
+
+
 def get_all_chunks() -> List[Dict[str, Any]]:
     """返回 Milvus 集合中存储的全部分块，供 BM25 建索引使用。"""
     try:
         with _milvus_client() as client:
             _ensure_collection(client)
-            results = client.query(
+            results = _query_collection_all(
+                client,
                 collection_name=_COLLECTION_NAME,
                 filter="id != ''",
-                output_fields=["id", "content", "file_path", "file_name", "doc_id", "tokens", "modality", "chunk_order_index"],
-                limit=100000,
-            )
-        # 静默上限告警: 触顶说明 BM25 索引基于不完整数据, 必须可见
-        if len(results) >= 100000:
-            LOGGER.warning(
-                "Milvus get_all_chunks 触及单次查询上限 100000: "
-                "BM25 关键词索引可能不完整, 请关注分块总量增长"
+                output_fields=["id", "content", "file_path", "file_name", "doc_id", "tokens", "modality", "chunk_order_index", "content_headings"],
             )
         return [
             {
-                "id": r.get("id", ""),
+                "id": _normalize_primary_key(r.get("id")),
                 "content": r.get("content", ""),
                 "file_path": r.get("file_path", ""),
                 "file_name": r.get("file_name", ""),
@@ -686,17 +751,13 @@ def get_collection_fingerprint() -> str:
     try:
         with _milvus_client() as client:
             _ensure_collection(client)
-            results = client.query(
+            results = _query_collection_all(
+                client,
                 collection_name=_COLLECTION_NAME,
                 filter="id != ''",
                 output_fields=["id", "created_at"],
-                limit=100000,
             )
-        ids = sorted(r.get("id", "") for r in results)
-        if len(ids) >= 100000:
-            LOGGER.warning(
-                "Milvus 指纹计算触及单次查询上限 100000: 指纹可能不稳定"
-            )
+        ids = sorted(_normalize_primary_key(r.get("id")) for r in results)
         max_created = max((int(r.get("created_at") or 0) for r in results), default=0)
         return hashlib.md5(f"{max_created}|{'|'.join(ids)}".encode()).hexdigest()
     except Exception as e:
@@ -713,11 +774,11 @@ def list_collection_doc_ids() -> Optional[set]:
     try:
         with _milvus_client() as client:
             _ensure_collection(client)
-            results = client.query(
+            results = _query_collection_all(
+                client,
                 collection_name=_COLLECTION_NAME,
                 filter="id != ''",
                 output_fields=["doc_id"],
-                limit=100000,
             )
         return {r.get("doc_id", "") for r in results if r.get("doc_id")}
     except Exception as e:
@@ -913,3 +974,181 @@ def delete_chat_memory_by_conv(conversation_id: str) -> int:
     except Exception as e:
         LOGGER.error(f"Milvus 删除对话记忆失败: {e}")
         return -1
+
+
+# ---------------------------------------------------------------------------
+# 查询经验集合（采纳反馈与映射检索范围）——不改动 rag_chunks schema
+# ---------------------------------------------------------------------------
+_QUERY_MEMORY_COLLECTION_NAME = "rag_query_memory"
+_QUERY_MEMORY_MAX_SOURCE_TYPE_BYTES = 32
+_QUERY_MEMORY_MAX_SOURCE_ID_BYTES = 128
+_QUERY_MEMORY_MAX_QUERY_BYTES = 8192
+_QUERY_MEMORY_MAX_CANONICAL_BYTES = 8192
+_QUERY_MEMORY_MAX_SCOPE_BYTES = 255
+_query_memory_collection_ready: bool = False
+
+
+def _ensure_query_memory_collection(client: MilvusClient) -> None:  # type: ignore
+    """创建并加载独立查询经验集合；集合存在时只加载，不重建 schema。"""
+    global _query_memory_collection_ready
+    if _query_memory_collection_ready:
+        try:
+            client.load_collection(_QUERY_MEMORY_COLLECTION_NAME)
+        except Exception:
+            pass
+        return
+
+    if client.has_collection(_QUERY_MEMORY_COLLECTION_NAME):
+        client.load_collection(_QUERY_MEMORY_COLLECTION_NAME)
+        _query_memory_collection_ready = True
+        return
+
+    schema = CollectionSchema(
+        fields=[
+            FieldSchema(name="id", dtype=DataType.VARCHAR, max_length=256, is_primary=True),
+            FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=PROJECT_CONFIG.EMBEDDING_DIM),
+            FieldSchema(name="source_type", dtype=DataType.VARCHAR, max_length=_QUERY_MEMORY_MAX_SOURCE_TYPE_BYTES),
+            FieldSchema(name="source_id", dtype=DataType.VARCHAR, max_length=_QUERY_MEMORY_MAX_SOURCE_ID_BYTES),
+            FieldSchema(name="query_text", dtype=DataType.VARCHAR, max_length=_QUERY_MEMORY_MAX_QUERY_BYTES),
+            FieldSchema(name="canonical_query", dtype=DataType.VARCHAR, max_length=_QUERY_MEMORY_MAX_CANONICAL_BYTES),
+            FieldSchema(name="scope", dtype=DataType.VARCHAR, max_length=_QUERY_MEMORY_MAX_SCOPE_BYTES),
+            FieldSchema(name="created_at", dtype=DataType.INT64),
+        ],
+        enable_dynamic_field=False,
+    )
+    try:
+        client.create_collection(collection_name=_QUERY_MEMORY_COLLECTION_NAME, schema=schema)
+    except Exception as create_err:
+        if client.has_collection(_QUERY_MEMORY_COLLECTION_NAME):
+            LOGGER.info(f"查询经验集合已由其他进程创建, 直接加载: {create_err}")
+            client.load_collection(_QUERY_MEMORY_COLLECTION_NAME)
+            _query_memory_collection_ready = True
+            return
+        raise
+
+    from pymilvus.milvus_client.index import IndexParams
+
+    vector_index = IndexParams()
+    vector_index.add_index(field_name="vector", index_type="AUTOINDEX", metric_type="COSINE")
+    client.create_index(collection_name=_QUERY_MEMORY_COLLECTION_NAME, index_params=vector_index)
+    for field_name in ("source_type", "source_id", "scope"):
+        try:
+            scalar_index = IndexParams()
+            scalar_index.add_index(field_name=field_name, index_type="INVERTED")
+            client.create_index(collection_name=_QUERY_MEMORY_COLLECTION_NAME, index_params=scalar_index)
+        except Exception:
+            # 标量索引只用于加速过滤，不能阻断集合可用性。
+            pass
+    client.load_collection(_QUERY_MEMORY_COLLECTION_NAME)
+    _query_memory_collection_ready = True
+
+
+def ensure_query_memory_collection() -> bool:
+    """确保查询经验集合可用；返回是否完成初始化。"""
+    try:
+        with _milvus_client() as client:
+            _ensure_query_memory_collection(client)
+        return True
+    except Exception as e:
+        LOGGER.error(f"初始化查询经验集合失败: {e}")
+        return False
+
+
+def upsert_query_memory(records: List[Dict[str, Any]]) -> int:
+    """写入或更新查询经验；同一 id 重复写入结果一致。"""
+    if not records:
+        return 0
+    now = int(time.time())
+    rows = []
+    for record in records:
+        rows.append({
+            "id": str(record["id"]),
+            "vector": record.get("vector", []),
+            "source_type": _truncate_bytes(str(record.get("source_type", "")), _QUERY_MEMORY_MAX_SOURCE_TYPE_BYTES),
+            "source_id": _truncate_bytes(str(record.get("source_id", "")), _QUERY_MEMORY_MAX_SOURCE_ID_BYTES),
+            "query_text": _truncate_bytes(str(record.get("query_text", "")), _QUERY_MEMORY_MAX_QUERY_BYTES),
+            "canonical_query": _truncate_bytes(str(record.get("canonical_query", "")), _QUERY_MEMORY_MAX_CANONICAL_BYTES),
+            "scope": _truncate_bytes(str(record.get("scope", "")), _QUERY_MEMORY_MAX_SCOPE_BYTES),
+            "created_at": int(record.get("created_at") or now),
+        })
+    with _milvus_client() as client:
+        _ensure_query_memory_collection(client)
+        client.upsert(collection_name=_QUERY_MEMORY_COLLECTION_NAME, data=rows)
+    return len(rows)
+
+
+def search_query_memory(
+        query_vectors: List[List[float]],
+        top_k: int = 5,
+        source_types: Optional[List[str]] = None,
+        scope: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """按向量召回查询经验；返回结果后仍需回查 MySQL 校验有效性。"""
+    if not query_vectors:
+        return []
+    try:
+        with _milvus_client() as client:
+            _ensure_query_memory_collection(client)
+            filters = []
+            if source_types:
+                values = ", ".join('"' + str(value).replace('"', '\\"') + '"' for value in source_types)
+                filters.append(f"source_type in [{values}]")
+            if scope:
+                filters.append(f'scope == "{str(scope).replace(chr(34), chr(92)+chr(34))}"')
+            search_kwargs = {
+                "collection_name": _QUERY_MEMORY_COLLECTION_NAME,
+                "data": query_vectors,
+                "limit": max(1, int(top_k)),
+                "output_fields": ["source_type", "source_id", "query_text", "canonical_query", "scope", "created_at"],
+                "search_params": {"metric_type": "COSINE"},
+            }
+            if filters:
+                search_kwargs["filter"] = " and ".join(filters)
+            results = client.search(**search_kwargs)
+            hits = results[0] if results else []
+            return [
+                {
+                    **(_hit_value(hit, "entity", {}) or {}),
+                    "id": _normalize_primary_key(_hit_value(hit, "id")),
+                    "distance": _hit_value(hit, "distance"),
+                }
+                for hit in hits
+            ]
+    except Exception as e:
+        LOGGER.error(f"Milvus 查询经验召回失败: {e}")
+        return []
+
+
+def delete_query_memory(ids: Optional[List[str]] = None, source_type: Optional[str] = None,
+                        source_id: Optional[str] = None) -> int:
+    """删除查询经验；支持按主键或来源定位，返回删除候选数量。"""
+    if not ids and not (source_type and source_id):
+        return 0
+    try:
+        with _milvus_client() as client:
+            _ensure_query_memory_collection(client)
+            if ids:
+                result = client.delete(collection_name=_QUERY_MEMORY_COLLECTION_NAME, pks=[str(item) for item in ids])
+                return int(result.get("delete_count", len(ids))) if isinstance(result, dict) else len(ids)
+            escaped_type = str(source_type).replace('"', '\\"')
+            escaped_id = str(source_id).replace('"', '\\"')
+            result = client.delete(
+                collection_name=_QUERY_MEMORY_COLLECTION_NAME,
+                filter=f'source_type == "{escaped_type}" and source_id == "{escaped_id}"',
+            )
+            return int(result.get("delete_count", 0)) if isinstance(result, dict) else 0
+    except Exception as e:
+        LOGGER.error(f"Milvus 删除查询经验失败: {e}")
+        return -1
+
+
+def get_query_memory_stats() -> Dict[str, Any]:
+    """返回查询经验集合统计；Milvus 不可用时返回明确的 empty 状态。"""
+    try:
+        with _milvus_client() as client:
+            _ensure_query_memory_collection(client)
+            stats = client.get_collection_stats(_QUERY_MEMORY_COLLECTION_NAME)
+            return {"collection": _QUERY_MEMORY_COLLECTION_NAME, "row_count": int(stats.get("row_count", 0)), "status": "ok", "backend": "milvus"}
+    except Exception as e:
+        LOGGER.error(f"Milvus 查询经验统计失败: {e}")
+        return {"collection": _QUERY_MEMORY_COLLECTION_NAME, "row_count": 0, "status": "empty", "backend": "milvus"}

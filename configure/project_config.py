@@ -250,6 +250,67 @@ class ProjectConfig(BaseSettings):
             "新入库文档最多延迟 TTL 秒进入文档级召回; 设为 0 则每次查询都核对"
         ),
     )
+    QUERY_MEMORY_ENABLED: bool = Field(
+        default=True,
+        description="是否启用采纳经验查询指导；关闭时直接走全库检索",
+    )
+    QUERY_MEMORY_SHADOW_MODE: bool = Field(
+        default=False,
+        description="影子模式：记录采纳经验命中但不使用文档范围限制实际检索",
+    )
+    QUERY_MEMORY_SCOPED_SEARCH_ENABLED: bool = Field(
+        default=False,
+        description="是否用采纳经验范围加权召回，同时保留全库候选参与统一重排",
+    )
+    QUERY_MEMORY_GUIDED_WEIGHT: float = Field(
+        default=1.2,
+        ge=1.0,
+        description="历史范围候选在融合阶段的 RRF 权重",
+    )
+    QUERY_MEMORY_GLOBAL_MIN_RATIO: float = Field(
+        default=0.30,
+        ge=0.0,
+        le=1.0,
+        description="候选池为全库其他文档预留的最低比例；最终由统一重排决定是否采用",
+    )
+    QUERY_MEMORY_TOP_K: int = Field(
+        default=5,
+        ge=1,
+        description="查询指导最多召回的采纳经验条数",
+    )
+    QUERY_MEMORY_MIN_SCORE: float = Field(
+        default=0.72,
+        ge=-1.0,
+        le=1.0,
+        description="查询经验余弦相似度最低阈值；低于此值不限定文档范围",
+    )
+    LEARNED_MAPPING_MIN_EVIDENCE: int = Field(
+        default=2,
+        ge=2,
+        description="程序映射进入候选状态所需的独立采纳证据数",
+    )
+    MAPPING_EVIDENCE_MIN_SCORE: float = Field(
+        default=0.72,
+        ge=-1.0,
+        le=1.0,
+        description="映射证据问题的最低语义相似度；每条证据须与组内成员及组中心达标",
+    )
+    MAPPING_EVIDENCE_MIN_CONFIDENCE: float = Field(
+        default=0.80,
+        ge=0.0,
+        le=1.0,
+        description="模型提取映射的最低自评置信度；低于此值的证据保留但不计入自动激活",
+    )
+    MAPPING_EVIDENCE_CENTROID_MIN_SCORE: float = Field(
+        default=0.90,
+        ge=-1.0,
+        le=1.0,
+        description="证据问题与所在组中心向量的最低相似度",
+    )
+    MAPPING_EXTRACTION_ENABLED: bool = Field(
+        default=True,
+        description="是否在采纳后异步提取程序映射证据",
+    )
     DOC_SUMMARY_INPUT_MAX_CHARS: int = Field(
         default=20000,
         ge=1000,
@@ -277,7 +338,7 @@ class ProjectConfig(BaseSettings):
             "检查点生效, 阈值越小取消响应等待越短"
         ),
     )
-    MAX_PARALLEL_PARSE_DOCLING: int = Field(default=2, description="子文档解析并行数（每槽位各自拥有独立解析器）")
+    MAX_PARALLEL_PARSE_DOCLING: int = Field(default=1, description="子文档解析并行数（每槽位各自拥有独立解析器）")
     CHAT_HISTORY_MAX_MESSAGES: int = Field(
         default=20,
         ge=0,
@@ -460,6 +521,10 @@ class ProjectConfig(BaseSettings):
     )
 
     # 环境工单预审
+    TICKET_REVIEW_ENABLED: bool = Field(
+        default=True,
+        description="工单预审模块总开关: False 时启动跳过 ticket_review 的数据库池与 Worker",
+    )
     TICKET_MODEL_POOL: str = "claude-sonnet-4-6;claude-opus-4-6;claude-haiku-4-5-20251001"
     TICKET_MODEL_TIMEOUT: int = 1200
     TICKET_MODEL_RETRY_COUNT: int = 2
@@ -494,6 +559,10 @@ class ProjectConfig(BaseSettings):
     TICKET_PUSH_TASK_HEARTBEAT_INTERVAL_SECONDS: int = 60
 
     # Code Server IDE
+    CODE_SERVER_IDE_ENABLED: bool = Field(
+        default=True,
+        description="Code Server IDE 模块总开关: False 时启动跳过 IDE 数据库与后台任务",
+    )
     IDE_DATABASE_HOST: str = ""
     IDE_DATABASE_PORT: int = 3306
     IDE_DATABASE_USER: str = ""

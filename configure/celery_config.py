@@ -95,6 +95,16 @@ class CeleryConfig(BaseSettings):
                     "schedule": 21600.0,
                     "options": {"queue": "default"},
                 },
+                "rag-sync-query-memory": {
+                    "task": "celery_scheduler.tasks.task_query_memory_sync.sync_pending_query_memory_task",
+                    "schedule": 60.0,
+                    "options": {"queue": "default"},
+                },
+                "rag-sweep-mapping-evidence": {
+                    "task": "celery_scheduler.tasks.task_mapping_evidence.sweep_mapping_evidence_task",
+                    "schedule": 60.0,
+                    "options": {"queue": "default"},
+                },
             },
             "worker_log_format": (
                 "[%(asctime)s][%(levelname)s] -> [%(name)s][%(filename)s]"
