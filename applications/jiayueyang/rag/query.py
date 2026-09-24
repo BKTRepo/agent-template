@@ -101,6 +101,12 @@ _CN_FIELD_CODE_RE = re.compile(
     r"(?P<code>[A-Z0-9]{1,6})",
     re.IGNORECASE,
 )
+
+
+# Milvus 的 hybrid_search 在同一连接服务上并发执行多路中文/英文/子查询时，
+# 某些版本会偶发返回 ``unsupported ID type``。保留上层多路 embedding 并行，
+# 只把实际 hybrid_search 串行化，避免一条子查询失败吞掉整道题的候选池。
+_MILVUS_HYBRID_SEARCH_LOCK = asyncio.Lock()
 _EN_FIELD_CODE_RE = re.compile(
     r"\b(?:field|de|f)\s*(?P<field>\d{1,3}(?:\.\d+)?)\b.{0,48}?"
     r"\b(?:response\s+code|reason\s+code|processing\s+code|code|value)\s*[:=]?\s*"
@@ -604,16 +610,17 @@ async def _retrieve_ranked_lists(
             vecs: List[List[float]],
             english: str = "",
     ) -> None:
-        chunks = await asyncio.to_thread(
-            hybrid_query_chunks,
-            vecs,
-            q,
-            english,
-            top_k=fusion_top_k,
-            dense_top_k=dense_top_k,
-            bm25_top_k=bm25_top_k,
-            filter_expr=filter_expr,
-        )
+        async with _MILVUS_HYBRID_SEARCH_LOCK:
+            chunks = await asyncio.to_thread(
+                hybrid_query_chunks,
+                vecs,
+                q,
+                english,
+                top_k=fusion_top_k,
+                dense_top_k=dense_top_k,
+                bm25_top_k=bm25_top_k,
+                filter_expr=filter_expr,
+            )
         if chunks:
             ranked_lists.append(chunks)
 

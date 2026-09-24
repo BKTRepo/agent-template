@@ -576,7 +576,21 @@ def hybrid_query_chunks(
             )
     except Exception as exc:
         LOGGER.error(f"Milvus 混合检索失败: {type(exc).__name__}: {exc}")
-        return []
+        # 部分 Milvus 版本在 BM25 分路无命中、而 Dense 分路有命中时，
+        # hybrid_search 会错误返回 ``unsupported ID type``。不能因此把
+        # 整个问题判定为“无召回”：退回同一查询的 Dense 结果，后续仍由
+        # RRF 外层和 rerank 统一排序。
+        try:
+            fallback = query_chunks(query_vectors, top_k=top_k)
+            for chunk in fallback:
+                chunk["source"] = "milvus_dense_fallback"
+            return fallback
+        except Exception as fallback_exc:
+            LOGGER.error(
+                f"Milvus Dense 兜底检索也失败: "
+                f"{type(fallback_exc).__name__}: {fallback_exc}"
+            )
+            return []
 
     if not results:
         return []
