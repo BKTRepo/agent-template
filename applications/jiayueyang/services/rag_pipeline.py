@@ -1580,6 +1580,7 @@ class RagPipelineService:
             return
         chunks_file = bundle_dir / "chunks.json"
         cached_chunks = None
+        chunks_changed = False
         if chunks_file.is_file():
             try:
                 chunks_dict_cached = json.loads(chunks_file.read_text(encoding="utf-8"))
@@ -1588,6 +1589,50 @@ class RagPipelineService:
                 LOGGER.warning(f"分块产物不可读, 将重新分块: {chunks_load_err}")
         if cached_chunks is not None:
             all_chunks = cached_chunks
+            # 旧任务的 chunks.json 可能生成于表格行级分块功能上线之前。
+            # 缓存命中时也补算派生表格块，避免“已有分块直接跳过”让历史文档
+            # 永远缺少 table_row。内容排重保证重复续跑不会反复追加。
+            if PROJECT_CONFIG.TABLE_ROW_CHUNKS:
+                from applications.jiayueyang.rag.table_rows import (
+                    build_code_table_chunks_from_docling_json,
+                    build_table_chunks,
+                    build_table_chunks_from_markdown,
+                )
+                derived_table_chunks: List[Dict[str, Any]] = []
+                derived_table_chunks.extend(build_table_chunks(
+                    sidecar.get("tables"), filename, markdown_text=markdown,
+                ))
+                derived_table_chunks.extend(build_table_chunks_from_markdown(
+                    markdown, sidecar.get("tables"), filename,
+                ))
+                docling_json_path = md_path.with_suffix(".json")
+                derived_table_chunks.extend(build_code_table_chunks_from_docling_json(
+                    docling_json_path, filename,
+                ))
+                known = {
+                    " ".join(str(chunk.get("content") or "").split()).casefold()
+                    for chunk in all_chunks
+                    if (chunk.get("content") or "").strip()
+                }
+                appended = 0
+                for chunk in derived_table_chunks:
+                    normalized = " ".join(str(chunk.get("content") or "").split()).casefold()
+                    if not normalized or normalized in known:
+                        continue
+                    chunk["chunk_order_index"] = len(all_chunks)
+                    all_chunks.append(chunk)
+                    known.add(normalized)
+                    appended += 1
+                if appended:
+                    chunks_changed = True
+                    chunks_dict = {f"chunk-{i:04d}": c for i, c in enumerate(all_chunks)}
+                    chunks_file.write_text(
+                        json.dumps(chunks_dict, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                    await service.add_history(
+                        f"为历史分块补充表格派生块 {appended} 个: {filename}"
+                    )
             doc["status"] = "chunking"
             doc["updated_at"] = service.now_time()
             doc["chunks_count"] = len(all_chunks)
@@ -1616,6 +1661,7 @@ class RagPipelineService:
             table_chunks: List[Dict[str, Any]] = []
             if PROJECT_CONFIG.TABLE_ROW_CHUNKS:
                 from applications.jiayueyang.rag.table_rows import (
+                    build_code_table_chunks_from_docling_json,
                     build_table_chunks,
                     build_table_chunks_from_markdown,
                 )
@@ -1629,6 +1675,11 @@ class RagPipelineService:
                     markdown, sidecar.get("tables"), filename,
                 )
                 table_chunks.extend(md_table_chunks)
+                # 路径 C: markdown/tables.json 被解析器压平成单列时，从原始
+                # Docling JSON 的单元格坐标恢复代码表行。
+                table_chunks.extend(build_code_table_chunks_from_docling_json(
+                    md_path.with_suffix(".json"), filename,
+                ))
                 for chunk in table_chunks:
                     chunk["chunk_order_index"] = len(all_chunks)
                     all_chunks.append(chunk)
@@ -1672,11 +1723,15 @@ class RagPipelineService:
             # 入库, 跳过嵌入; 产物不可读或缺向量时回退重新嵌入
             embeddings_file = bundle_dir / "embeddings.json"
             embedded_chunks = None
-            if embeddings_file.is_file():
+            if embeddings_file.is_file() and not chunks_changed:
                 try:
                     emb_data = json.loads(embeddings_file.read_text(encoding="utf-8"))
                     candidate = [emb_data[k] for k in sorted(emb_data)]
-                    if candidate and all(c.get("vector") for c in candidate):
+                    if (
+                        candidate
+                        and len(candidate) == len(all_chunks)
+                        and all(c.get("vector") for c in candidate)
+                    ):
                         embedded_chunks = candidate
                 except Exception as emb_load_err:
                     LOGGER.warning(f"向量产物不可读, 将重新嵌入: {emb_load_err}")

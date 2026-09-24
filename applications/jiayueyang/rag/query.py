@@ -38,6 +38,7 @@ from applications.jiayueyang.rag.subquery import decompose_query
 from applications.jiayueyang.rag.milvus_store import (
     get_collection_stats,
     hybrid_query_chunks,
+    query_neighbor_chunks,
     query_chunks,
 )
 from applications.jiayueyang.rag.query_guidance import (
@@ -83,6 +84,228 @@ class QueryResult:
     response_iterator: Optional[AsyncIterator[str]] = None
     raw_data: Optional[Dict[str, Any]] = None
     is_streaming: bool = False
+
+
+@dataclass(frozen=True)
+class TechnicalConstraint:
+    """从问题中确定性抽取的技术字段约束。"""
+
+    field_no: str
+    code_value: str = ""
+    concept: str = "response"
+
+
+_CN_FIELD_CODE_RE = re.compile(
+    r"(?P<field>\d{1,3}(?:\.\d+)?)\s*域.{0,36}?"
+    r"(?:返回(?:码)?|响应码|代码|取值|值|=|为)\s*"
+    r"(?P<code>[A-Z0-9]{1,6})",
+    re.IGNORECASE,
+)
+_EN_FIELD_CODE_RE = re.compile(
+    r"\b(?:field|de|f)\s*(?P<field>\d{1,3}(?:\.\d+)?)\b.{0,48}?"
+    r"\b(?:response\s+code|reason\s+code|processing\s+code|code|value)\s*[:=]?\s*"
+    r"(?P<code>[A-Z0-9]{1,6})\b",
+    re.IGNORECASE,
+)
+
+
+def _technical_concept(text: str) -> str:
+    lowered = text.casefold()
+    if "处理码" in text or "processing code" in lowered:
+        return "processing"
+    if "原因码" in text or "reason code" in lowered:
+        return "reason"
+    return "response"
+
+
+def _extract_technical_constraints(*texts: str) -> List[TechnicalConstraint]:
+    """抽取 Field/域号与代码值；处理码缺字段时按 ISO 8583 的 Field 3 展开。"""
+    combined = " ".join(text for text in texts if text)
+    concept = _technical_concept(combined)
+    found: List[TechnicalConstraint] = []
+    seen: Set[Tuple[str, str, str]] = set()
+    for pattern in (_CN_FIELD_CODE_RE, _EN_FIELD_CODE_RE):
+        for match in pattern.finditer(combined):
+            item = TechnicalConstraint(
+                field_no=match.group("field"),
+                code_value=match.group("code").upper(),
+                concept=concept,
+            )
+            identity = (item.field_no, item.code_value, item.concept)
+            if identity not in seen:
+                seen.add(identity)
+                found.append(item)
+    if not found and concept == "processing":
+        found.append(TechnicalConstraint(field_no="3", concept="processing"))
+    return found
+
+
+def _technical_retrieval_queries(
+        constraints: List[TechnicalConstraint],
+        original_query: str,
+) -> List[str]:
+    """构造不依赖 LLM 的字段精确查询分路。"""
+    labels = {
+        "processing": "Processing Code Transaction Type Code",
+        "reason": "Message Reason Code",
+        "response": "Response Code",
+    }
+    queries: List[str] = []
+    for item in constraints:
+        parts = [f"Field {item.field_no}", labels[item.concept]]
+        if item.code_value:
+            parts.append(item.code_value)
+        # 保留原问题中的业务词（例如 Balance Inquiry），但字段和代码不再依赖改写。
+        parts.append(original_query)
+        query = " ".join(parts)
+        if query not in queries:
+            queries.append(query)
+    return queries
+
+
+def _field_in_text(text: str, field_no: str) -> bool:
+    escaped = re.escape(field_no)
+    return bool(re.search(
+        rf"(?:\b(?:field|de|f)\s*{escaped}\b|\b{escaped}\s*域)",
+        text,
+        re.IGNORECASE,
+    ))
+
+
+def _code_in_text(text: str, code_value: str) -> bool:
+    if not code_value:
+        return False
+    return bool(re.search(
+        rf"(?<![A-Z0-9]){re.escape(code_value)}(?![A-Z0-9])",
+        text,
+        re.IGNORECASE,
+    ))
+
+
+def _technical_evidence_score(
+        text: str,
+        constraint: TechnicalConstraint,
+) -> int:
+    """只对可解释的字段/代码/概念共现加分，避免单独数字造成误提升。"""
+    lowered = text.casefold()
+    field_match = _field_in_text(text, constraint.field_no)
+    code_match = _code_in_text(text, constraint.code_value)
+    if constraint.concept == "processing":
+        concept_match = any(term in lowered for term in (
+            "processing code", "transaction type code", "处理码",
+        ))
+    elif constraint.concept == "reason":
+        concept_match = "reason code" in lowered or "原因码" in text
+    else:
+        concept_match = "response code" in lowered or "响应码" in text
+    table_match = "table" in lowered or "[表格" in text or "[代码表行]" in text
+    score = (4 if field_match else 0) + (5 if code_match else 0)
+    score += 2 if concept_match else 0
+    score += 1 if table_match else 0
+    # 有明确代码时必须同块/同窗口同时出现字段和代码，单独数字不算精确证据。
+    if constraint.code_value and not (field_match and code_match):
+        return 0
+    if not constraint.code_value and not (field_match and concept_match):
+        return 0
+    return score
+
+
+async def _augment_technical_candidates(
+        chunks: List[Dict[str, Any]],
+        constraints: List[TechnicalConstraint],
+) -> List[Dict[str, Any]]:
+    """为技术代码查询加入相邻上下文窗口，解决表头与代码行跨块。"""
+    if not chunks or not constraints:
+        return chunks
+    ranked_anchors: List[Tuple[int, int, Dict[str, Any]]] = []
+    for rank, chunk in enumerate(chunks):
+        content = str(chunk.get("content") or "")
+        anchor_score = 0
+        for constraint in constraints:
+            field_match = _field_in_text(content, constraint.field_no)
+            code_match = _code_in_text(content, constraint.code_value)
+            table_match = "table" in content.casefold() or "[表格" in content
+            anchor_score = max(
+                anchor_score,
+                (4 if field_match else 0) + (3 if code_match else 0) + (2 if table_match else 0),
+            )
+        if anchor_score:
+            ranked_anchors.append((anchor_score, -rank, chunk))
+    ranked_anchors.sort(key=lambda item: (-item[0], -item[1]))
+    anchors = [item[2] for item in ranked_anchors[:16]]
+    if not anchors:
+        return chunks
+    neighbors = await asyncio.to_thread(query_neighbor_chunks, anchors, 1, 16)
+    if not neighbors:
+        return chunks
+
+    by_position: Dict[Tuple[str, int], Dict[str, Any]] = {}
+    for chunk in [*chunks, *neighbors]:
+        doc_id = str(chunk.get("doc_id") or "")
+        try:
+            order = int(chunk.get("order", chunk.get("chunk_order_index")))
+        except (TypeError, ValueError):
+            continue
+        if doc_id:
+            by_position[(doc_id, order)] = chunk
+
+    existing_ids = {str(chunk.get("id") or chunk.get("chunk_id") or "") for chunk in chunks}
+    windows: List[Dict[str, Any]] = []
+    for anchor in anchors:
+        doc_id = str(anchor.get("doc_id") or "")
+        try:
+            order = int(anchor.get("order", anchor.get("chunk_order_index")))
+        except (TypeError, ValueError):
+            continue
+        parts = [
+            by_position[(doc_id, candidate_order)]
+            for candidate_order in range(max(0, order - 1), order + 2)
+            if (doc_id, candidate_order) in by_position
+        ]
+        if len(parts) < 2:
+            continue
+        combined = "\n\n".join(str(part.get("content") or "") for part in parts)
+        best_score = max(
+            (_technical_evidence_score(combined, constraint) for constraint in constraints),
+            default=0,
+        )
+        if best_score <= 0:
+            continue
+        first_order = min(int(part.get("order", order)) for part in parts)
+        last_order = max(int(part.get("order", order)) for part in parts)
+        window_id = f"{anchor.get('id') or anchor.get('chunk_id')}::context:{first_order}-{last_order}"
+        if window_id in existing_ids:
+            continue
+        existing_ids.add(window_id)
+        windows.append({
+            **anchor,
+            "id": window_id,
+            "chunk_id": window_id,
+            "content": f"[相邻分块上下文]\n{combined}",
+            "modality": "context_window",
+            "tokens": sum(int(part.get("tokens") or 0) for part in parts),
+            "_technical_evidence_score": best_score,
+        })
+    return [*chunks, *windows]
+
+
+def _prioritize_technical_evidence(
+        chunks: List[Dict[str, Any]],
+        constraints: List[TechnicalConstraint],
+) -> List[Dict[str, Any]]:
+    """在 rerank 结果内把字段与代码同时命中的证据移到前面。"""
+    if not constraints:
+        return chunks
+    decorated = []
+    for rank, chunk in enumerate(chunks):
+        content = str(chunk.get("content") or "")
+        score = max(
+            [int(chunk.get("_technical_evidence_score") or 0)]
+            + [_technical_evidence_score(content, item) for item in constraints]
+        )
+        decorated.append((score, rank, chunk))
+    decorated.sort(key=lambda item: (-item[0], item[1]))
+    return [item[2] for item in decorated]
 
 
 async def _prepare_query_guidance(resolved_query: str) -> Tuple[Dict[str, Any], str, bool]:
@@ -796,13 +1019,23 @@ async def naive_query(
         resolved_query, mapping_matches=mapping_matches,
     )
     query_for_search = bilingual_query.primary_query
+    technical_constraints = _extract_technical_constraints(
+        resolved_query,
+        bilingual_query.primary_query,
+        bilingual_query.english_query,
+    )
 
     search_top_k = query_param.chunk_top_k or PROJECT_CONFIG.CHUNK_TOP_K
 
     # 阶段 1: 子查询分解——复合问题拆为单面查询, 每面独立召回;
     # 原查询保留在检索集合中作为兜底（分解不当不丢原始召回面）
     sub_queries = await decompose_query(query_for_search)
-    queries = _merge_retrieval_queries(query_for_search, sub_queries)
+    queries = _merge_retrieval_queries(
+        query_for_search,
+        [*(sub_queries or []), *_technical_retrieval_queries(
+            technical_constraints, resolved_query,
+        )],
+    )
 
     guidance, guidance_filter, guidance_shadow_mode = await _prepare_query_guidance(
         resolved_query,
@@ -841,6 +1074,9 @@ async def naive_query(
             mapping_result=mapping_result,
         )
 
+    # 技术代码表常把表头、代码行拆到相邻分块；先补窗口，再统一进入重排。
+    chunks = await _augment_technical_candidates(chunks, technical_constraints)
+
     # 重排: 按改写后查询的相关性对分块重新打分（从候选池精选出最终检索窗口）
     if query_param.enable_rerank:
         try:
@@ -854,6 +1090,8 @@ async def naive_query(
             LOGGER.warning("重排超时 (20 秒), 使用原始分块")
         except Exception:
             LOGGER.opt(exception=True).warning("重排失败, 使用原始分块")
+
+    chunks = _prioritize_technical_evidence(chunks, technical_constraints)
 
     total_chunks_found = len(chunks)
     chunks = chunks[:PROJECT_CONFIG.RAG_CONTEXT_TOP_K]
@@ -1007,6 +1245,11 @@ async def hybrid_query(
     bilingual_query = await rewrite_query_bilingual(
         resolved_query, mapping_matches=mapping_matches,
     )
+    technical_constraints = _extract_technical_constraints(
+        resolved_query,
+        bilingual_query.primary_query,
+        bilingual_query.english_query,
+    )
 
     # 阶段 1: 混合检索（仅改写查询 → Dense + BM25 → RRF 融合）。
     # 刻意不用原文查询召回: 口语原文（如 "3域"）词项与文档词汇脱节,
@@ -1018,6 +1261,10 @@ async def hybrid_query(
     # 阶段 0c: 子查询分解——复合问题拆为单面查询, 每面独立走双通道召回;
     # 原查询保留在检索集合中作为兜底（分解不当不丢原始召回面）
     sub_queries = await decompose_query(query_for_search)
+    sub_queries = [
+        *(sub_queries or []),
+        *_technical_retrieval_queries(technical_constraints, resolved_query),
+    ]
 
     guidance, guidance_filter, guidance_shadow_mode = await _prepare_query_guidance(
         resolved_query,
@@ -1050,6 +1297,8 @@ async def hybrid_query(
             mapping_result=mapping_result,
         )
 
+    chunks = await _augment_technical_candidates(chunks, technical_constraints)
+
     # 重排: 按改写后查询的相关性对分块重新打分（从候选池精选出最终检索窗口）
     if query_param.enable_rerank:
         try:
@@ -1063,6 +1312,8 @@ async def hybrid_query(
             LOGGER.warning("重排超时 (20 秒), 使用原始分块")
         except Exception:
             LOGGER.opt(exception=True).warning("重排失败, 使用原始分块")
+
+    chunks = _prioritize_technical_evidence(chunks, technical_constraints)
 
     total_chunks_found = len(chunks)
     chunks = chunks[:PROJECT_CONFIG.RAG_CONTEXT_TOP_K]

@@ -9,7 +9,7 @@
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from configure import LOGGER, PROJECT_CONFIG
 
@@ -85,6 +85,140 @@ def _header_labels(header: List[str], width: int) -> List[str]:
 
 # GFM pipe-table 行: 以 | 开头、以 | 结尾（允许尾随空白）
 _PIPE_ROW = re.compile(r"^\|.+\|\s*$")
+_TABLE_TITLE = re.compile(r"^\s*Table\s+\d+\b", re.IGNORECASE)
+_CODE_TABLE_TITLE = re.compile(
+    r"\b(?:code|codes|valid\s+values?|identifier|reason|result|category|"
+    r"indicator|transaction\s+type|tag|value)\b",
+    re.IGNORECASE,
+)
+_FIELD_NUMBER = re.compile(r"\b(?:Field|DE)\s*(\d+(?:\.\d+)?)\b", re.IGNORECASE)
+_CODE_CELL = re.compile(r"^(?:\d{1,4}(?:\.\d+)?|[A-Z]{1,3}\d{0,3})$", re.IGNORECASE)
+
+
+def _first_provenance(item: Dict[str, Any]) -> Tuple[Optional[int], Dict[str, Any]]:
+    """返回 Docling 文本节点的页号和 bbox；缺失时使用空值。"""
+    prov = item.get("prov") or []
+    first = prov[0] if prov and isinstance(prov[0], dict) else {}
+    page_no = first.get("page_no")
+    bbox = first.get("bbox") if isinstance(first.get("bbox"), dict) else {}
+    return page_no if isinstance(page_no, int) else None, bbox
+
+
+def _nearest_section_heading(texts: List[Dict[str, Any]], index: int) -> str:
+    """查找表题之前最近的非表格章节标题，作为表格行的父级语境。"""
+    for item in reversed(texts[max(0, index - 160):index]):
+        if item.get("label") != "section_header":
+            continue
+        value = str(item.get("text") or "").strip()
+        if value and not _TABLE_TITLE.match(value):
+            return value
+    return ""
+
+
+def build_code_table_chunks_from_docling_json(
+    docling_json_path: Any,
+    filename: str = "",
+) -> List[Dict[str, Any]]:
+    """从 Docling JSON 坐标流恢复被压平成单列文本的代码表行。
+
+    某些 PDF 表格在 markdown/tables.json 中会退化为一整行文本，但 Docling
+    JSON 仍保留每个单元格的文本、横坐标和纵坐标。本函数以 ``Table N``
+    表题为边界，识别表格最左列中的短代码，并把该代码到下一代码之间的
+    单元格恢复为独立 ``table_row`` 分块。规则只依赖表格结构，不内置任何
+    Visa 字段或代码值，因此也适用于响应码、处理码、原因码和结果码表。
+    """
+    if not docling_json_path:
+        return []
+    path = Path(docling_json_path)
+    if not path.is_file():
+        return []
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    texts = raw.get("texts") if isinstance(raw, dict) else None
+    if not isinstance(texts, list):
+        return []
+
+    chunks: List[Dict[str, Any]] = []
+    seen: set = set()
+    for index, caption in enumerate(texts):
+        title = str(caption.get("text") or "").strip()
+        if caption.get("label") not in {"caption", "section_header"} \
+                or not _TABLE_TITLE.match(title) or not _CODE_TABLE_TITLE.search(title):
+            continue
+        page_no, _ = _first_provenance(caption)
+        if page_no is None:
+            continue
+
+        # 同一页、同一表题后的正文单元格。遇到下一张表、章节或页脚即停止。
+        cells: List[Dict[str, Any]] = []
+        for item in texts[index + 1:]:
+            item_page, bbox = _first_provenance(item)
+            label = item.get("label")
+            value = str(item.get("text") or "").strip()
+            if item_page != page_no:
+                break
+            if label in {"page_footer", "page_header"}:
+                break
+            if label in {"caption", "section_header"} and value:
+                break
+            if label != "text" or not value or not bbox:
+                continue
+            try:
+                left = float(bbox.get("l"))
+                top = float(bbox.get("t"))
+            except (TypeError, ValueError):
+                continue
+            cells.append({"text": value, "left": left, "top": top})
+
+        if len(cells) < 4:
+            continue
+        left_edge = min(cell["left"] for cell in cells)
+        starts = [
+            position for position, cell in enumerate(cells)
+            if cell["left"] <= left_edge + 18.0 and _CODE_CELL.fullmatch(cell["text"])
+        ]
+        # 单行误判的风险高；代码表通常至少有两行，少于两行交给普通分块。
+        if len(starts) < 2:
+            continue
+
+        parent = _nearest_section_heading(texts, index)
+        name = title if not parent or parent.casefold() in title.casefold() \
+            else f"{parent} > {title}"
+        # Field 编号可能位于表题后的表头单元格，而不在 caption 中。
+        header_text = " ".join(cell["text"] for cell in cells[:starts[0]])
+        field_match = _FIELD_NUMBER.search(f"{name} {header_text}")
+        field_no = field_match.group(1) if field_match else ""
+
+        for row_number, start in enumerate(starts, start=1):
+            end = starts[row_number] if row_number < len(starts) else len(cells)
+            row_cells = cells[start:end]
+            code = row_cells[0]["text"]
+            values = [cell["text"] for cell in row_cells[1:] if cell["text"]]
+            if not values:
+                continue
+            row_text = " | ".join(values)
+            identity = (name.casefold(), page_no, code.casefold(), row_text.casefold())
+            if identity in seen:
+                continue
+            seen.add(identity)
+            content = (
+                f"[代码表行] {name}\n"
+                f"代码: {code} | 内容: {row_text}\n"
+                f"行描述: 在「{name}」中，代码 {code} 对应 {row_text}。"
+            )
+            chunks.append({
+                "content": content,
+                "tokens": max(1, len(content) // 2),
+                "modality": "table_row",
+                "table_name": name,
+                "field_no": field_no,
+                "code_value": code,
+                "page_no": page_no,
+                "source_filename": filename,
+            })
+    return chunks
 
 
 def _parse_markdown_pipe_table(table_text: str) -> List[List[str]]:

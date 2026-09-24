@@ -393,7 +393,10 @@ def upsert_chunks(
 
     records: List[Dict[str, Any]] = []
     for i, c in enumerate(chunks):
-        chunk_id = f"{doc_id}-chunk-{i:04d}" if doc_id else f"chunk-{i:04d}"
+        order_index = int(c.get("chunk_order_index", i) or 0)
+        chunk_id = str(c.get("id") or c.get("chunk_id") or (
+            f"{doc_id}-chunk-{order_index:04d}" if doc_id else f"chunk-{order_index:04d}"
+        ))
         vec = c.get("vector", [])
         content = c.get("content", "")
         language = c.get("language") or _detect_language(content)
@@ -414,8 +417,14 @@ def upsert_chunks(
             "modality": _truncate_bytes(
                 c.get("modality", "text"), _MAX_MODALITY_BYTES
             ),
-            "chunk_order_index": c.get("chunk_order_index", i),
+            "chunk_order_index": order_index,
         })
+        # 集合启用了 dynamic field；表格结构元数据保留在记录中，供代码值
+        # 精确检索、审计和后续扩展使用。普通文本块不写这些键。
+        for key in ("table_name", "field_no", "code_value", "page_no", "source_filename"):
+            value = c.get(key)
+            if value not in (None, ""):
+                records[-1][key] = value
 
     with _milvus_client() as client:
         _ensure_collection(client)
@@ -631,6 +640,82 @@ def query_chunks_by_doc(
     except Exception as e:
         LOGGER.error(f"Milvus 按文档查询分块失败: doc_id={doc_id}, {e}")
         return []
+
+
+def query_neighbor_chunks(
+        anchors: List[Dict[str, Any]],
+        window: int = 1,
+        max_anchors: int = 16,
+) -> List[Dict[str, Any]]:
+    """读取候选分块在同一文档中的前后邻块。
+
+    表格标题、表头和数据行经常跨分块；邻块只作为 rerank 的补充候选，
+    不直接改变最终答案。按 ``doc_id + chunk_order_index`` 精确查询，避免
+    对全库执行额外向量召回。
+    """
+    if window < 1 or not anchors:
+        return []
+    grouped: Dict[str, set] = {}
+    for chunk in anchors[:max(1, max_anchors)]:
+        doc_id = str(chunk.get("doc_id") or "").strip()
+        try:
+            order = int(chunk.get("order", chunk.get("chunk_order_index")))
+        except (TypeError, ValueError):
+            continue
+        if not doc_id:
+            continue
+        orders = grouped.setdefault(doc_id, set())
+        for candidate_order in range(max(0, order - window), order + window + 1):
+            orders.add(candidate_order)
+    if not grouped:
+        return []
+
+    output_fields = [
+        "id", "content", "file_path", "file_name", "doc_id", "tokens",
+        "modality", "chunk_order_index", "created_at", "language",
+        "table_name", "field_no", "code_value", "page_no",
+    ]
+    neighbors: List[Dict[str, Any]] = []
+    try:
+        with _milvus_client() as client:
+            _ensure_collection(client)
+            for doc_id, orders in grouped.items():
+                escaped_doc_id = doc_id.replace("\\", "\\\\").replace('"', '\\"')
+                order_values = ",".join(str(value) for value in sorted(orders))
+                rows = client.query(
+                    collection_name=_COLLECTION_NAME,
+                    filter=(
+                        f'doc_id == "{escaped_doc_id}" and '
+                        f'chunk_order_index in [{order_values}]'
+                    ),
+                    output_fields=output_fields,
+                    limit=max(1, len(orders)),
+                )
+                for row in rows:
+                    chunk_id = _normalize_primary_key(row.get("id"))
+                    neighbors.append({
+                        "id": chunk_id,
+                        "chunk_id": chunk_id,
+                        "content": row.get("content", ""),
+                        "file_path": row.get("file_path", "unknown_source"),
+                        "file_name": row.get("file_name", ""),
+                        "doc_id": row.get("doc_id", ""),
+                        "tokens": row.get("tokens", 0),
+                        "modality": row.get("modality", "text"),
+                        "order": row.get("chunk_order_index", 0),
+                        "distance": None,
+                        "created_at": row.get("created_at"),
+                        "language": row.get("language", "mixed"),
+                        "table_name": row.get("table_name", ""),
+                        "field_no": row.get("field_no", ""),
+                        "code_value": row.get("code_value", ""),
+                        "page_no": row.get("page_no"),
+                    })
+    except Exception as exc:
+        LOGGER.warning(f"Milvus 相邻分块查询失败: {type(exc).__name__}: {exc}")
+        return []
+    neighbors.sort(key=lambda item: (str(item.get("doc_id") or ""), int(item.get("order") or 0)))
+    return neighbors
 
 
 def delete_by_doc_id(doc_id: str) -> int:
