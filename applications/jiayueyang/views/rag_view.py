@@ -496,9 +496,17 @@ def _build_retrieval_detail(raw_data: Optional[Dict[str, Any]]) -> Optional[Dict
         "rewritten_query": meta.get("rewritten_query") or None,
         "english_query": meta.get("english_query", ""),
         "sub_queries": meta.get("sub_queries") or [],
+        "subquery_status": meta.get("subquery_status", "single"),
+        "subquery_method": meta.get("subquery_method", "none"),
+        "subquery_failure_reason": meta.get("subquery_failure_reason"),
+        "subquery_retry_count": meta.get("subquery_retry_count", 0),
+        "subquery_coverage": meta.get("subquery_coverage") or {},
+        "quota_backfill_count": meta.get("quota_backfill_count", 0),
         "query_mode": meta.get("query_mode", "naive"),
         "matched_mapping_ids": meta.get("matched_mapping_ids") or [],
         "matched_mapping_source": meta.get("matched_mapping_source") or [],
+        "mapping_field_match_types": meta.get("mapping_field_match_types") or [],
+        "mapping_field_keys": meta.get("mapping_field_keys") or [],
         "mapping_status": meta.get("mapping_status", "unmatched"),
         "mapping_conflicts": meta.get("mapping_conflicts") or [],
         "retrieval_route": meta.get("retrieval_route"),
@@ -509,6 +517,10 @@ def _build_retrieval_detail(raw_data: Optional[Dict[str, Any]]) -> Optional[Dict
         "guidance_shadow_mode": bool(meta.get("guidance_shadow_mode", False)),
         "scoped_search_enabled": bool(meta.get("scoped_search_enabled", False)),
         "fallback_reason": meta.get("fallback_reason"),
+        "answer_truncated": bool(meta.get("answer_truncated", False)),
+        "answer_retry_count": meta.get("answer_retry_count", 0),
+        "answer_finish_reason": meta.get("answer_finish_reason", "stop"),
+        "answer_fallback": meta.get("answer_fallback"),
         "total_found": meta.get("total_chunks_found", 0),
         "final_count": meta.get("final_chunks_count", 0),
         "chunks": [
@@ -534,6 +546,11 @@ def _build_retrieval_detail(raw_data: Optional[Dict[str, Any]]) -> Optional[Dict
                 "file_name": c.get("file_name", ""),
                 "file_sha256": c.get("file_sha256", ""),
                 "reference_id": c.get("reference_id", ""),
+                "quota_backfill": bool(c.get("quota_backfill", False)),
+                "backfill_query_id": c.get("backfill_query_id"),
+                "backfill_reason": c.get("backfill_reason"),
+                "passed_global_threshold": c.get("passed_global_threshold"),
+                "passed_backfill_guard": c.get("passed_backfill_guard"),
                 "order": c.get("order", c.get("chunk_order_index", 0)),
                 "chunk_order_index": c.get("chunk_order_index", c.get("order", 0)),
             }
@@ -679,6 +696,16 @@ async def _run_stream_job(
             job.publish(_sse("error", {"type": "error", "content": "生成中断, 请重试"}))
             return
 
+        # 流式接口无法像非流式那样重生成，但保留供应商 finish_reason，
+        # 让前端和检索详情明确知道答案是正常结束还是达到长度上限。
+        stream_status = getattr(result.response_iterator, "finish_reason", None)
+        stream_truncated = stream_status == "length"
+        if retrieval is not None:
+            retrieval["answer_truncated"] = stream_truncated
+            retrieval["answer_finish_reason"] = stream_status or "stop"
+            retrieval["answer_retry_count"] = 0
+            retrieval["answer_fallback"] = "stream_partial" if stream_truncated else None
+
         # 4. 终态落盘 + 完成事件（用户抢在收尾前点了"停止"时不覆盖 interrupted）
         #    思考耗时随消息持久化; 检索详情写入独立表, 历史回看均可见
         if (
@@ -691,7 +718,12 @@ async def _run_stream_job(
                 await save_retrieval_detail(conv_id, assistant_index, retrieval)
         # done 事件附带思考耗时: 刷新/切换后重连的客户端靠 replay 重建消息,
         # 拿不到本地测量值, 以服务端落盘的 thinking_ms 为准展示
-        job.publish(_sse("done", {"type": "done", "thinking_ms": thinking_ms}))
+        job.publish(_sse("done", {
+            "type": "done",
+            "thinking_ms": thinking_ms,
+            "truncated": stream_truncated,
+            "finish_reason": stream_status or "stop",
+        }))
     finally:
         job.close()
         # 本轮终态后后台记忆维护（轮次入 L4 向量库 + 预折叠摘要, 不阻塞响应）

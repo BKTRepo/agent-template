@@ -1,0 +1,44 @@
+[
+  {
+    "id": "Q001",
+    "question": "VISA 39域返回11是什么意思",
+    "expect_in_kb": true,
+    "organization": "VISA",
+    "question_type": "field_code",
+    "expected_points": ["Field 39", "11", "Approved (V.I.P.)"],
+    "forbidden_points": ["将11解释为普通拒绝码"]
+  },
+  {
+    "id": "Q002",
+    "question": "VISA追加授权的触发条件和关键匹配机制是什么？",
+    "expect_in_kb": true,
+    "organization": "VISA",
+    "question_type": "compound_business_rule",
+    "expected_points": ["原始授权", "Field 62.1", "Field 62.2", "Field 63.3", "3900"]
+  },
+  {
+    "id": "Q003",
+    "question": "万事达预授权最长有效期是多少？",
+    "expect_in_kb": false,
+    "organization": "Mastercard",
+    "question_type": "knowledge_gap",
+    "expected_behavior": "明确说明当前知识库未涵盖",
+    "forbidden_behavior": "根据 VISA 资料推断 Mastercard 规则"
+  },
+  {
+    "id": "Q004",
+    "question": "余额查询的处理码和后续处理逻辑是什么？",
+    "expect_in_kb": true,
+    "organization": "VISA",
+    "question_type": "field_code_and_flow",
+    "expected_points": ["余额查询", "Field 3", "Processing Code"]
+  },
+  {
+    "id": "Q005",
+    "question": "Field 38 缺失时 VisaNet 为什么会返回 0293？",
+    "expect_in_kb": true,
+    "organization": "VISA",
+    "question_type": "reject_code",
+    "expected_points": ["Field 38", "0293", "批准响应"]
+  }
+]

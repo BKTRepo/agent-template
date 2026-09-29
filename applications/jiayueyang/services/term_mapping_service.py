@@ -8,7 +8,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+import re
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from configure import LOGGER
 
@@ -32,6 +33,8 @@ class MappingMatch:
     matched_value: str
     matched_field: str
     match_type: str
+    field_match_type: Optional[str] = None
+    field_keys: Optional[List[str]] = None
     status: str = "determined"
 
     def to_dict(self) -> Dict[str, Any]:
@@ -45,11 +48,33 @@ class MappingMatch:
             "matched_value": self.matched_value,
             "matched_field": self.matched_field,
             "match_type": self.match_type,
+            "field_match_type": self.field_match_type,
+            "field_keys": list(self.field_keys or []),
             "status": self.status,
         }
 
 
 MappingCandidate = Tuple[MappingMatch, int, int, int]
+
+_FIELD_RE = re.compile(r"\b(?:field|de|f)\s*(\d{1,3}(?:\.\d+)?)\b|\b(\d{1,3}(?:\.\d+)?)\s*域", re.IGNORECASE)
+
+
+def extract_field_variants(text: str) -> Set[str]:
+    """查询侧统一 Field/DE/F/中文“域”写法；不修改数据库规范化值。"""
+    values: Set[str] = set()
+    for match in _FIELD_RE.finditer(text or ""):
+        value = (match.group(1) or match.group(2) or "").strip()
+        if value:
+            values.add(value)
+    return values
+
+
+def _is_parent_field(value: str) -> bool:
+    return "." not in value
+
+
+def _field_expansion_requested(query: str) -> bool:
+    return bool(re.search(r"有哪些?子域|包含哪些?子字段|子域|子字段", query or "", re.IGNORECASE))
 
 
 class TermMappingService:
@@ -100,12 +125,27 @@ class TermMappingService:
         requested_scope: Optional[str],
     ) -> List[MappingCandidate]:
         normalized_query = normalize_term(query)
+        query_fields = extract_field_variants(query)
+        expand_children = _field_expansion_requested(query)
         candidates: List[MappingCandidate] = []
         if not normalized_query:
             return candidates
 
         for row in rows:
             row_terms = self._row_terms(row)
+            row_fields = extract_field_variants(" ".join(item[1] for item in row_terms))
+            field_match_type: Optional[str] = None
+            if query_fields and row_fields:
+                exact_fields = query_fields & row_fields
+                if exact_fields:
+                    field_match_type = "exact"
+                elif expand_children and any(_is_parent_field(qf) and rf.startswith(qf + ".") for qf in query_fields for rf in row_fields):
+                    field_match_type = "parent_expansion"
+                elif any(_is_parent_field(rf) and any(qf.startswith(rf + ".") for qf in query_fields) for rf in row_fields):
+                    # 子字段查询暂时保留父字段候选，resolve() 会在没有精确子字段时才放行。
+                    field_match_type = "parent_fallback"
+                else:
+                    continue
             # 最长词优先，避免 “auth” 抢在 “incremental auth” 前面。
             row_terms.sort(key=lambda item: len(item[0]), reverse=True)
             selected = next(
@@ -127,6 +167,8 @@ class TermMappingService:
                 matched_value=matched_value,
                 matched_field=matched_field,
                 match_type="normalized_exact",
+                field_match_type=field_match_type,
+                field_keys=sorted(row_fields),
             )
             candidates.append((match, start, start + len(normalized_value), rank))
         return candidates
@@ -179,14 +221,20 @@ class TermMappingService:
             return {"status": "unmatched", "matches": [], "conflicts": []}
         try:
             source_rows = await RagTermMappingSource.filter(status=self._SOURCE_STATUS).all()
+            source_candidates = self._candidate_rows(query, source_rows, "source_mapping", scope)
+            learned_rows = await RagTermMappingLearned.filter(status=self._LEARNED_STATUS).all()
+            learned_candidates = self._candidate_rows(query, learned_rows, "learned_mapping", scope)
+            all_candidates = source_candidates + learned_candidates
+            has_exact_field = any(item[0].field_match_type in ("exact", "parent_expansion") for item in all_candidates)
+            if has_exact_field:
+                source_candidates = [item for item in source_candidates if item[0].field_match_type != "parent_fallback"]
+                learned_candidates = [item for item in learned_candidates if item[0].field_match_type != "parent_fallback"]
             source_matches, source_conflicts, occupied = self._select_candidates(
-                self._candidate_rows(query, source_rows, "source_mapping", scope),
+                source_candidates,
                 "source_mapping", [],
             )
-
-            learned_rows = await RagTermMappingLearned.filter(status=self._LEARNED_STATUS).all()
             learned_matches, learned_conflicts, _ = self._select_candidates(
-                self._candidate_rows(query, learned_rows, "learned_mapping", scope),
+                learned_candidates,
                 "learned_mapping", occupied,
             )
             matches = source_matches + learned_matches

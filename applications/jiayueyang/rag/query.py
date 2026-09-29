@@ -20,12 +20,12 @@ import math
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional, Set, Tuple, Union
 
 from configure import LOGGER, PROJECT_CONFIG, RAG_PROMPTS
 
 from applications.jiayueyang.rag.embedding import embed_texts
-from applications.jiayueyang.rag.llm import chat_completion
+from applications.jiayueyang.rag.llm import LLMTruncatedError, chat_completion
 from applications.jiayueyang.rag.rerank import rerank_chunks
 from applications.jiayueyang.rag.doc_recall import recall_doc_chunks
 from applications.jiayueyang.rag.memory import estimate_tokens, history_token_count
@@ -34,7 +34,7 @@ from applications.jiayueyang.rag.query_rewriter import (
     resolve_query_with_history,
     rewrite_query_bilingual,
 )
-from applications.jiayueyang.rag.subquery import decompose_query
+from applications.jiayueyang.rag.subquery import DecomposeResult, decompose_query
 from applications.jiayueyang.rag.milvus_store import (
     get_collection_stats,
     hybrid_query_chunks,
@@ -93,6 +93,16 @@ class TechnicalConstraint:
     field_no: str
     code_value: str = ""
     concept: str = "response"
+
+
+def _coerce_decompose_result(value: Any) -> DecomposeResult:
+    """兼容旧测试/插件返回 ``list[str]`` 的分解实现。"""
+    if isinstance(value, DecomposeResult):
+        return value
+    if isinstance(value, (list, tuple)):
+        items = [str(item).strip() for item in value if str(item).strip()]
+        return DecomposeResult(items, "compound" if items else "single", "legacy")
+    return DecomposeResult()
 
 
 _CN_FIELD_CODE_RE = re.compile(
@@ -609,6 +619,7 @@ async def _retrieve_ranked_lists(
             q: str,
             vecs: List[List[float]],
             english: str = "",
+            retrieval_query: str = "",
     ) -> None:
         async with _MILVUS_HYBRID_SEARCH_LOCK:
             chunks = await asyncio.to_thread(
@@ -622,7 +633,10 @@ async def _retrieve_ranked_lists(
                 filter_expr=filter_expr,
             )
         if chunks:
-            ranked_lists.append(chunks)
+            ranked_lists.append([
+                {**chunk, "_retrieval_query": retrieval_query or q}
+                for chunk in chunks
+            ])
 
     async def _embed_and_hybrid(q: str) -> None:
         vecs = await embed_texts([q], quick=True)
@@ -631,10 +645,13 @@ async def _retrieve_ranked_lists(
     async def _doc_recall_and_collect() -> None:
         chunks = await recall_doc_chunks(main_vecs)
         if chunks:
-            ranked_lists.append(chunks)
+            ranked_lists.append([
+                {**chunk, "_retrieval_query": "__doc_recall__"}
+                for chunk in chunks
+            ])
 
     tasks: List[asyncio.Task[None]] = [
-        asyncio.create_task(_hybrid_and_collect(queries[0], main_vecs, english_query)),
+        asyncio.create_task(_hybrid_and_collect(queries[0], main_vecs, english_query, queries[0])),
     ]
     for q in queries[1:]:
         tasks.append(asyncio.create_task(_embed_and_hybrid(q)))
@@ -658,6 +675,104 @@ def _merge_retrieval_queries(main_query: str, sub_queries: List[str]) -> List[st
     return queries
 
 
+def _subquery_terms(text: str) -> Set[str]:
+    terms = {item.casefold() for item in re.findall(r"[A-Za-z][A-Za-z0-9_.-]{1,}|\d+(?:\.\d+)?", text or "")}
+    terms.update(item for item in re.findall(r"[\u4e00-\u9fff]{2,}", text or ""))
+    return terms
+
+
+def _candidate_identity(chunk: Dict[str, Any]) -> str:
+    return str(chunk.get("id") or chunk.get("reference_id") or chunk.get("content", "")[:80])
+
+
+def _subquery_covered(subquery: str, chunks: List[Dict[str, Any]]) -> bool:
+    constraints = _extract_technical_constraints(subquery)
+    for chunk in chunks:
+        content = chunk.get("content", "") or ""
+        if constraints and any(
+            _field_in_text(content, item.field_no)
+            and (not item.code_value or _code_in_text(content, item.code_value))
+            for item in constraints
+        ):
+            return True
+        terms = _subquery_terms(subquery)
+        if terms and len(terms & _subquery_terms(content)) >= max(1, min(2, len(terms))):
+            return True
+    return False
+
+
+def _backfill_subquery_candidates(
+        chunks: List[Dict[str, Any]],
+        candidate_pool: List[Dict[str, Any]],
+        sub_queries: List[str],
+        max_total: int,
+        top_k: int,
+        technical_constraints: Optional[List[TechnicalConstraint]] = None,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """为未覆盖子问题有限回填候选，且不绕过独立安全门槛。"""
+    coverage = {f"q{i + 1}": _subquery_covered(q, chunks) for i, q in enumerate(sub_queries)}
+    added: List[Dict[str, Any]] = []
+    if not PROJECT_CONFIG.SUBQUERY_QUOTA_BACKFILL_ENABLED or not sub_queries:
+        return chunks, {"coverage": coverage, "count": 0}
+    identities = {_candidate_identity(item) for item in chunks}
+    for index, subquery in enumerate(sub_queries):
+        query_id = f"q{index + 1}"
+        if coverage[query_id] or len(added) >= min(max_total, PROJECT_CONFIG.SUBQUERY_BACKFILL_MAX_TOTAL):
+            continue
+        candidates = [
+            item for item in candidate_pool
+            if _candidate_identity(item) not in identities
+            and (item.get("_retrieval_query") == subquery or _subquery_terms(subquery) & _subquery_terms(item.get("content", "")))
+        ]
+        if not candidates:
+            continue
+        candidates.sort(key=lambda item: float(item.get("rerank_score", item.get("score", item.get("_rrf_score", 0))) or 0), reverse=True)
+        selected = candidates[0]
+        score = float(selected.get("rerank_score", selected.get("score", selected.get("_rrf_score", 0))) or 0)
+        constraints = _extract_technical_constraints(subquery)
+        content = selected.get("content", "") or ""
+        direct_anchor = any(
+            _field_in_text(content, item.field_no)
+            and (not item.code_value or _code_in_text(content, item.code_value))
+            for item in constraints
+        )
+        overlap = len(_subquery_terms(subquery) & _subquery_terms(content))
+        if PROJECT_CONFIG.SUBQUERY_BACKFILL_REQUIRE_ANCHOR and not (direct_anchor or overlap >= 2):
+            continue
+        if not (direct_anchor or score >= PROJECT_CONFIG.SUBQUERY_BACKFILL_MIN_SCORE):
+            continue
+        clone = dict(selected)
+        clone.update({
+            "quota_backfill": True,
+            "backfill_query_id": query_id,
+            "backfill_reason": "subquery_not_covered",
+            "passed_global_threshold": False,
+            "passed_backfill_guard": True,
+        })
+        added.append(clone)
+        identities.add(_candidate_identity(clone))
+        coverage[query_id] = True
+    # 正常重排结果优先；窗口已满时只替换末尾普通块，绝不挤掉精确字段/代码块。
+    result = list(chunks)
+    for item in added:
+        if len(result) < top_k:
+            result.append(item)
+            continue
+        replace_at = next(
+            (
+                i for i in range(len(result) - 1, -1, -1)
+                if not any(
+                    _technical_evidence_score(result[i].get("content", ""), constraint) > 0
+                    for constraint in (technical_constraints or [])
+                )
+            ),
+            None,
+        )
+        if replace_at is not None:
+            result[replace_at] = item
+    return result, {"coverage": coverage, "count": len(added)}
+
+
 async def _get_hybrid_context(
         query: BilingualQuery,
         merge_top_k: int,
@@ -666,6 +781,7 @@ async def _get_hybrid_context(
         bm25_top_k: Optional[int] = None,
         sub_queries: Optional[List[str]] = None,
         filter_expr: str = "",
+        candidate_pool: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """混合检索: 多查询 × 双通道（Dense + BM25）+ 文档级召回 → RRF 融合。
 
@@ -696,6 +812,10 @@ async def _get_hybrid_context(
     # 至少有一路命中
     if not ranked_lists:
         return []
+
+    if candidate_pool is not None:
+        per_query_top_k = int(getattr(PROJECT_CONFIG, "SUBQUERY_CANDIDATE_TOP_K", 3))
+        candidate_pool.extend(item for ranked in ranked_lists for item in ranked[:per_query_top_k])
 
     # RRF 融合全部候选列表（dense/bm25/定向注入一视同仁）
     return _rrf_merge(ranked_lists, merge_top_k)
@@ -935,6 +1055,95 @@ def _build_llm_context(
     )
 
 
+_CONCISE_RETRY_INSTRUCTION = """
+---精简重生成约束---
+这是同一批检索证据的精简重生成。不得重新检索、补充资料之外的判断或引入新事实。
+先给结论，再按用户问题的要点分条；只保留关键字段、代码、条件和处理规则，不重复背景。
+回答控制在 {max_chars} 字以内。资料不能直接支持的要点，明确写“当前资料未充分涵盖”。
+"""
+
+
+def _evidence_completeness_instruction(
+        sub_queries: List[str],
+        coverage: Dict[str, Any],
+) -> str:
+    if not sub_queries:
+        return ""
+    uncovered = [f"q{i + 1}" for i in range(len(sub_queries)) if not coverage.get(f"q{i + 1}", False)]
+    return (
+        "\n\n---证据覆盖约束---\n"
+        "复合问题的每个子问题必须分别核对证据；不要用一个子问题的资料推断另一个。\n"
+        + (f"未被最终证据充分覆盖的子问题：{', '.join(uncovered)}。这些要点请明确说明‘当前资料未充分涵盖’，不要猜测。\n" if uncovered else "所有子问题均有候选证据，但仍只能引用资料直接支持的内容。\n")
+    )
+
+
+async def _generate_answer_reusing_evidence(
+        query: str,
+        query_param: QueryParam,
+        system_prompt: str,
+        raw_data: Dict[str, Any],
+) -> Union[str, AsyncIterator[str]]:
+    """生成答案；截断时仅用同一 system/context 做一次精简重生成。"""
+    metadata = raw_data.setdefault("metadata", {})
+    metadata.setdefault("answer_truncated", False)
+    metadata.setdefault("answer_retry_count", 0)
+    metadata.setdefault("answer_finish_reason", "stop")
+    metadata.setdefault("answer_fallback", None)
+    if query_param.stream:
+        return await chat_completion(
+            messages=query,
+            system_prompt=system_prompt,
+            history_messages=query_param.conversation_history,
+            conversation_summary=query_param.conversation_summary,
+            conversation_recall=query_param.conversation_recall,
+            stream=True,
+            enable_cot=query_param.enable_cot,
+            temperature=query_param.temperature,
+            model=query_param.model,
+        )
+    try:
+        return await chat_completion(
+            messages=query,
+            system_prompt=system_prompt,
+            history_messages=query_param.conversation_history,
+            conversation_summary=query_param.conversation_summary,
+            conversation_recall=query_param.conversation_recall,
+            stream=False,
+            enable_cot=query_param.enable_cot,
+            temperature=query_param.temperature,
+            model=query_param.model,
+        )
+    except LLMTruncatedError as first_error:
+        metadata["answer_truncated"] = True
+        metadata["answer_finish_reason"] = first_error.finish_reason
+        metadata["answer_retry_count"] = 1
+        if not PROJECT_CONFIG.ANSWER_TRUNCATION_RETRY_ENABLED:
+            metadata["answer_fallback"] = "partial"
+            return first_error.partial if PROJECT_CONFIG.ANSWER_PARTIAL_FALLBACK_ENABLED else ""
+        concise_prompt = system_prompt + _CONCISE_RETRY_INSTRUCTION.format(
+            max_chars=PROJECT_CONFIG.ANSWER_CONCISE_RETRY_MAX_CHARS,
+        )
+        try:
+            second = await chat_completion(
+                messages=query,
+                system_prompt=concise_prompt,
+                history_messages=query_param.conversation_history,
+                conversation_summary=query_param.conversation_summary,
+                conversation_recall=query_param.conversation_recall,
+                stream=False,
+                enable_cot=query_param.enable_cot,
+                temperature=query_param.temperature,
+                model=query_param.model,
+            )
+            metadata["answer_fallback"] = "concise_retry"
+            metadata["answer_finish_reason"] = "stop"
+            return second
+        except LLMTruncatedError as second_error:
+            metadata["answer_finish_reason"] = second_error.finish_reason
+            metadata["answer_fallback"] = "partial"
+            return second_error.partial or first_error.partial if PROJECT_CONFIG.ANSWER_PARTIAL_FALLBACK_ENABLED else ""
+
+
 # ==================== 检索为空兜底 ====================
 
 
@@ -975,6 +1184,8 @@ async def _no_context_fallback(
             "sub_queries": [],
             "matched_mapping_ids": [item.get("mapping_id") for item in mapping_matches],
             "matched_mapping_source": [item.get("mapping_source") for item in mapping_matches],
+            "mapping_field_match_types": [item.get("field_match_type") for item in mapping_matches],
+            "mapping_field_keys": [item.get("field_keys") or [] for item in mapping_matches],
             "mapping_status": mapping_result.get("status", "unmatched"),
             "mapping_conflicts": mapping_result.get("conflicts") or [],
             "retrieval_route": f"{query_mode}:fallback",
@@ -1036,7 +1247,8 @@ async def naive_query(
 
     # 阶段 1: 子查询分解——复合问题拆为单面查询, 每面独立召回;
     # 原查询保留在检索集合中作为兜底（分解不当不丢原始召回面）
-    sub_queries = await decompose_query(query_for_search)
+    decompose_result = _coerce_decompose_result(await decompose_query(query_for_search))
+    sub_queries = decompose_result.sub_queries
     queries = _merge_retrieval_queries(
         query_for_search,
         [*(sub_queries or []), *_technical_retrieval_queries(
@@ -1050,6 +1262,7 @@ async def naive_query(
 
     # 阶段 2: 历史范围与全库并行召回。两路各自融合后组成同一候选池，
     # 旧文档获得适度权重，新问题涉及的其他文档仍能进入同一次重排。
+    retrieval_side_candidates: List[Dict[str, Any]] = []
     async def retrieve_candidates(filter_expr: str) -> List[Dict[str, Any]]:
         ranked_lists = await _retrieve_ranked_lists(
             queries,
@@ -1062,7 +1275,14 @@ async def naive_query(
         )
         if not ranked_lists:
             return []
-        return ranked_lists[0] if len(ranked_lists) == 1 else _rrf_merge(ranked_lists, search_top_k)
+        combined = ranked_lists[0] if len(ranked_lists) == 1 else _rrf_merge(ranked_lists, search_top_k)
+        # 在全局 RRF/重排之前保留每路 top-N，供未覆盖子问题做安全回填。
+        per_query_top_k = int(getattr(PROJECT_CONFIG, "SUBQUERY_CANDIDATE_TOP_K", 3))
+        retrieval_side_candidates.extend(
+            item for ranked in ranked_lists for item in ranked[:per_query_top_k]
+        )
+        retrieval_side_candidates.extend(combined[:per_query_top_k])
+        return combined
 
     chunks, used_guidance, retrieval_fallback, guided_count, global_count = (
         await _retrieve_with_guidance(
@@ -1102,6 +1322,14 @@ async def naive_query(
 
     total_chunks_found = len(chunks)
     chunks = chunks[:PROJECT_CONFIG.RAG_CONTEXT_TOP_K]
+    chunks, backfill_info = _backfill_subquery_candidates(
+        chunks,
+        retrieval_side_candidates,
+        sub_queries,
+        max_total=PROJECT_CONFIG.SUBQUERY_BACKFILL_MAX_TOTAL,
+        top_k=PROJECT_CONFIG.RAG_CONTEXT_TOP_K,
+        technical_constraints=technical_constraints,
+    )
 
     # 计算动态 token 预算（历史窗口 + 滚动摘要计入预算）
     available_tokens = _compute_token_budget(
@@ -1154,8 +1382,16 @@ async def naive_query(
             ),
             "english_query": bilingual_query.english_query,
             "sub_queries": sub_queries or None,
+            "subquery_status": decompose_result.status,
+            "subquery_method": decompose_result.method,
+            "subquery_failure_reason": decompose_result.failure_reason,
+            "subquery_retry_count": decompose_result.retry_count,
+            "subquery_coverage": backfill_info["coverage"],
+            "quota_backfill_count": backfill_info["count"],
             "matched_mapping_ids": [item.get("mapping_id") for item in mapping_matches],
             "matched_mapping_source": [item.get("mapping_source") for item in mapping_matches],
+            "mapping_field_match_types": [item.get("field_match_type") for item in mapping_matches],
+            "mapping_field_keys": [item.get("field_keys") or [] for item in mapping_matches],
             "mapping_status": mapping_result.get("status", "unmatched"),
             "mapping_conflicts": mapping_result.get("conflicts") or [],
             "retrieval_route": (
@@ -1195,23 +1431,14 @@ async def naive_query(
         user_prompt=user_prompt_str,
         content_data=context_content,
     )
+    sys_prompt += _evidence_completeness_instruction(sub_queries, backfill_info["coverage"])
 
     if query_param.only_need_prompt:
         prompt_content = f"{sys_prompt}\n\n---User Query---\n{query}"
         return QueryResult(content=prompt_content, raw_data=raw_data)
 
-    # 调用 LLM
-    response = await chat_completion(
-        messages=query,
-        system_prompt=sys_prompt,
-        history_messages=query_param.conversation_history,
-        conversation_summary=query_param.conversation_summary,
-        conversation_recall=query_param.conversation_recall,
-        stream=query_param.stream,
-        enable_cot=query_param.enable_cot,
-        temperature=query_param.temperature,
-        model=query_param.model,
-    )
+    # 调用 LLM；若被截断，复用完全相同的最终证据精简重生成一次。
+    response = await _generate_answer_reusing_evidence(query, query_param, sys_prompt, raw_data)
 
     if isinstance(response, str):
         return QueryResult(content=response, raw_data=raw_data)
@@ -1267,7 +1494,8 @@ async def hybrid_query(
 
     # 阶段 0c: 子查询分解——复合问题拆为单面查询, 每面独立走双通道召回;
     # 原查询保留在检索集合中作为兜底（分解不当不丢原始召回面）
-    sub_queries = await decompose_query(query_for_search)
+    decompose_result = _coerce_decompose_result(await decompose_query(query_for_search))
+    sub_queries = decompose_result.sub_queries
     sub_queries = [
         *(sub_queries or []),
         *_technical_retrieval_queries(technical_constraints, resolved_query),
@@ -1277,15 +1505,19 @@ async def hybrid_query(
         resolved_query,
     )
 
+    retrieval_side_candidates: List[Dict[str, Any]] = []
     async def retrieve_candidates(filter_expr: str) -> List[Dict[str, Any]]:
-        return await _get_hybrid_context(
+        result = await _get_hybrid_context(
             bilingual_query,
             merge_top_k=merge_top_k,
             dense_top_k=query_param.dense_top_k,
             bm25_top_k=query_param.bm25_top_k,
             sub_queries=sub_queries,
             filter_expr=filter_expr,
+            candidate_pool=retrieval_side_candidates,
         )
+        retrieval_side_candidates.extend(result)
+        return result
 
     chunks, used_guidance, retrieval_fallback, guided_count, global_count = (
         await _retrieve_with_guidance(
@@ -1324,6 +1556,14 @@ async def hybrid_query(
 
     total_chunks_found = len(chunks)
     chunks = chunks[:PROJECT_CONFIG.RAG_CONTEXT_TOP_K]
+    chunks, backfill_info = _backfill_subquery_candidates(
+        chunks,
+        retrieval_side_candidates,
+        sub_queries,
+        max_total=PROJECT_CONFIG.SUBQUERY_BACKFILL_MAX_TOTAL,
+        top_k=PROJECT_CONFIG.RAG_CONTEXT_TOP_K,
+        technical_constraints=technical_constraints,
+    )
 
     # 计算动态 token 预算 (用户可见的提示词使用原始查询; 历史窗口 + 滚动摘要计入预算)
     available_tokens = _compute_token_budget(
@@ -1376,6 +1616,12 @@ async def hybrid_query(
             ),
             "english_query": bilingual_query.english_query,
             "sub_queries": sub_queries or None,
+            "subquery_status": decompose_result.status,
+            "subquery_method": decompose_result.method,
+            "subquery_failure_reason": decompose_result.failure_reason,
+            "subquery_retry_count": decompose_result.retry_count,
+            "subquery_coverage": backfill_info["coverage"],
+            "quota_backfill_count": backfill_info["count"],
             "matched_mapping_ids": [item.get("mapping_id") for item in mapping_matches],
             "matched_mapping_source": [item.get("mapping_source") for item in mapping_matches],
             "mapping_status": mapping_result.get("status", "unmatched"),
@@ -1417,23 +1663,14 @@ async def hybrid_query(
         user_prompt=user_prompt_str,
         content_data=context_content,
     )
+    sys_prompt += _evidence_completeness_instruction(sub_queries, backfill_info["coverage"])
 
     if query_param.only_need_prompt:
         prompt_content = f"{sys_prompt}\n\n---User Query---\n{query}"
         return QueryResult(content=prompt_content, raw_data=raw_data)
 
-    # 调用 LLM
-    response = await chat_completion(
-        messages=query,
-        system_prompt=sys_prompt,
-        history_messages=query_param.conversation_history,
-        conversation_summary=query_param.conversation_summary,
-        conversation_recall=query_param.conversation_recall,
-        stream=query_param.stream,
-        enable_cot=query_param.enable_cot,
-        temperature=query_param.temperature,
-        model=query_param.model,
-    )
+    # 调用 LLM；若被截断，复用完全相同的最终证据精简重生成一次。
+    response = await _generate_answer_reusing_evidence(query, query_param, sys_prompt, raw_data)
 
     if isinstance(response, str):
         return QueryResult(content=response, raw_data=raw_data)

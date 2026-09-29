@@ -27,6 +27,45 @@ class LLMTruncatedError(RuntimeError):
     只会得到同样的截断——故该异常不参与 tenacity 重试, 由调用方决定降级
     策略（如术语提取侧对半重切批次后重试）。
     """
+    def __init__(self, message: str, *, partial: str = "", finish_reason: str = "length"):
+        super().__init__(message)
+        self.partial = partial or ""
+        self.finish_reason = finish_reason
+
+
+class LLMTokenStream:
+    """兼容原 async iterator，同时保留流式 finish_reason/partial 状态。"""
+
+    def __init__(self, response: Any):
+        self._iterator = response.__aiter__()
+        self.finish_reason: Optional[str] = None
+        self.error: Optional[BaseException] = None
+        self.partial = ""
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> str:
+        while True:
+            try:
+                chunk = await self._iterator.__anext__()
+            except StopAsyncIteration:
+                raise
+            except BaseException as exc:
+                self.error = exc
+                raise
+            choices = getattr(chunk, "choices", None) or []
+            if not choices:
+                continue
+            choice = choices[0]
+            reason = getattr(choice, "finish_reason", None)
+            if reason:
+                self.finish_reason = reason
+            delta = getattr(choice, "delta", None)
+            token = getattr(delta, "content", None) if delta is not None else None
+            if token:
+                self.partial += token
+                return token
 
 
 def _create_llm_client() -> Any:
@@ -74,26 +113,17 @@ async def _chat_completion_inner(
         if getattr(choice, "finish_reason", None) == "length":
             # 输出被 max_tokens 截断: 结构化输出场景下结果必然不完整,
             # 抛专门异常让调用方走降级路径（而非当作普通失败静默丢弃）
+            partial = getattr(getattr(choice, "message", None), "content", "") or ""
             raise LLMTruncatedError(
                 f"LLM 输出被截断（finish_reason=length, "
-                f"max_tokens={params.get('max_tokens')}）"
+                f"max_tokens={params.get('max_tokens')}）",
+                partial=partial,
             )
         content = choice.message.content
         return content if content else ""
 
     # 流式模式: 返回逐 token 输出的异步生成器
-    async def _token_stream() -> AsyncIterator[str]:
-        try:
-            async for chunk in response:
-                delta = chunk.choices[0].delta
-                token = delta.content
-                if token:
-                    yield token
-        except Exception:
-            # 生成器耗尽或连接中断
-            pass
-
-    return _token_stream()
+    return LLMTokenStream(response)
 
 
 async def chat_completion(

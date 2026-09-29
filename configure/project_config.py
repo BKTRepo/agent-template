@@ -329,6 +329,21 @@ class ProjectConfig(BaseSettings):
         le=8,
         description="子查询分解的最大子查询数（超出截断）",
     )
+    SUBQUERY_CANDIDATE_TOP_K: int = Field(default=3, ge=1, description="每个子查询保留给回填安全检查的候选数")
+    SUBQUERY_MAX_TOKENS: int = Field(default=500, ge=64, description="子查询分解单次输出 token 上限")
+    SUBQUERY_MAX_LENGTH: int = Field(default=80, ge=16, description="单个子查询最大字符数")
+    SUBQUERY_TRUNCATION_RETRY_ENABLED: bool = Field(default=True, description="子查询 JSON 截断/解析失败时最多重试一次")
+    SUBQUERY_RULE_FALLBACK_ENABLED: bool = Field(default=True, description="子查询模型失败时是否启用规则兜底")
+    SUBQUERY_FALLBACK_CACHE_TTL: int = Field(default=300, ge=0, description="规则兜底结果缓存秒数；失败结果不缓存")
+    SUBQUERY_QUOTA_BACKFILL_ENABLED: bool = Field(default=True, description="复合问题未覆盖面是否允许有限证据回填")
+    SUBQUERY_MIN_FINAL_CHUNKS: int = Field(default=1, ge=0, description="每个有效子问题期望进入最终上下文的最少证据数")
+    SUBQUERY_BACKFILL_MAX_TOTAL: int = Field(default=3, ge=0, description="单次请求最多回填的分块数")
+    SUBQUERY_BACKFILL_MIN_SCORE: float = Field(default=0.35, ge=0.0, le=1.0, description="回填候选独立最低分数门槛，需按测试集校准")
+    SUBQUERY_BACKFILL_REQUIRE_ANCHOR: bool = Field(default=True, description="回填是否必须命中字段/代码/业务主体锚点")
+    ANSWER_TRUNCATION_RETRY_ENABLED: bool = Field(default=True, description="答案达到 max_tokens 时是否复用同一证据精简重生成一次")
+    ANSWER_PARTIAL_FALLBACK_ENABLED: bool = Field(default=True, description="精简重生成仍截断时是否返回已有部分答案")
+    ANSWER_CONCISE_RETRY_MAX_CHARS: int = Field(default=1500, ge=200, description="精简重生成提示中的答案篇幅上限")
+    FIELD_VARIANT_NORMALIZATION_ENABLED: bool = Field(default=True, description="查询侧是否统一 Field/DE/F/域号写法")
     MAX_TOTAL_TOKENS: int = Field(default=30000, description="上下文 token 总预算上限")
     PDF_SPLIT_MAX_PAGES: int = Field(
         default=25,
