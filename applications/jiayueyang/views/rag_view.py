@@ -190,7 +190,10 @@ async def delete_files(
     """移除文档条目, 并由服务端清理其源文件留档、解析产物与向量库分块。"""
     try:
         result = await document_service.delete_files_and_docs(job_ids)
-        LOGGER.info(f"删除文件: 成功={result['deleted']}, 失败={result['failed']}")
+        # 删除任务现在由 Worker 异步执行，服务层返回 queued；保留 deleted
+        # 兼容旧实现，避免仅因日志读取旧字段把成功请求转换成 999999。
+        deleted = result.get("deleted", result.get("queued", []))
+        LOGGER.info(f"删除文件: 成功={deleted}, 失败={result.get('failed', [])}")
         return SuccessResponse(data=result)
     except Exception as e:
         LOGGER.error(f"删除文件失败: {e}")

@@ -681,7 +681,9 @@ class RagDocumentService:
                 LOGGER.error(f"删除任务投递失败: job_id={doc.job_id}, {type(exc).__name__}: {exc}")
                 failed.append(doc.job_id)
 
-        return {"queued": queued, "failed": failed}
+        # queued 表示任务已交给 Worker；deleted 作为旧接口字段保留，
+        # 让已有前端和调用方在异步删除迁移期间仍能读取成功列表。
+        return {"queued": queued, "deleted": queued, "failed": failed}
 
     async def delete_document_in_worker(
             self,
