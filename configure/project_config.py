@@ -378,6 +378,10 @@ class ProjectConfig(BaseSettings):
             "历史 token 会计入总预算, 剩余才分给检索分块"
         ),
     )
+    QUERY_REWRITE_MAX_TOKENS: int = Field(default=512, ge=64, le=8192, description="中文检索查询改写输出预算，不影响最终答案")
+    QUERY_TRANSLATE_MAX_TOKENS: int = Field(default=512, ge=64, le=8192, description="英文检索查询生成输出预算")
+    QUERY_REWRITE_TRUNCATION_RETRY_ENABLED: bool = Field(default=True, description="中文/英文查询生成截断时是否扩大预算重试一次")
+    QUERY_REWRITE_RETRY_MAX_TOKENS: int = Field(default=1024, ge=64, le=8192, description="短查询截断重试预算上限；不大于初始预算时不重试")
     CHAT_REWRITE_HISTORY_MESSAGES: int = Field(
         default=6,
         ge=0,
