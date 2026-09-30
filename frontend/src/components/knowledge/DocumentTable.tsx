@@ -159,7 +159,14 @@ export function DocumentTable({ onOpenDetail, onOpenMarkdown, onOpenTerminology,
                           </span>
                         )}
                       </div>
-                      {doc.is_updating && (
+                      {doc.status === 'deleting' && (
+                        <span className="text-xs text-danger">
+                          {doc.summary?.startsWith('删除暂时失败') || doc.summary?.startsWith('删除失败')
+                            ? doc.summary
+                            : '等待当前处理停止后清理，完成后自动移除'}
+                        </span>
+                      )}
+                      {doc.is_updating && doc.status !== 'deleting' && (
                         <span className="text-xs text-muted">
                           {doc.status === 'failed' ? '更新失败 · 问答仍用旧版本' : '更新中 · 问答仍用旧版本'}
                         </span>

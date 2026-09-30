@@ -397,6 +397,19 @@ export function DocumentDetailDrawer({ docId, open, onClose }: Props) {
                 </>
               )}
 
+              {doc.status === 'deleting' && (
+                <div className="mt-5 rounded-xl border border-danger/30 bg-danger-soft p-3">
+                  <p className="text-xs font-medium text-danger">删除进度</p>
+                  <p className="mt-1 whitespace-pre-wrap break-all text-xs text-danger/90">
+                    {doc.summary || '删除任务已提交，等待后台清理'}
+                  </p>
+                  <p className="mt-2 text-xs text-muted">
+                    如文档仍在处理中，需要等待当前处理步骤停止。清理完成后文档才会从列表移除。
+                    暂时失败会等待后台重试；提示“不可自动补偿”时需要联系管理员处理。
+                  </p>
+                </div>
+              )}
+
               {/* ---- 失败信息 ---- */}
               {doc.status === 'failed' && (
                 <div className="mt-5 rounded-xl border border-danger/30 bg-danger-soft p-3">

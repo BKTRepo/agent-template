@@ -32,7 +32,7 @@ export function ClearDialog({ open, onClose }: Props) {
       await fetchDocuments()
       deselectAll()
       const queued = result.queued ?? result.deleted
-      if (queued.length) toast.info(`已提交 ${queued.length} 个文档的删除任务`)
+      if (queued.length) toast.info(`已提交 ${queued.length} 个文档的删除任务；正在处理的文档会先停止处理，再清理数据`)
       if (result.failed.length) toast.danger(`${result.failed.length} 个文档删除任务派发失败，请查看文档状态`)
       if (!queued.length && !result.failed.length) toast.info('没有需要删除的文档，请查看最新列表')
       onClose()
@@ -70,7 +70,10 @@ export function ClearDialog({ open, onClose }: Props) {
         </>
       }
     >
-      <></>
+      <p className="text-sm text-muted">
+        正在解析的文档也可以删除。系统会请求停止处理，待当前处理步骤退出后清理文件和关联数据。
+        提交后文档会显示“删除中”，完成清理后才从列表移除；如等待较久，请查看文档状态和详情。
+      </p>
     </AppModal>
   )
 }

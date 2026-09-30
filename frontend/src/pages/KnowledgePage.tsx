@@ -70,7 +70,7 @@ export default function KnowledgePage() {
         is_updating: false,
       })
       startPolling(id)
-      toast.success('已提交回滚')
+      toast.info('已提交回滚任务，恢复完成后文档状态会变为“已完成”')
     } catch (err) {
       toast.danger(`回滚失败: ${err instanceof Error ? err.message : String(err)}`)
     }
