@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import asyncio
+import inspect
 import logging
 import threading
 import traceback
@@ -409,9 +410,12 @@ def create_celery():
             _task_stack.push(self)
             self.push_request(args=args, kwargs=kwargs)
             try:
-                if asyncio.iscoroutinefunction(self.run):
-                    return get_async_event_loop_pool().run(self.run(*args, **kwargs))
-                return self.run(*args, **kwargs)
+                result = self.run(*args, **kwargs)
+                # Celery 的 autoretry 包装会把 async run 包成普通函数，
+                # 但返回值仍然是 coroutine；因此不能只判断函数本身。
+                if inspect.isawaitable(result):
+                    return get_async_event_loop_pool().run(result)
+                return result
             finally:
                 self.pop_request()
                 _task_stack.pop()

@@ -114,6 +114,11 @@ class ProjectConfig(BaseSettings):
     RAG_INPUT_DIR: str = os.path.abspath(os.path.join(_BACKEND_PROJECT_ROOT, "input"))
     # 服务端允许的上传文件大小上限（MB）: 前端 200MB 校验可被绕过, 服务端须独立设防
     RAG_MAX_UPLOAD_MB: int = Field(default=200, ge=1, description="服务端上传文件大小上限(MB)")
+    MAX_DELETING_RECOMPENSATE: int = Field(
+        default=5,
+        ge=1,
+        description="单个 deleting 文档允许被巡检重新投递的最大次数",
+    )
     # 项目根目录（public，供 static_vendor 等跨目录资源定位）
     PROJECT_ROOT: str = _BACKEND_PROJECT_ROOT
     DOCLING_PDF_BACKEND: str = Field(

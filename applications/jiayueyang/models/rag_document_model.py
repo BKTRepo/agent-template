@@ -20,8 +20,8 @@ class RagDocument(ScaffoldModel, TimestampMixin):
     - Celery 协调字段（celery_task_id/heartbeat_at/cancel_requested/resume）
       支撑跨进程进度回写与僵尸巡检（详见 services/rag_service.py::sweep_stale_documents）。
 
-    文档删除为硬删除（连同磁盘产物与向量库条目, 见
-    services/rag_service.py::delete_files_and_docs）, 故不继承软删除基类。
+    文档删除采用“先标记 deleting、后清理产物、最后硬删除”的流程（见
+    services/rag_service.py::delete_files_and_docs）。
     """
 
     # ---- 身份与基础信息 ----
@@ -30,7 +30,7 @@ class RagDocument(ScaffoldModel, TimestampMixin):
     filename = fields.CharField(max_length=255, unique=True, description="文件名")
     status = fields.CharField(
         max_length=32, default="queued", index=True,
-        description="处理状态: queued/splitting/parsing/terminology/analyzing/chunking/embedding/complete/failed",
+        description="处理状态: queued/splitting/parsing/terminology/analyzing/chunking/embedding/complete/failed/deleting",
     )
     # 属性名沿用代码与接口惯例 summary, 数据库列名按表设计要求为 abstract
     summary = fields.TextField(
@@ -64,6 +64,19 @@ class RagDocument(ScaffoldModel, TimestampMixin):
     heartbeat_at = fields.DatetimeField(null=True, index=True, description="Worker 最近心跳时间(巡检容忍15分钟)")
     cancel_requested = fields.BooleanField(default=False, description="取消标记(守卫: 已取消文档拒绝进度覆盖)")
     resume = fields.BooleanField(default=False, description="重试续跑标记(完成后清除)")
+    deleting_retry_count = fields.IntField(
+        default=0,
+        description="删除任务由巡检重新投递的次数（仅补偿投递时递增）",
+    )
+    deletion_retryable = fields.BooleanField(
+        default=True,
+        description="删除失败后是否允许定时巡检自动补偿",
+    )
+    deletion_error_type = fields.CharField(
+        max_length=64,
+        null=True,
+        description="最近一次删除失败的异常类型",
+    )
 
     # ---- 结果与错误 ----
     content_length = fields.IntField(null=True, description="清洗后 markdown 字符数")

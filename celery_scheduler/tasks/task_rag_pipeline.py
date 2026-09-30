@@ -7,6 +7,8 @@
 import traceback
 from typing import Any, Dict
 
+from celery.exceptions import SoftTimeLimitExceeded
+
 from celery_scheduler.celery_worker import celery
 from configure import LOGGER
 
@@ -35,6 +37,29 @@ async def process_document_task(job_id: str) -> Dict[str, Any]:
             job_id=job_id,
             execution_token=process_document_task.request.id,
         )
+    except SoftTimeLimitExceeded as exc:
+        # 软超时仍有机会执行清理和状态回写：明确记录为失败并继续抛出，
+        # 让 Celery 看到真实的 FAILURE，而不是把超时伪装成 SUCCESS。
+        LOGGER.error(
+            f"RAG 文档处理任务软超时: job_id={job_id}, "
+            f"错误类型={type(exc).__name__}, 错误描述={exc}\n"
+            f"错误回溯={traceback.format_exc()}"
+        )
+        try:
+            from applications.jiayueyang.services.rag_service import RagDocumentService
+
+            await RagDocumentService().update_document(job_id, {
+                "status": "failed",
+                "summary": "文档解析任务超时, 请重试",
+                "error_trace": traceback.format_exc()[-5000:],
+                "updated_at": RagDocumentService.now_time(),
+            })
+        except Exception as state_exc:
+            LOGGER.error(
+                f"文档解析超时状态回写失败: job_id={job_id}, "
+                f"{type(state_exc).__name__}: {state_exc}"
+            )
+        raise
     except Exception as exc:
         LOGGER.error(
             f"RAG 文档处理任务异常: \n"
@@ -78,3 +103,28 @@ async def rollback_document_task(job_id: str) -> Dict[str, Any]:
             f"错误回溯: {traceback.format_exc()}\n"
         )
         return {"success": False, "error": str(exc)}
+
+
+@celery.task(
+    name="celery_scheduler.tasks.task_rag_pipeline.delete_document_task",
+    soft_time_limit=1500,
+    time_limit=1800,
+)
+async def delete_document_task(job_id: str) -> Dict[str, Any]:
+    """Celery 入口：清理文档文件、解析产物和向量，成功后删除 MySQL 记录。"""
+    try:
+        from applications.jiayueyang.services.rag_service import RagDocumentService
+
+        result = await RagDocumentService().delete_document_in_worker(
+            job_id=job_id,
+            execution_token=delete_document_task.request.id,
+        )
+        LOGGER.info(f"【Celery】文档删除任务完成: job_id={job_id}, result={result}")
+        return result
+    except Exception as exc:
+        LOGGER.error(
+            f"【Celery】文档删除任务异常: job_id={job_id}, "
+            f"错误类型={type(exc).__name__}, 错误描述={exc}\n"
+            f"错误回溯={traceback.format_exc()}"
+        )
+        raise

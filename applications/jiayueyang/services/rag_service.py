@@ -14,9 +14,11 @@ rag_storage 文件存储已整体下线。
 import asyncio
 import json
 import shutil
+import traceback
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, NamedTuple, Optional
 
 from applications.jiayueyang.models.rag_document_model import RagDocument
 from applications.jiayueyang.services.pipeline_crud import PipelineCrud
@@ -24,6 +26,27 @@ from applications.jiayueyang.services.rag_document_crud import RagDocumentCrud
 from configure import LOGGER, PROJECT_CONFIG
 
 _TIME_FMT = "%Y-%m-%d %H:%M:%S"
+DELETE_DOCUMENT_TASK = "celery_scheduler.tasks.task_rag_pipeline.delete_document_task"
+
+
+class RetryableDeletionError(RuntimeError):
+    """删除过程中可通过再次执行解决的临时性错误。"""
+
+
+class NonRetryableDeletionError(RuntimeError):
+    """删除过程中再次执行也无法自动解决的永久性错误。"""
+
+
+class _CeleryTaskState(NamedTuple):
+    """Celery 状态查询结果。
+
+    ``query_ok`` 用来区分两种完全不同的情况：
+    - True + state=None：查询成功，但没有可用的历史状态（例如没有 task_id）；
+    - False：Redis/结果后端查询失败，当前无法判断任务状态。
+    """
+
+    state: Optional[str]
+    query_ok: bool
 
 
 def _fmt_time(value: Optional[datetime]) -> str:
@@ -46,6 +69,8 @@ class RagDocumentService:
     STALE_HEARTBEAT_SECONDS = 15 * 60
     # queued 文档滞留超过该时长仍未派发, 视为任务丢失
     STALE_QUEUED_SECONDS = 10 * 60
+    # deleting 文档长时间无状态更新时间，视为删除任务可能丢失
+    STALE_DELETING_SECONDS = 15 * 60
 
     def __init__(self):
         self.crud = RagDocumentCrud()
@@ -85,6 +110,9 @@ class RagDocumentService:
             "heartbeat_at": _fmt_time(doc.heartbeat_at),
             "cancel_requested": doc.cancel_requested,
             "resume": doc.resume,
+            "deleting_retry_count": doc.deleting_retry_count,
+            "deletion_retryable": doc.deletion_retryable,
+            "deletion_error_type": doc.deletion_error_type,
             "content_length": doc.content_length,
             "chunks_count": doc.chunks_count,
             "error_trace": doc.error_trace or "",
@@ -159,7 +187,7 @@ class RagDocumentService:
     # ==================== 僵尸任务巡检 ====================
 
     async def sweep_stale_documents(self) -> int:
-        """巡检并标记确定性死亡的任务为 failed（Web 启动与周期任务调用）。
+        """巡检失联的解析任务，并补偿停滞的 deleting 任务。
 
         判定只依据"任务已死"的肯定证据, 避免 Web 单独重启时误伤:
         - queued 滞留超容忍（派发丢失, 见提交流程的失败分支）;
@@ -170,9 +198,14 @@ class RagDocumentService:
         标记采用条件更新（乐观并发）: 仅当心跳仍停留在候选收集时刻的值
         才生效, 查证期间 Worker 复活即自动放弃, 无需全局锁。
 
-        :return: 本次标记为失败的文档数
+        deleting 任务不改成 failed。删除失败时保留 deleting，等确认旧
+        Celery 任务已经结束后重新投递；达到补偿上限只告警，留给人工处理。
+
+        :return: 本次标记为失败的解析任务数
         """
-        now_dt = datetime.now()
+        # Tortoise 在当前配置下返回带时区的数据库时间；统一使用带时区的
+        # 本地时间，避免计算任务年龄时出现 naive/aware datetime 混用异常。
+        now_dt = datetime.now().astimezone()
         hb_threshold = now_dt - timedelta(seconds=self.STALE_HEARTBEAT_SECONDS)
 
         # 阶段1: 收集候选（中间态且心跳过期/缺失, 不含 queued; 无网络 IO）
@@ -181,9 +214,34 @@ class RagDocumentService:
         # 阶段2: 逐个复核 Celery 任务状态（同步 Redis 查询移交线程池, 不阻塞事件循环）
         verdicts: Dict[str, bool] = {}
         for doc in candidates:
-            state = await asyncio.to_thread(self._celery_task_state, doc.celery_task_id)
-            if state in ("STARTED", "RETRY"):
-                verdicts[doc.job_id] = False  # 任务仍在运行（心跳可能只是暂未及时刷新）
+            state_check = await asyncio.to_thread(
+                self._celery_task_state, doc.celery_task_id,
+            )
+            if not state_check.query_ok:
+                # Redis/结果后端不可用时不能把“查不到”当成“任务已死亡”。
+                verdicts[doc.job_id] = False
+                continue
+            state = state_check.state
+            if state == "STARTED":
+                # result_backend 里的 STARTED 只是 Worker 最后一次上报的状态。
+                # Worker 被 kill -9 后它可能长期停留在 STARTED，因此再检查
+                # active 任务列表：只有确认查询成功且 task_id 已不在任何
+                # Worker 的 active 列表中，才允许把僵尸任务判为失联。
+                active = await asyncio.to_thread(
+                    self._celery_task_is_active, doc.celery_task_id,
+                )
+                if active is False:
+                    age_ref = doc.heartbeat_at or doc.created_time
+                    age = (now_dt - age_ref).total_seconds() if age_ref else None
+                    verdicts[doc.job_id] = (
+                        age is not None and age > self.STALE_HEARTBEAT_SECONDS
+                    )
+                else:
+                    # True = 仍在执行；None = 无法确认，均保守跳过。
+                    verdicts[doc.job_id] = False
+            elif state == "RETRY":
+                # RETRY 代表 Celery 已安排后续重试，不应被巡检抢先改失败。
+                verdicts[doc.job_id] = False
             elif state == "PENDING":
                 # 排队中, 或结果已过期（result_expires）导致状态未知:
                 # 仅当心跳/创建时间超容忍才判定失联
@@ -199,34 +257,147 @@ class RagDocumentService:
         for doc in candidates:
             if not verdicts.get(doc.job_id):
                 continue
-            if await self.crud.mark_active_failed(
+            marked_failed = await self.crud.mark_active_failed(
                 doc.job_id, doc.heartbeat_at, "任务中断（工作进程失联）, 请重试",
-            ):
+            )
+            if marked_failed:
                 marked += 1
+                # 文档已确认失联且状态条件更新成功后，按原 Celery task_id
+                # 安全释放遗留锁。释放函数会在 Redis 内校验 token，若锁已
+                # 被新任务持有则不会误删；Redis 不可用时保留 TTL 兜底。
+                if doc.celery_task_id:
+                    from applications.jiayueyang.services.rag_pipeline import (
+                        _release_job_lock_if_owner,
+                    )
+                    released = await asyncio.to_thread(
+                        _release_job_lock_if_owner,
+                        doc.job_id, doc.celery_task_id,
+                    )
+                    if released:
+                        LOGGER.info(
+                            f"已释放失联解析任务遗留锁: job_id={doc.job_id}, "
+                            f"task_id={doc.celery_task_id}"
+                        )
 
         # queued 滞留: 按时长直接判定（updated_time 由 auto_now 维护）
         queued_before = now_dt - timedelta(seconds=self.STALE_QUEUED_SECONDS)
         marked += await self.crud.mark_queued_failed(queued_before, "任务派发后失联, 请重试")
 
-        if marked:
-            LOGGER.warning(f"僵尸任务巡检: 标记 {marked} 个失联任务为失败")
+        # deleting 滞留补偿：只对已确认不在执行中的旧任务重新投递，
+        # 不把 deleting 直接改成 failed，避免删除流程中断后留下脏数据。
+        deleting_before = now_dt - timedelta(seconds=self.STALE_DELETING_SECONDS)
+        stale_deleting = await self.crud.list_stale_deleting_candidates(deleting_before)
+        requeued = 0
+        if stale_deleting:
+            from celery_scheduler.celery_worker import celery
+
+        for doc in stale_deleting:
+            if not bool(getattr(doc, "deletion_retryable", True)):
+                LOGGER.error(
+                    f"deleting 任务存在不可自动补偿的删除错误，停止投递，等待人工处理: "
+                    f"job_id={doc.job_id}, error_type={doc.deletion_error_type or 'unknown'}"
+                )
+                continue
+            state_check = await asyncio.to_thread(
+                self._celery_task_state, doc.celery_task_id,
+            )
+            state = state_check.state
+            if state in ("STARTED", "RETRY"):
+                continue
+            # 有 task_id 但查不到状态时，可能只是 Redis/结果后端暂时不可用；
+            # 保守跳过，避免把仍在运行的删除任务重复投递。
+            if doc.celery_task_id and not state_check.query_ok:
+                LOGGER.warning(
+                    f"无法确认 deleting 任务状态，本轮不补偿: job_id={doc.job_id}, "
+                    f"task_id={doc.celery_task_id}"
+                )
+                continue
+            max_recompensate = int(
+                getattr(PROJECT_CONFIG, "MAX_DELETING_RECOMPENSATE", 5)
+            )
+            retry_count = int(doc.deleting_retry_count or 0)
+            if retry_count >= max_recompensate:
+                LOGGER.error(
+                    f"deleting 任务已达到最大补偿次数，停止自动投递: "
+                    f"job_id={doc.job_id}, retry_count={retry_count}, "
+                    f"max={max_recompensate}, celery_state={state}"
+                )
+                continue
+            try:
+                # 先在数据库内原子领取名额，再发消息，避免多个巡检实例
+                # 同时为同一个 job_id 投递删除任务。
+                claimed = await self.crud.claim_deleting_recompensation(
+                    doc.job_id, max_recompensate,
+                )
+                if claimed is None:
+                    LOGGER.error(
+                        f"deleting 任务补偿名额已被其他巡检实例领取或已达上限: "
+                        f"job_id={doc.job_id}"
+                    )
+                    continue
+                async_result = celery.send_task(
+                    DELETE_DOCUMENT_TASK,
+                    kwargs={"job_id": doc.job_id},
+                )
+                if await self.crud.set_deleting_task_id(doc.job_id, async_result.id):
+                    requeued += 1
+                    LOGGER.warning(
+                        f"deleting 任务已补偿投递: job_id={doc.job_id}, "
+                        f"recompensate_count={claimed}, task_id={async_result.id}"
+                    )
+            except Exception as exc:
+                LOGGER.error(
+                    f"deleting 任务补偿投递失败: job_id={doc.job_id}, "
+                    f"{type(exc).__name__}: {exc}"
+                )
+
+        if marked or requeued:
+            LOGGER.warning(
+                f"僵尸任务巡检: 标记 {marked} 个失联任务为失败, "
+                f"重新投递 {requeued} 个 deleting 任务"
+            )
         return marked
 
     @staticmethod
-    def _celery_task_state(task_id: Optional[str]) -> Optional[str]:
-        """查询 Celery 任务状态（PENDING/STARTED/FAILURE/REVOKED 等）, 失败返回 None。
+    def _celery_task_state(task_id: Optional[str]) -> _CeleryTaskState:
+        """查询 Celery 任务状态，并明确区分“无状态”和“查询失败”。
 
         依赖 result_backend 与 task_track_started=True; 结果过期
         （result_expires=3600）后状态回落为 PENDING, 调用方需结合心跳账龄判定。
         """
         if not task_id:
-            return None
+            return _CeleryTaskState(None, True)
         try:
             from celery.result import AsyncResult
             from celery_scheduler.celery_worker import celery
-            return AsyncResult(task_id, app=celery).state
+            return _CeleryTaskState(AsyncResult(task_id, app=celery).state, True)
         except Exception as e:
             LOGGER.warning(f"查询 Celery 任务状态失败: {task_id}, {e}")
+            return _CeleryTaskState(None, False)
+
+    @staticmethod
+    def _celery_task_is_active(task_id: Optional[str]) -> Optional[bool]:
+        """确认 task_id 是否仍在某个 Worker 的 active 列表中。
+
+        返回值含义：True=确认仍在执行，False=确认不在任何在线 Worker
+        的 active 列表，None=无法确认（例如 Worker/Redis 查询失败）。
+        ``None`` 必须按未知处理，不能直接判定任务失联。
+        """
+        if not task_id:
+            return False
+        try:
+            from celery_scheduler.celery_worker import celery
+
+            active_by_worker = celery.control.inspect(timeout=2.0).active()
+            if active_by_worker is None:
+                return None
+            for tasks in active_by_worker.values():
+                for task in tasks or []:
+                    if task.get("id") == task_id:
+                        return True
+            return False
+        except Exception as e:
+            LOGGER.warning(f"查询 Worker active 任务失败: {task_id}, {e}")
             return None
 
     # ==================== 内部工具 ====================
@@ -484,25 +655,139 @@ class RagDocumentService:
             LOGGER.warning(f"撤销 Celery 任务失败（不影响取消生效）: {e}")
 
     async def delete_files_and_docs(self, job_ids: str) -> Dict[str, Any]:
-        """移除文档条目并清理其全部关联产物。
+        """标记文档删除并投递后台清理任务。
 
         :param job_ids: 换行分隔的待移除文档 job_id
-        :return: 删除结果（deleted/failed 两个 job_id 列表）
+        :return: 投递结果（queued/failed 两个 job_id 列表）
 
         磁盘路径（源文件留档目录 / 解析产物目录）完全由服务端文档记录推导,
         不接受客户端传入路径——避免服务器绝对路径外泄及任意路径删除风险。
         """
         ids = [j.strip() for j in job_ids.strip().split("\n") if j.strip()]
-        removed_docs = await self.crud.fetch_and_remove(ids)
-        removed_job_ids = [d.job_id for d in removed_docs]
+        docs = await self.crud.mark_deleting(ids)
+        queued: List[str] = []
+        failed: List[str] = []
 
-        # 副作用（文件删除 / Milvus 向量删除）为同步阻塞 IO, 移交线程池执行。
-        snapshots = [self.model_to_dict(d) for d in removed_docs]
-        await asyncio.to_thread(self._cleanup_artifacts, snapshots)
-        return {"deleted": removed_job_ids, "failed": []}
+        from celery_scheduler.celery_worker import celery
+        for doc in docs:
+            try:
+                async_result = celery.send_task(
+                    DELETE_DOCUMENT_TASK,
+                    kwargs={"job_id": doc.job_id},
+                )
+                await self.crud.set_deleting_task_id(doc.job_id, async_result.id)
+                queued.append(doc.job_id)
+            except Exception as exc:
+                LOGGER.error(f"删除任务投递失败: job_id={doc.job_id}, {type(exc).__name__}: {exc}")
+                failed.append(doc.job_id)
+
+        return {"queued": queued, "failed": failed}
+
+    async def delete_document_in_worker(
+            self,
+            job_id: str,
+            execution_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """由 Celery Worker 执行单个文档的外部资源清理。
+
+        文档记录在删除前重新读取，防止把过期快照传入 Worker。只有文件、
+        解析产物和向量清理流程正常结束后，才物理删除 MySQL 记录。
+        """
+        doc = await self.crud.get_by_job_id(job_id)
+        if doc is None:
+            return {"success": True, "job_id": job_id, "skipped": "not_found"}
+        if doc.status != self.crud.DELETING_STATUS:
+            return {"success": True, "job_id": job_id, "skipped": "not_deleting"}
+
+        # 与文档解析/upsert 共用同一把 job_id Redis 锁，防止删除和写入并发；
+        # 删除使用严格策略，Redis 不可用时不允许降级放行。
+        from applications.jiayueyang.services.rag_pipeline import (
+            _acquire_delete_job_lock,
+            _release_job_lock,
+        )
+
+        token = execution_token or uuid.uuid4().hex
+        try:
+            locked = _acquire_delete_job_lock(job_id, token)
+        except Exception as exc:
+            LOGGER.error(
+                f"删除任务无法确认 job_id 锁状态: job_id={job_id}, "
+                f"{type(exc).__name__}: {exc}"
+            )
+            try:
+                await self.crud.record_deletion_failure(
+                    job_id,
+                    f"获取删除锁失败: {type(exc).__name__}: {exc}",
+                    retryable=True,
+                    error_type=type(exc).__name__,
+                )
+            except Exception as record_exc:
+                LOGGER.error(
+                    f"删除锁失败原因写回数据库也失败: job_id={job_id}, "
+                    f"{type(record_exc).__name__}: {record_exc}"
+                )
+            raise RetryableDeletionError(
+                f"删除任务暂时无法获取操作锁，稍后重试: job_id={job_id}"
+            ) from exc
+        if not locked:
+            error = "文档操作锁被其他任务占用"
+            try:
+                await self.crud.record_deletion_failure(
+                    job_id,
+                    error,
+                    f"RetryableDeletionError: {error}",
+                    retryable=True,
+                    error_type="LockBusy",
+                )
+            except Exception as record_exc:
+                LOGGER.error(
+                    f"删除锁占用原因写回数据库也失败: job_id={job_id}, "
+                    f"{type(record_exc).__name__}: {record_exc}"
+                )
+            raise RetryableDeletionError(
+                f"无法获取文档操作锁，删除任务稍后重试: job_id={job_id}"
+            )
+        try:
+            # 加锁后重新读取，避免等待锁期间文档状态发生变化。
+            doc = await self.crud.get_by_job_id(job_id)
+            if doc is None:
+                return {"success": True, "job_id": job_id, "skipped": "not_found"}
+            if doc.status != self.crud.DELETING_STATUS:
+                return {"success": True, "job_id": job_id, "skipped": "not_deleting"}
+
+            snapshot = self.model_to_dict(doc)
+            await asyncio.to_thread(self._cleanup_artifacts, [snapshot])
+            removed = await self.crud.remove_if_deleting(job_id)
+            return {"success": removed, "job_id": job_id, "deleted": removed}
+        except Exception as exc:
+            # 记录错误但继续抛出：Celery 本次执行应为 FAILURE，巡检负责后续补偿。
+            try:
+                await self.crud.record_deletion_failure(
+                    job_id,
+                    f"{type(exc).__name__}: {exc}",
+                    traceback.format_exc(),
+                    retryable=isinstance(exc, RetryableDeletionError),
+                    error_type=type(exc).__name__,
+                )
+            except Exception as record_exc:
+                LOGGER.error(
+                    f"删除失败原因写回数据库也失败: job_id={job_id}, "
+                    f"{type(record_exc).__name__}: {record_exc}"
+                )
+            LOGGER.error(
+                f"删除任务执行失败，保留 deleting 等待巡检补偿: "
+                f"job_id={job_id}, {type(exc).__name__}: {exc}"
+            )
+            raise
+        finally:
+            _release_job_lock(job_id, token)
 
     def _cleanup_artifacts(self, docs: List[Dict[str, Any]]) -> None:
-        """删除文档的磁盘产物与向量库条目（线程池内执行, 尽力而为）。"""
+        """删除文档的磁盘产物与向量库条目。
+
+        任一外部资源清理失败都必须抛出，阻止上层提前删除 MySQL 记录，
+        并交给删除异常分类逻辑判断是否允许后续巡检补偿。
+        """
         for doc in docs:
             self._remove_input_dir(doc)
             self._remove_output_dirs(doc)
@@ -526,6 +811,9 @@ class RagDocumentService:
                     shutil.rmtree(input_dir)
             except Exception as e:
                 LOGGER.warning(f"清理源文件留档目录失败（{input_dir}）: {e}")
+                raise NonRetryableDeletionError(
+                    f"清理源文件留档目录失败: {input_dir}: {e}"
+                ) from e
 
     @staticmethod
     def _resume_artifacts_ready(doc: Dict[str, Any]) -> bool:
@@ -549,7 +837,7 @@ class RagDocumentService:
 
     @staticmethod
     def _remove_output_dirs(doc: Dict[str, Any]) -> None:
-        """清理文档在输出目录下的解析产物（尽力而为, 失败仅告警）。
+        """清理文档在输出目录下的解析产物；失败时抛出异常。
 
         两部分:
         1. 主产物目录（output_path, 形如 RAG_OUTPUT_DIR/<job_id>）——前端
@@ -567,10 +855,17 @@ class RagDocumentService:
         if output_path:
             try:
                 out_dir = Path(output_path)
-                if out_dir.is_dir() and out_dir.resolve().is_relative_to(base.resolve()):
-                    shutil.rmtree(out_dir, ignore_errors=True)
+                if out_dir.is_dir():
+                    if not out_dir.resolve().is_relative_to(base.resolve()):
+                        raise NonRetryableDeletionError(
+                            f"解析产物路径不在允许目录内: {output_path}"
+                        )
+                    shutil.rmtree(out_dir)
             except Exception as e:
                 LOGGER.warning(f"清理主产物目录失败（{output_path}）: {e}")
+                raise NonRetryableDeletionError(
+                    f"清理主产物目录失败: {output_path}: {e}"
+                ) from e
 
         job_id = doc.get("id") or ""
         if not job_id:
@@ -578,23 +873,52 @@ class RagDocumentService:
         try:
             for part_dir in base.glob(f"{job_id}_part_*"):
                 if part_dir.is_dir():
-                    shutil.rmtree(part_dir, ignore_errors=True)
+                    shutil.rmtree(part_dir)
         except Exception as e:
             LOGGER.warning(f"清理子文档产物目录失败（{job_id}）: {e}")
+            raise NonRetryableDeletionError(
+                f"清理子文档产物目录失败: {job_id}: {e}"
+            ) from e
 
         # 增量更新 prev 归档（更新失败时上一版本产物留在 <job_id>.prev）
         try:
             prev_dir = base / f"{job_id}.prev"
             if prev_dir.is_dir():
-                shutil.rmtree(prev_dir, ignore_errors=True)
+                shutil.rmtree(prev_dir)
         except Exception as e:
             LOGGER.warning(f"清理 prev 归档失败（{job_id}）: {e}")
+            raise NonRetryableDeletionError(
+                f"清理 prev 归档失败: {job_id}: {e}"
+            ) from e
 
     @staticmethod
     def _delete_vectors(doc_id: str) -> None:
-        """删除向量库中指定文档的全部分块（尽力而为, 失败仅告警）。"""
+        """删除向量库分块；失败必须抛出，阻止提前删除 MySQL 记录。"""
         try:
-            from applications.jiayueyang.rag.milvus_store import delete_by_doc_id
-            delete_by_doc_id(doc_id)
+            if PROJECT_CONFIG.VECTOR_BACKEND == "milvus":
+                from applications.jiayueyang.rag.vector_rpc import delete_by_doc_id
+            else:
+                from applications.jiayueyang.rag.vector_store import delete_by_doc_id
+
+            deleted = delete_by_doc_id(doc_id)
+            # 兼容尚未升级的后端实现，避免 -1 被误当成成功结果。
+            if isinstance(deleted, int) and deleted < 0:
+                raise RuntimeError(
+                    f"向量删除返回失败: doc_id={doc_id}, ret={deleted}"
+                )
         except Exception as e:
-            LOGGER.warning(f"删除文档向量失败（{doc_id}）: {e}")
+            LOGGER.warning(f"删除文档向量失败（doc_id={doc_id}）: {e}")
+            # 记录日志后继续向上抛出，不能让上层误判为删除成功。
+            error_text = f"{type(e).__name__}: {e}".lower()
+            transient_markers = (
+                "timeout", "timed out", "deadline", "unavailable",
+                "connection", "temporarily", "too many requests",
+                "service unavailable", "429", "503", "残留",
+            )
+            if isinstance(e, (TimeoutError, ConnectionError, OSError)) or any(
+                marker in error_text for marker in transient_markers
+            ):
+                raise RetryableDeletionError(
+                    f"向量删除临时失败: doc_id={doc_id}, error={e}"
+                ) from e
+            raise
