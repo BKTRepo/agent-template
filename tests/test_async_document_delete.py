@@ -9,6 +9,49 @@ from applications.jiayueyang.services.rag_service import RagDocumentService
 from applications.jiayueyang.views.rag_view import delete_files
 
 
+def test_deletion_cleans_standard_dirs_before_paths_saved(monkeypatch, tmp_path):
+    from configure import PROJECT_CONFIG
+    input_base = tmp_path / 'input'
+    output_base = tmp_path / 'output'
+    monkeypatch.setattr(PROJECT_CONFIG, 'RAG_INPUT_DIR', str(input_base))
+    monkeypatch.setattr(PROJECT_CONFIG, 'RAG_OUTPUT_DIR', str(output_base))
+    for base in (input_base, output_base):
+        (base / 'doc-interrupted').mkdir(parents=True)
+        (base / 'doc-interrupted' / 'artifact.txt').write_text('unfinished')
+        (base / 'doc-other').mkdir()
+    doc = {'id': 'doc-interrupted', 'input_path': '', 'output_path': ''}
+    RagDocumentService._remove_input_dir(doc)
+    RagDocumentService._remove_output_dirs(doc)
+    for base in (input_base, output_base):
+        assert not (base / 'doc-interrupted').exists()
+        assert (base / 'doc-other').exists()
+
+
+def test_deletion_rejects_standard_dir_escape(monkeypatch, tmp_path):
+    from configure import PROJECT_CONFIG
+    from applications.jiayueyang.services.rag_service import NonRetryableDeletionError
+    input_base = tmp_path / 'input'
+    output_base = tmp_path / 'output'
+    monkeypatch.setattr(PROJECT_CONFIG, 'RAG_INPUT_DIR', str(input_base))
+    monkeypatch.setattr(PROJECT_CONFIG, 'RAG_OUTPUT_DIR', str(output_base))
+    outside = tmp_path / 'keep'
+    outside.mkdir()
+    for cleanup in (RagDocumentService._remove_input_dir, RagDocumentService._remove_output_dirs):
+        with pytest.raises(NonRetryableDeletionError):
+            cleanup({'id': '../keep', 'input_path': '', 'output_path': ''})
+        assert outside.exists()
+
+
+def test_document_deletion_uses_current_milvus_module(monkeypatch):
+    from configure import PROJECT_CONFIG
+    from applications.jiayueyang.rag import milvus_store
+    deleted=[]
+    monkeypatch.setattr(PROJECT_CONFIG,'VECTOR_BACKEND','milvus')
+    monkeypatch.setattr(milvus_store,'delete_by_doc_id',lambda doc: deleted.append(doc) or 1)
+    RagDocumentService._delete_vectors('doc-regression')
+    assert deleted==['doc-regression']
+
+
 @pytest.mark.asyncio
 async def test_delete_endpoint_accepts_queued_contract():
     service = SimpleNamespace(

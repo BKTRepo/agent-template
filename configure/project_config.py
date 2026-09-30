@@ -316,6 +316,8 @@ class ProjectConfig(BaseSettings):
         default=True,
         description="是否在采纳后异步提取程序映射证据",
     )
+    MAPPING_EXTRACTION_MAX_TOKENS: int = Field(default=8192, ge=800, le=8192, description="采纳映射提取输出预算；较小预算截断时最多扩容重试一次")
+    MAPPING_EXTRACTION_TIMEOUT: float = Field(default=120.0, gt=0, description="单次采纳映射提取超时秒数（含模型推理）")
     DOC_SUMMARY_INPUT_MAX_CHARS: int = Field(
         default=20000,
         ge=1000,

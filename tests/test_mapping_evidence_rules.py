@@ -21,6 +21,67 @@ from applications.jiayueyang.services.mapping_evidence_service import mapping_ev
 from applications.jiayueyang.services.term_mapping_service import term_mapping_service
 from tortoise import Tortoise
 from configure import PROJECT_CONFIG
+from applications.jiayueyang.rag.llm import LLMTruncatedError
+
+
+@pytest.mark.asyncio
+async def test_extraction_truncation_retries_once_with_same_evidence(monkeypatch):
+    calls = []
+    async def fake_chat_completion(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise LLMTruncatedError("test truncation", partial='{"mappings":')
+        return '{"mappings":[]}'
+    monkeypatch.setattr("applications.jiayueyang.services.mapping_evidence_service.chat_completion", fake_chat_completion)
+    monkeypatch.setattr(PROJECT_CONFIG, "MAPPING_EXTRACTION_MAX_TOKENS", 4096)
+    assert await _extract_proposals(_feedback()) == []
+    assert [c['max_tokens'] for c in calls] == [4096, 8192]
+    assert calls[0]['messages'] == calls[1]['messages']
+
+
+@pytest.mark.asyncio
+async def test_extraction_does_not_accept_twice_truncated_json(monkeypatch):
+    calls = []
+    async def fake_chat_completion(**kwargs):
+        calls.append(kwargs)
+        raise LLMTruncatedError("test truncation", partial='{"mappings":')
+    monkeypatch.setattr("applications.jiayueyang.services.mapping_evidence_service.chat_completion", fake_chat_completion)
+    monkeypatch.setattr(PROJECT_CONFIG, "MAPPING_EXTRACTION_MAX_TOKENS", 4096)
+    with pytest.raises(LLMTruncatedError):
+        await _extract_proposals(_feedback())
+    assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('fail_extraction', [False, True])
+async def test_revocation_during_extraction_is_not_overwritten(monkeypatch, fail_extraction):
+    await Tortoise.init(db_url="sqlite://:memory:", modules={"models": [
+        "applications.jiayueyang.models.conversation_model",
+        "applications.jiayueyang.models.feedback_model",
+        "applications.jiayueyang.models.mapping_evidence_model",
+        "applications.jiayueyang.models.term_mapping_model",
+    ]})
+    await Tortoise.generate_schemas()
+    try:
+        feedback = await RagAnswerFeedback.create(
+            feedback_uid='fb-revoke-race', conversation_id=1, assistant_message_seq=1,
+            original_query='追家授权怎么处理', action='accepted', index_status='indexed',
+        )
+        async def revoke_during_extract(_feedback):
+            await RagAnswerFeedback.filter(feedback_uid=feedback.feedback_uid).update(
+                action='revoked', index_status='delete_pending', mapping_extract_status='revoke_pending',
+            )
+            if fail_extraction:
+                raise LLMTruncatedError('test truncation')
+            return []
+        monkeypatch.setattr('applications.jiayueyang.services.mapping_evidence_service._extract_proposals', revoke_during_extract)
+        result = await mapping_evidence_service.process_feedback(feedback.feedback_uid)
+        await feedback.refresh_from_db()
+        assert result['status'] == 'revoked'
+        assert feedback.mapping_extract_status == 'revoked'
+        assert await RagTermMappingEvidence.all().count() == 0
+    finally:
+        await Tortoise.close_connections()
 
 # SQLite 初始化也注册会话模型：删除接口测试会导入会话路由，
 # Tortoise 的公共继承字段需要对应模型的连接绑定，避免测试导入顺序影响结果。

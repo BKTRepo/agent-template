@@ -90,7 +90,7 @@ const useSettingsStoreBase = create<SettingsState>()(
       // v5: RRF 合并 Top-K（重排候选池）50→100; 最终窗口改由后端 RERANK_TOP_K 控制
       // v4: 混合检索默认值 向量/BM25 Top-K 60→100、RRF 合并 Top-K 60→50
       // v3: theme -> themeMode + accentColor; v2: 三个 Top-K 提到 60、重排默认开启
-      version: 6,
+      version: 7,
       migrate: (persistedState, version) => {
         const state = persistedState as Partial<SettingsState> & { theme?: 'light' | 'dark'; topK?: number }
         if (version < 2) {
@@ -122,6 +122,9 @@ const useSettingsStoreBase = create<SettingsState>()(
           state.naiveTopK = state.topK ?? 100
           state.rrfTopK = state.topK ?? 100
           delete state.topK
+        }
+        if (version < 7 && state.llmModel === 'kimi-for-coding') {
+          state.llmModel = DEFAULT_LLM_MODEL
         }
         return state as SettingsState
       },

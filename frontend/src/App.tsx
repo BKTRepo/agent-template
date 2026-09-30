@@ -1,4 +1,6 @@
+import { useEffect } from 'react'
 import { ToastProvider } from '@heroui/react'
+import { getModels } from '@/api/models'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import SiteHeader from '@/components/layout/SiteHeader'
 import KnowledgePage from '@/pages/KnowledgePage'
@@ -15,6 +17,16 @@ import { useTheme } from '@/hooks/useTheme'
 export default function App() {
   useTheme()
   const activeTab = useSettingsStore.use.activeTab()
+
+  useEffect(() => {
+    let cancelled = false
+    getModels().then(({ model }) => {
+      if (!cancelled && model && !useSettingsStore.getState().llmModel) {
+        useSettingsStore.getState().setLlmModel(model)
+      }
+    }).catch(() => {}) // 获取失败时仍由后端选择默认模型。
+    return () => { cancelled = true }
+  }, [])
 
   return (
     <ErrorBoundary>

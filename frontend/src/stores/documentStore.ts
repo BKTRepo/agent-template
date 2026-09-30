@@ -44,6 +44,10 @@ const useDocumentStoreBase = create<DocumentState>()((set, get) => ({
     set({ loading: true })
     try {
       const data = await listDocuments()
+      const activeIds = new Set(data.filter((d) => ACTIVE_STATUSES.has(d.status)).map((d) => d.id))
+      Object.keys(get().pollTimers).forEach((id) => {
+        if (!activeIds.has(id)) get().stopPolling(id)
+      })
       set({ documents: data, loading: false })
       get().resumePendingPolls()
     } catch {
@@ -59,6 +63,7 @@ const useDocumentStoreBase = create<DocumentState>()((set, get) => ({
     })),
 
   removeDocuments: (ids) => {
+    ids.forEach((id) => get().stopPolling(id))
     const idSet = new Set(ids)
     set((s) => ({
       documents: s.documents.filter((d) => !idSet.has(d.id)),
@@ -92,6 +97,10 @@ const useDocumentStoreBase = create<DocumentState>()((set, get) => ({
       try {
         // 取本轮轮询前的快照: 用于识别"由更新中 → 完成"的跳变, 触发更新完成提示
         const prev = get().documents.find((d) => d.id === jobId)
+        if (!prev) {
+          get().stopPolling(jobId)
+          return
+        }
         // 清理完成后记录会消失，通过列表确认后再移除前端条目。
         if (prev?.status === 'deleting') {
           const documents = await listDocuments()

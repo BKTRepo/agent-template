@@ -24,7 +24,7 @@ from applications.jiayueyang.models.term_mapping_model import (
     RagTermMappingSource,
 )
 from applications.jiayueyang.rag.embedding import embed_texts
-from applications.jiayueyang.rag.llm import chat_completion
+from applications.jiayueyang.rag.llm import chat_completion, LLMTruncatedError
 from applications.jiayueyang.services.term_mapping_import_service import normalize_term
 from configure import LOGGER, PROJECT_CONFIG
 
@@ -154,15 +154,24 @@ async def _extract_proposals(feedback: RagAnswerFeedback) -> List[Dict[str, Any]
     if not evidence_text:
         evidence_text = str(feedback.retrieval_snapshot or {})[:12000]
     try:
-        raw = await asyncio.wait_for(
-            chat_completion(
-                messages=_build_extraction_prompt(feedback, evidence_text),
-                response_format={"type": "json_object"},
-                temperature=0.0,
-                max_tokens=800,
-            ),
-            timeout=30.0,
-        )
+        prompt = _build_extraction_prompt(feedback, evidence_text)
+        budget = PROJECT_CONFIG.MAPPING_EXTRACTION_MAX_TOKENS
+        for attempt in range(2):
+            try:
+                raw = await asyncio.wait_for(
+                    chat_completion(
+                        messages=prompt,
+                        response_format={"type": "json_object"},
+                        temperature=0.0,
+                        max_tokens=budget,
+                    ),
+                    timeout=PROJECT_CONFIG.MAPPING_EXTRACTION_TIMEOUT,
+                )
+                break
+            except LLMTruncatedError:
+                if attempt or budget >= 8192:
+                    raise
+                budget = min(8192, budget * 2)
     except Exception as exc:
         LOGGER.warning("采纳映射提取调用失败: %s", exc)
         raise
@@ -523,6 +532,10 @@ class MappingEvidenceService:
             await feedback.save(update_fields=["query_fingerprint", "updated_time"])
         try:
             proposals = await _extract_proposals(feedback)
+            # LLM 等待期间用户可能已撤销采纳，不允许旧任务覆盖撤销状态。
+            await feedback.refresh_from_db()
+            if feedback.action != "accepted" or feedback.index_status == "deleted":
+                return await self.process_feedback(feedback_uid)
             if not proposals:
                 feedback.mapping_extract_status = "no_candidate"
                 feedback.mapping_extract_error = None
@@ -539,6 +552,9 @@ class MappingEvidenceService:
             await feedback.save(update_fields=["mapping_extract_status", "mapping_extract_error", "updated_time"])
             return {"success": True, "status": "succeeded", "feedback_uid": feedback_uid, "mapping_keys": candidates}
         except Exception as exc:
+            await feedback.refresh_from_db()
+            if feedback.action != "accepted" or feedback.index_status == "deleted":
+                return await self.process_feedback(feedback_uid)
             feedback.mapping_extract_status = "failed"
             feedback.mapping_extract_error = f"{type(exc).__name__}: {exc}"[:2000]
             await feedback.save(update_fields=["mapping_extract_status", "mapping_extract_error", "updated_time"])

@@ -15,6 +15,12 @@ from configure import PROJECT_CONFIG, LOGGER
 
 _tortoise_orm_initialized = False
 _init_async_lock: Optional[asyncio.Lock] = None
+CELERY_EXECUTION_ID: ContextVar[Optional[str]] = ContextVar("celery_execution_id", default=None)
+
+
+def get_celery_execution_id() -> Optional[str]:
+    """读取跨异步事件循环传递的 Celery 消息 ID，而非线程局部的 Task.request。"""
+    return CELERY_EXECUTION_ID.get()
 
 
 def reset_tortoise_orm_state() -> None:

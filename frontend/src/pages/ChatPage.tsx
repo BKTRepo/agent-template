@@ -180,7 +180,7 @@ export default function ChatPage() {
   const buildPayload = useCallback((query: string, history: { role: string; content: string }[], conversationId: number | null, replaceIndex: number | null = null) => ({
     query,
     mode: chatMode,
-    model: llmModel,
+    model: llmModel || undefined,
     response_type: responseType,
     chunk_top_k: naiveTopK,
     rrf_top_k: rrfTopK,
@@ -343,7 +343,7 @@ export default function ChatPage() {
     const payload = {
       query: question,
       mode: s.chatMode,
-      model: s.llmModel,
+      model: s.llmModel || undefined,
       response_type: s.responseType,
       chunk_top_k: s.naiveTopK,
       rrf_top_k: s.rrfTopK,

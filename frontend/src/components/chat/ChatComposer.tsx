@@ -116,7 +116,7 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function Chat
               )}
             >
               <Cpu className="size-3.5 shrink-0" />
-              <span className="min-w-0 truncate">{llmModel}</span>
+              <span className="min-w-0 truncate">{llmModel || '服务器默认模型'}</span>
               <ChevronDown className="size-3 shrink-0" />
             </DropdownTrigger>
             <DropdownPopover placement="top start" className="min-w-[200px]">
@@ -126,7 +126,7 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function Chat
                 selectedKeys={[llmModel]}
                 onAction={(key) => setLlmModel(String(key))}
               >
-                {LLM_MODELS.map((m) => (
+                {[...new Set([llmModel, ...LLM_MODELS].filter(Boolean))].map((m) => (
                   <DropdownItem key={m} id={m}>{m}</DropdownItem>
                 ))}
               </DropdownMenu>

@@ -805,10 +805,15 @@ class RagDocumentService:
             targets.append(Path(input_path).parent)
         job_id = doc.get("id") or ""
         if job_id:
+            # 取消/删除可能发生在源路径尚未写回数据库之前。
+            targets.append(Path(PROJECT_CONFIG.RAG_INPUT_DIR) / job_id)
             # 更新失败时上一版本的源文件留档在 <job_id>.prev, 一并回收
             targets.append(Path(PROJECT_CONFIG.RAG_INPUT_DIR) / f"{job_id}.prev")
         for input_dir in targets:
             try:
+                input_base = Path(PROJECT_CONFIG.RAG_INPUT_DIR).resolve()
+                if input_dir.resolve() == input_base or not input_dir.resolve().is_relative_to(input_base):
+                    raise NonRetryableDeletionError(f"源文件路径不在允许目录内: {input_dir}")
                 if input_dir.is_dir():
                     shutil.rmtree(input_dir)
             except Exception as e:
@@ -853,15 +858,17 @@ class RagDocumentService:
         """
         base = Path(PROJECT_CONFIG.RAG_OUTPUT_DIR)
 
-        output_path = doc.get("output_path") or ""
-        if output_path:
+        job_id = doc.get("id") or ""
+        output_paths = [doc.get("output_path") or ""]
+        if job_id:
+            # Docling 已落盘但 _save 被删除状态拦截时，output_path 仍为空。
+            output_paths.append(str(base / job_id))
+        for output_path in set(output_paths) - {""}:
             try:
                 out_dir = Path(output_path)
+                if out_dir.resolve() == base.resolve() or not out_dir.resolve().is_relative_to(base.resolve()):
+                    raise NonRetryableDeletionError(f"解析产物路径不在允许目录内: {output_path}")
                 if out_dir.is_dir():
-                    if not out_dir.resolve().is_relative_to(base.resolve()):
-                        raise NonRetryableDeletionError(
-                            f"解析产物路径不在允许目录内: {output_path}"
-                        )
                     shutil.rmtree(out_dir)
             except Exception as e:
                 LOGGER.warning(f"清理主产物目录失败（{output_path}）: {e}")
@@ -869,7 +876,6 @@ class RagDocumentService:
                     f"清理主产物目录失败: {output_path}: {e}"
                 ) from e
 
-        job_id = doc.get("id") or ""
         if not job_id:
             return
         try:
@@ -898,7 +904,7 @@ class RagDocumentService:
         """删除向量库分块；失败必须抛出，阻止提前删除 MySQL 记录。"""
         try:
             if PROJECT_CONFIG.VECTOR_BACKEND == "milvus":
-                from applications.jiayueyang.rag.vector_rpc import delete_by_doc_id
+                from applications.jiayueyang.rag.milvus_store import delete_by_doc_id
             else:
                 from applications.jiayueyang.rag.vector_store import delete_by_doc_id
 

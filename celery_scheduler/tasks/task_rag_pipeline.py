@@ -10,6 +10,7 @@ from typing import Any, Dict
 from celery.exceptions import SoftTimeLimitExceeded
 
 from celery_scheduler.celery_worker import celery
+from celery_scheduler.celery_base import get_celery_execution_id
 from configure import LOGGER
 
 
@@ -35,7 +36,7 @@ async def process_document_task(job_id: str) -> Dict[str, Any]:
         # （acks_late 重投递任务 task_id 不变, 可接管续跑; 不同 token 的并行执行被拒）
         return await pipeline_service.process_document(
             job_id=job_id,
-            execution_token=process_document_task.request.id,
+            execution_token=get_celery_execution_id() or process_document_task.request.id,
         )
     except SoftTimeLimitExceeded as exc:
         # 软超时仍有机会执行清理和状态回写：明确记录为失败并继续抛出，
@@ -92,7 +93,7 @@ async def rollback_document_task(job_id: str) -> Dict[str, Any]:
         pipeline_service = RagPipelineService(document_service=RagDocumentService())
         return await pipeline_service.execute_rollback(
             job_id=job_id,
-            execution_token=rollback_document_task.request.id,
+            execution_token=get_celery_execution_id() or rollback_document_task.request.id,
         )
     except Exception as exc:
         LOGGER.error(
@@ -117,7 +118,7 @@ async def delete_document_task(job_id: str) -> Dict[str, Any]:
 
         result = await RagDocumentService().delete_document_in_worker(
             job_id=job_id,
-            execution_token=delete_document_task.request.id,
+            execution_token=get_celery_execution_id() or delete_document_task.request.id,
         )
         LOGGER.info(f"【Celery】文档删除任务完成: job_id={job_id}, result={result}")
         return result

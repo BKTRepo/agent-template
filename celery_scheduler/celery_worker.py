@@ -22,6 +22,7 @@ from common.request_context import (
 from configure import CELERY_CONFIG, LOGGER
 from configure.logging_config import InterceptHandler
 from .celery_base import (
+    CELERY_EXECUTION_ID,
     LOCAL_CONTEXT_VAR,
     ensure_tortoise_orm_initialized,
     get_scheduler_value,
@@ -407,8 +408,10 @@ def create_celery():
 
             ensure_tortoise_orm_initialized()
 
+            request_snapshot = dict(self.request.__dict__)
+            execution_context = CELERY_EXECUTION_ID.set(self.request.id)
             _task_stack.push(self)
-            self.push_request(args=args, kwargs=kwargs)
+            self.push_request({**request_snapshot, "args": args, "kwargs": kwargs})
             try:
                 result = self.run(*args, **kwargs)
                 # Celery 的 autoretry 包装会把 async run 包成普通函数，
@@ -419,6 +422,7 @@ def create_celery():
             finally:
                 self.pop_request()
                 _task_stack.pop()
+                CELERY_EXECUTION_ID.reset(execution_context)
 
     _celery_: Celery = NewCelery("Worker", task_cls=ContextTask)
     _celery_.config_from_object(CELERY_CONFIG.CELERY_CONFIG)

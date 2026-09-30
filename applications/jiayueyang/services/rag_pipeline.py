@@ -168,6 +168,27 @@ class RagPipelineService:
 
     # ==================== Worker 侧写回统一入口（心跳 + 锁续期） ====================
 
+    async def _reserve_replacement_task(self, doc: Dict[str, Any]) -> str:
+        """重试/回滚先占有执行锁，再清除取消标记；旧任务未退出时拒绝提交。"""
+        job_id = doc['id']
+        token = uuid.uuid4().hex
+        try:
+            acquired = await asyncio.to_thread(_acquire_delete_job_lock, job_id, token)
+        except Exception as exc:
+            raise ParameterException(message="任务锁不可用，请稍后重试") from exc
+        if not acquired:
+            raise ParameterException(message="上一任务仍在停止中，请稍后重试或回滚")
+        try:
+            current = await self.document_service.get_document_entry(job_id)
+            if not current or current.get('status') != 'failed':
+                raise ParameterException(message="文档状态已变化，请刷新后重试")
+            doc['celery_task_id'] = token
+            await self.document_service.save_document(doc, bypass_guard=True)
+            return token
+        except Exception:
+            _release_job_lock(job_id, token)
+            raise
+
     async def _save(self, doc: Dict[str, Any], bypass_guard: bool = False) -> Dict[str, Any]:
         """Worker 侧整文档保存: 打心跳 → 委托 save_document → 续期执行锁。
 
@@ -358,7 +379,7 @@ class RagPipelineService:
         # （全量重跑会重新执行解析与后处理, 计时自然整体覆写, 同样无需清零。）
         if not resumable:
             doc["content_length"] = None
-        await service.save_document(doc, bypass_guard=True)
+        task_token = await self._reserve_replacement_task(doc)
 
         # 重新分发 Celery 任务（消息仅携带 job_id; Worker 依据 resume 标记
         # 决定续跑或从 input/ 留档重读源文件重跑完整流水线）
@@ -367,6 +388,7 @@ class RagPipelineService:
             async_result = celery.send_task(
                 PROCESS_DOCUMENT_TASK,
                 kwargs={"job_id": job_id},
+                task_id=task_token,
             )
         except Exception as exc:
             # 状态已先重置为处理中，但消息可能因 Redis/Broker 不可用而未投递。
@@ -382,6 +404,7 @@ class RagPipelineService:
                 "error_trace": traceback.format_exc()[-5000:],
                 "updated_at": service.now_time(),
             })
+            _release_job_lock(job_id, task_token)
             raise ParameterException(message="重试任务派发失败, 请稍后重试") from exc
         # 回写 Celery 任务ID 用字段级更新（浅合并, 避免旧快照覆盖 Worker 写入）
         await service.update_document(job_id, {"celery_task_id": async_result.id})
@@ -717,13 +740,14 @@ class RagPipelineService:
         doc["cancel_requested"] = False
         doc["is_updating"] = False
         doc["updated_at"] = service.now_time()
-        await service.save_document(doc, bypass_guard=True)
+        task_token = await self._reserve_replacement_task(doc)
 
         from celery_scheduler.celery_worker import celery
         try:
             async_result = celery.send_task(
                 ROLLBACK_DOCUMENT_TASK,
                 kwargs={"job_id": job_id},
+                task_id=task_token,
             )
         except Exception as exc:
             LOGGER.error(f"Celery 任务派发失败（回滚）: {job_id}, {type(exc).__name__}: {exc}")
@@ -732,6 +756,7 @@ class RagPipelineService:
                 "summary": "回滚任务派发失败（消息队列不可用）, 请重试",
                 "updated_at": service.now_time(),
             })
+            _release_job_lock(job_id, task_token)
             raise ParameterException(message="任务派发失败, 请稍后重试")
         await service.update_document(job_id, {"celery_task_id": async_result.id})
 
@@ -777,8 +802,9 @@ class RagPipelineService:
         doc = await service.get_document_entry(job_id)
         if not doc:
             return {"success": False, "error": f"文档不存在: job_id={job_id}"}
-        if doc.get("status") != "failed":
-            return {"success": False, "error": f"仅失败状态的文档可以回滚（当前状态: {doc.get('status')}）"}
+        submitted = doc.get('status') == 'embedding' and doc.get('celery_task_id') == self._execution_token
+        if doc.get("status") != "failed" and not submitted:
+            return {"success": False, "error": f"文档不属于当前回滚任务（当前状态: {doc.get('status')}）"}
 
         out_base = Path(PROJECT_CONFIG.RAG_OUTPUT_DIR)
         in_base = Path(PROJECT_CONFIG.RAG_INPUT_DIR)
