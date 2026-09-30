@@ -6,6 +6,14 @@ import type { DocumentStatus } from '@/types/api'
  * 故沿用原前端的分阶段配色方案（Tailwind 默认调色板, 本地打包）。
  */
 const STATUS_MAP: Record<DocumentStatus, { label: string; className: string }> = {
+  queued: {
+    label: '等待派发',
+    className: 'bg-default text-default-foreground border-border',
+  },
+  deleting: {
+    label: '删除中',
+    className: 'bg-danger-soft text-danger border-danger/30',
+  },
   splitting: {
     label: '内容解析',
     className:

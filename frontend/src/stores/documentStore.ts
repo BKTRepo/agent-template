@@ -6,7 +6,7 @@ import { POLL_INTERVAL } from '@/lib/constants'
 import { toast } from '@/lib/toast'
 
 const ACTIVE_STATUSES = new Set([
-  'splitting', 'pending', 'parsing', 'terminology', 'analyzing', 'chunking', 'embedding',
+  'queued', 'deleting', 'splitting', 'pending', 'parsing', 'terminology', 'analyzing', 'chunking', 'embedding',
 ])
 
 interface DocumentState {
@@ -43,7 +43,6 @@ const useDocumentStoreBase = create<DocumentState>()((set, get) => ({
   fetchDocuments: async () => {
     set({ loading: true })
     try {
-      const { selectedIds } = get()
       const data = await listDocuments()
       set({ documents: data, loading: false })
       get().resumePendingPolls()
@@ -93,6 +92,19 @@ const useDocumentStoreBase = create<DocumentState>()((set, get) => ({
       try {
         // 取本轮轮询前的快照: 用于识别"由更新中 → 完成"的跳变, 触发更新完成提示
         const prev = get().documents.find((d) => d.id === jobId)
+        // 清理完成后记录会消失，通过列表确认后再移除前端条目。
+        if (prev?.status === 'deleting') {
+          const documents = await listDocuments()
+          const current = documents.find((d) => d.id === jobId)
+          if (!current) {
+            get().stopPolling(jobId)
+            get().removeDocuments([jobId])
+            toast.success(`删除完成: ${prev.filename}`)
+          } else {
+            get().updateDocument(jobId, current)
+          }
+          return
+        }
         const status = await getConvertStatus(jobId)
         get().updateDocument(jobId, status)
         if (

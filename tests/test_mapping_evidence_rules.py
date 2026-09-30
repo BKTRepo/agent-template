@@ -22,6 +22,8 @@ from applications.jiayueyang.services.term_mapping_service import term_mapping_s
 from tortoise import Tortoise
 from configure import PROJECT_CONFIG
 
+# SQLite 初始化也注册会话模型：删除接口测试会导入会话路由，
+# Tortoise 的公共继承字段需要对应模型的连接绑定，避免测试导入顺序影响结果。
 
 def _feedback(**overrides):
     data = {
@@ -148,6 +150,7 @@ async def test_first_evidence_waits_for_second_independent_feedback(monkeypatch)
     await Tortoise.init(
         db_url="sqlite://:memory:",
         modules={"models": [
+            "applications.jiayueyang.models.conversation_model",
             "applications.jiayueyang.models.feedback_model",
             "applications.jiayueyang.models.mapping_evidence_model",
             "applications.jiayueyang.models.term_mapping_model",
@@ -215,6 +218,7 @@ async def test_concurrent_aggregate_recovers_from_mapping_key_conflict(monkeypat
     await Tortoise.init(
         db_url="sqlite://:memory:",
         modules={"models": [
+            "applications.jiayueyang.models.conversation_model",
             "applications.jiayueyang.models.feedback_model",
             "applications.jiayueyang.models.mapping_evidence_model",
             "applications.jiayueyang.models.term_mapping_model",
@@ -294,6 +298,7 @@ async def test_evidence_with_different_scopes_can_share_learned_mapping(monkeypa
     await Tortoise.init(
         db_url="sqlite://:memory:",
         modules={"models": [
+            "applications.jiayueyang.models.conversation_model",
             "applications.jiayueyang.models.feedback_model",
             "applications.jiayueyang.models.mapping_evidence_model",
             "applications.jiayueyang.models.term_mapping_model",
@@ -352,6 +357,7 @@ async def test_query_scope_mismatch_does_not_discard_mapping():
     await Tortoise.init(
         db_url="sqlite://:memory:",
         modules={"models": [
+            "applications.jiayueyang.models.conversation_model",
             "applications.jiayueyang.models.feedback_model",
             "applications.jiayueyang.models.mapping_evidence_model",
             "applications.jiayueyang.models.term_mapping_model",
@@ -382,7 +388,10 @@ async def test_query_scope_mismatch_does_not_discard_mapping():
 async def test_source_mappings_cover_all_terms_and_learned_fills_only_gaps():
     await Tortoise.init(
         db_url="sqlite://:memory:",
-        modules={"models": ["applications.jiayueyang.models.term_mapping_model"]},
+        modules={"models": [
+            "applications.jiayueyang.models.conversation_model",
+            "applications.jiayueyang.models.term_mapping_model",
+        ]},
     )
     await Tortoise.generate_schemas()
     try:
@@ -421,6 +430,7 @@ async def test_source_mapping_status_is_checked_per_alias(monkeypatch):
     await Tortoise.init(
         db_url="sqlite://:memory:",
         modules={"models": [
+            "applications.jiayueyang.models.conversation_model",
             "applications.jiayueyang.models.feedback_model",
             "applications.jiayueyang.models.mapping_evidence_model",
             "applications.jiayueyang.models.term_mapping_model",
@@ -474,6 +484,7 @@ async def test_zero_valid_evidence_disables_existing_mapping():
     await Tortoise.init(
         db_url="sqlite://:memory:",
         modules={"models": [
+            "applications.jiayueyang.models.conversation_model",
             "applications.jiayueyang.models.feedback_model",
             "applications.jiayueyang.models.mapping_evidence_model",
             "applications.jiayueyang.models.term_mapping_model",
@@ -508,6 +519,7 @@ async def test_conflicting_nonempty_official_terms_disable_mapping(monkeypatch):
     await Tortoise.init(
         db_url="sqlite://:memory:",
         modules={"models": [
+            "applications.jiayueyang.models.conversation_model",
             "applications.jiayueyang.models.feedback_model",
             "applications.jiayueyang.models.mapping_evidence_model",
             "applications.jiayueyang.models.term_mapping_model",

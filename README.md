@@ -223,6 +223,12 @@ static_vendor/             合并模块携带的 Swagger 静态资源
 tests/                     单元和集成测试
 ```
 
+## 2026-09-30 发布合并版
+
+`release/qoder-worker-db-20260930` 同时包含后端与 `frontend/` 前端，
+包括 qoder 问答优化、Worker 生命周期、删除一致性及 LLM 调用统计落库。
+部署目录、数据库变更和重启顺序见 [发布部署说明](deploy/RELEASE-20260930.md)。
+
 ## 常见问题
 
 - **依赖安装异常**：确认 `python --version` 为 3.13，并删除后重新创建由旧 Python 版本生成的虚拟环境。

@@ -1,5 +1,7 @@
 // ---- Document ----
 export type DocumentStatus =
+  | 'queued'
+  | 'deleting'
   | 'splitting'
   | 'pending'
   | 'parsing'
@@ -48,6 +50,9 @@ export interface Document {
   update_history: UpdateHistoryEntry[]
   /** 是否可回滚到上一版本（更新失败且上一版本产物齐全时为 true） */
   rollback_available: boolean
+  deleting_retry_count?: number
+  deletion_retryable?: boolean
+  deletion_error_type?: string | null
 }
 
 /** 单次增量更新历史记录 */
@@ -143,6 +148,8 @@ export interface PipelineCancelResponse {
 
 // ---- Files ----
 export interface DeleteFilesResponse {
+  /** 已派发后台删除任务，不表示磁盘和向量已清理完成。 */
+  queued?: string[]
   deleted: string[]
   failed: string[]
 }

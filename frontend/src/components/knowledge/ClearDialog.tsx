@@ -5,7 +5,6 @@ import { AlertTriangle } from 'lucide-react'
 import { AppModal } from '@/components/common/Modal'
 import { useDocumentStore } from '@/stores/documentStore'
 import { deleteFiles } from '@/api/files'
-import { cancelPipeline } from '@/api/pipeline'
 
 interface Props {
   open: boolean
@@ -19,34 +18,23 @@ export function ClearDialog({ open, onClose }: Props) {
   const selectedIds = useDocumentStore.use.selectedIds()
   const hasSelection = useDocumentStore.use.hasSelection()
   const documents = useDocumentStore.use.documents()
-  const removeDocuments = useDocumentStore.use.removeDocuments()
-  const stopAllPolling = useDocumentStore.use.stopAllPolling()
+  const fetchDocuments = useDocumentStore.use.fetchDocuments()
   const deselectAll = useDocumentStore.use.deselectAll()
 
   const targetIds = hasSelection() ? [...selectedIds] : documents.map((d) => d.id)
-  const targetDocs = documents.filter((d) => targetIds.includes(d.id))
   const isAll = !hasSelection()
 
   const handleConfirm = async () => {
     setDeleting(true)
     try {
-      const hasRunning = targetDocs.some((d) =>
-        ['parsing', 'terminology', 'analyzing', 'chunking', 'embedding'].includes(d.status),
-      )
-      if (hasRunning) {
-        try {
-          await cancelPipeline()
-        } catch {
-          // best effort
-        }
-        stopAllPolling()
-      }
-
-      // 源文件留档、解析产物目录与向量分块均由服务端按 job_id 推导清理
-      await deleteFiles(targetIds)
-      removeDocuments(targetIds)
+      // 服务端只取消所选文档，并异步清理产物；不能停止其他文档的流水线。
+      const result = await deleteFiles(targetIds)
+      await fetchDocuments()
       deselectAll()
-      toast.success(`已删除 ${targetIds.length} 个文档`)
+      const queued = result.queued ?? result.deleted
+      if (queued.length) toast.info(`已提交 ${queued.length} 个文档的删除任务`)
+      if (result.failed.length) toast.danger(`${result.failed.length} 个文档删除任务派发失败，请查看文档状态`)
+      if (!queued.length && !result.failed.length) toast.info('没有需要删除的文档，请查看最新列表')
       onClose()
     } catch (err) {
       toast.danger(`删除失败: ${err instanceof Error ? err.message : String(err)}`)
