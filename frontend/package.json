@@ -1,0 +1,49 @@
+{
+  "name": "rag-webui-heroui-jyy",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "css:build": "node scripts/build-css.mjs",
+    "css:watch": "node scripts/build-css.mjs --watch",
+    "dev": "node scripts/dev.mjs",
+    "build": "tsc -b && node scripts/build-css.mjs && vite build",
+    "preview": "vite preview",
+    "serve": "node server.js",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@fontsource/space-grotesk": "^5.3.0",
+    "@heroui/react": "^3.2.3",
+    "axios": "^1.9.0",
+    "clsx": "^2.1.1",
+    "framer-motion": "^12.43.0",
+    "highlight.js": "^11.11.0",
+    "lucide-react": "^0.503.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1",
+    "tailwind-merge": "^3.2.0",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@csstools/postcss-cascade-layers": "^6.0.0",
+    "@csstools/postcss-color-mix-function": "^4.0.7",
+    "@csstools/postcss-oklab-function": "^5.0.7",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@tailwindcss/vite": "^4.1.4",
+    "@types/node": "^22.14.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-legacy": "^6.1.1",
+    "@vitejs/plugin-react": "^4.4.0",
+    "autoprefixer": "^10.5.4",
+    "postcss": "^8.5.25",
+    "postcss-nesting": "^14.0.1",
+    "tailwindcss": "^4.1.4",
+    "typescript": "~5.8.0",
+    "vite": "^6.3.0"
+  }
+}

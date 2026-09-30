@@ -1,0 +1,7 @@
+# 构建产物（可由 npm run build 重新生成）
+dist/
+# 依赖（根 .gitignore 已全局忽略 node_modules/，此处显式声明以便单独克隆本目录时也生效）
+node_modules/
+# TypeScript 增量编译缓存
+*.tsbuildinfo
+.vite/

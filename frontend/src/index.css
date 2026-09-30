@@ -1,0 +1,528 @@
+/* HeroUI v3 主题入口：内部会 @import "tailwindcss" 并注入分层样式与默认主题。
+   由 @tailwindcss/vite 插件统一编译, 全部资源本地打包, 无任何外网依赖。 */
+@import "@heroui/styles";
+
+/* 品牌字体 Space Grotesk（本地文件 public/fonts/, 离线可用; 仅 Logo 用到的 latin 粗体子集） */
+@font-face {
+  font-family: 'Space Grotesk';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 700;
+  src: url('/fonts/space-grotesk-latin-700-normal.woff2') format('woff2'),
+    url('/fonts/space-grotesk-latin-700-normal.woff') format('woff');
+}
+
+/* 基于 .dark 类的暗色变体（HeroUI 组件色由 CSS 变量随 .dark 自动切换,
+   这里额外开启 dark: 工具类以便自定义样式区分明暗） */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---------------------------------------------------------------------------
+   品牌与全局
+--------------------------------------------------------------------------- */
+:root {
+  /* 将 HeroUI 的主色(accent)调为与图标一致的蓝, 并微调圆角, 贴近原前端观感。
+     双声明: hex 供旧浏览器(不认识 oklch)使用, 现代浏览器以 oklch 覆盖;
+     运行时由 useTheme 按所选主题色覆盖 --accent / --accent-rgb。 */
+  --accent: #2867e4;
+  --accent: oklch(0.55 0.2 262);
+  --accent-rgb: 40 103 228;
+  --radius: 0.55rem;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--background);
+    color: var(--foreground);
+    font-family:
+      -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+      Arial, "Noto Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  * {
+    border-color: var(--border);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   品牌 Logo 字标（RAG）
+   使用本地打包的 Space Grotesk 粗体, 主题色(accent)渐变填充; accent 换色时自动跟随。
+--------------------------------------------------------------------------- */
+.rag-logo {
+  font-family: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-weight: 700;
+  font-size: 1.625rem;
+  line-height: 1;
+  letter-spacing: 0.05em;
+  /* 旧浏览器回退（不支持 color-mix）: 纯主色渐变; 现代浏览器用下方声明覆盖 */
+  background: linear-gradient(118deg, var(--accent) 20%, var(--accent) 95%);
+  background: linear-gradient(
+    118deg,
+    var(--accent) 20%,
+    color-mix(in oklab, var(--accent) 62%, #ffffff) 95%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  user-select: none;
+}
+
+/* ---------------------------------------------------------------------------
+   自定义动画 / 工具类（与原前端等价的交互细节）
+--------------------------------------------------------------------------- */
+/* 不定长进度条 —— 连续左右流动 */
+@keyframes indeterminate-flow {
+  0% {
+    left: -30%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+.animate-indeterminate {
+  position: relative;
+  height: 100%;
+  width: 30%;
+  animation: indeterminate-flow 1.5s linear infinite;
+  border-radius: 9999px;
+}
+
+/* 流水线运行中按钮的呼吸提示 */
+.pipeline-busy {
+  animation: pipeline-pulse 2s ease-in-out infinite;
+}
+@keyframes pipeline-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(239, 68, 68, 0);
+  }
+}
+
+/* 竖排文字（侧栏收起时的标签） */
+.vertical-text {
+  writing-mode: vertical-lr;
+  letter-spacing: 0.15em;
+}
+
+/* ---------------------------------------------------------------------------
+   滚动条
+--------------------------------------------------------------------------- */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--foreground) 18%, transparent);
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklab, var(--foreground) 30%, transparent);
+}
+
+/* ---------------------------------------------------------------------------
+   Markdown 正文排版（对话消息）
+--------------------------------------------------------------------------- */
+.md-body {
+  line-height: 1.65;
+  word-break: break-word;
+}
+.md-body > *:first-child {
+  margin-top: 0;
+}
+.md-body > *:last-child {
+  margin-bottom: 0;
+}
+.md-body p {
+  margin: 0.4em 0;
+}
+.md-body h1,
+.md-body h2,
+.md-body h3,
+.md-body h4 {
+  font-weight: 600;
+  margin: 0.8em 0 0.4em;
+  line-height: 1.3;
+}
+.md-body h1 {
+  font-size: 1.25em;
+}
+.md-body h2 {
+  font-size: 1.15em;
+}
+.md-body h3 {
+  font-size: 1.05em;
+}
+.md-body ul,
+.md-body ol {
+  margin: 0.4em 0;
+  padding-left: 1.4em;
+}
+.md-body ul {
+  list-style: disc;
+}
+.md-body ol {
+  list-style: decimal;
+}
+.md-body li {
+  margin: 0.15em 0;
+}
+.md-body a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.md-body blockquote {
+  margin: 0.6em 0;
+  padding: 0.2em 0.9em;
+  border-left: 3px solid var(--accent);
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
+  border-radius: 0 0.4rem 0.4rem 0;
+  color: var(--muted);
+}
+.md-body code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  padding: 0.15em 0.4em;
+  border-radius: 0.35rem;
+  background: color-mix(in oklab, var(--foreground) 10%, transparent);
+}
+/* 代码块: 背景随主题（浅色=加深一点的浅色底, 深色=柔和悬浮面板, 不再纯黑）;
+   高亮 token 配色见下方 --hl-* 双主题变量 */
+.md-body pre {
+  margin: 0.6em 0;
+  padding: 0.85em 1em;
+  border-radius: 0.6rem;
+  overflow: auto;
+  border: 1px solid color-mix(in oklab, var(--foreground) 10%, transparent);
+  background: color-mix(in oklab, var(--foreground) 6%, transparent);
+  /* 无语言标注的代码块不会触发 hljs 着色, 文字须跟随主题前景色 */
+  color: var(--foreground);
+}
+.md-body pre code {
+  padding: 0;
+  background: transparent;
+  font-size: 0.82em;
+  line-height: 1.6;
+}
+.md-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  font-size: 0.9em;
+}
+.md-body th,
+.md-body td {
+  border: 1px solid var(--border);
+  padding: 0.35em 0.7em;
+  text-align: left;
+}
+.md-body th {
+  background: color-mix(in oklab, var(--foreground) 6%, transparent);
+  font-weight: 600;
+}
+.md-body hr {
+  margin: 1em 0;
+  border: none;
+  border-top: 1px solid var(--border);
+}
+.md-body img {
+  max-width: 100%;
+  border-radius: 0.5rem;
+}
+
+/* ---------------------------------------------------------------------------
+   代码高亮双主题（highlight.js token 类）
+   取代整体引入的 github-dark 主题: 浅色用 GitHub 浅配色、深色用 GitHub 深配色,
+   token 颜色经 --hl-* 变量随 .dark 切换, 与随主题的代码块底色配套。
+--------------------------------------------------------------------------- */
+.md-body {
+  --hl-keyword: #d73a49;
+  --hl-entity: #6f42c1;
+  --hl-constant: #005cc5;
+  --hl-string: #032f62;
+  --hl-var: #e36209;
+  --hl-comment: #6a737d;
+  --hl-tag: #22863a;
+  --hl-bullet: #735c0f;
+  --hl-addition: #22863a;
+  --hl-addition-bg: #f0fff4;
+  --hl-deletion: #b31d28;
+  --hl-deletion-bg: #ffeef0;
+}
+.dark .md-body {
+  --hl-keyword: #ff7b72;
+  --hl-entity: #d2a8ff;
+  --hl-constant: #79c0ff;
+  --hl-string: #a5d6ff;
+  --hl-var: #ffa657;
+  --hl-comment: #8b949e;
+  --hl-tag: #7ee787;
+  --hl-bullet: #f2cc60;
+  --hl-addition: #aff5b4;
+  --hl-addition-bg: #033a16;
+  --hl-deletion: #ffdcd7;
+  --hl-deletion-bg: #67060c;
+}
+.md-body .hljs-doctag,
+.md-body .hljs-keyword,
+.md-body .hljs-meta .hljs-keyword,
+.md-body .hljs-template-tag,
+.md-body .hljs-template-variable,
+.md-body .hljs-type,
+.md-body .hljs-variable.language_ {
+  color: var(--hl-keyword);
+}
+.md-body .hljs-title,
+.md-body .hljs-title.class_,
+.md-body .hljs-title.class_.inherited__,
+.md-body .hljs-title.function_ {
+  color: var(--hl-entity);
+}
+.md-body .hljs-attr,
+.md-body .hljs-attribute,
+.md-body .hljs-literal,
+.md-body .hljs-meta,
+.md-body .hljs-number,
+.md-body .hljs-operator,
+.md-body .hljs-variable,
+.md-body .hljs-selector-attr,
+.md-body .hljs-selector-class,
+.md-body .hljs-selector-id {
+  color: var(--hl-constant);
+}
+.md-body .hljs-regexp,
+.md-body .hljs-string,
+.md-body .hljs-meta .hljs-string {
+  color: var(--hl-string);
+}
+.md-body .hljs-built_in,
+.md-body .hljs-symbol {
+  color: var(--hl-var);
+}
+.md-body .hljs-comment,
+.md-body .hljs-code,
+.md-body .hljs-formula {
+  color: var(--hl-comment);
+}
+.md-body .hljs-name,
+.md-body .hljs-quote,
+.md-body .hljs-selector-tag,
+.md-body .hljs-selector-pseudo {
+  color: var(--hl-tag);
+}
+.md-body .hljs-section {
+  color: var(--hl-constant);
+  font-weight: 700;
+}
+.md-body .hljs-bullet {
+  color: var(--hl-bullet);
+}
+.md-body .hljs-addition {
+  color: var(--hl-addition);
+  background-color: var(--hl-addition-bg);
+}
+.md-body .hljs-deletion {
+  color: var(--hl-deletion);
+  background-color: var(--hl-deletion-bg);
+}
+.md-body .hljs-emphasis {
+  font-style: italic;
+}
+.md-body .hljs-strong {
+  font-weight: 700;
+}
+
+/* ---------------------------------------------------------------------------
+   文档表格美化（.doc-table）
+   去掉背景色与列间竖线, 细化表头与分隔线, 行悬停高亮; 颜色全部走主题变量,
+   明暗模式自动适配。
+--------------------------------------------------------------------------- */
+/* 表格容器: 去背景, 加浅色外边框 + 柔和阴影, 轻圆角 */
+.doc-table {
+  background: transparent;
+  border: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
+  border-radius: 12px;
+  box-shadow:
+    0 1px 2px 0 rgb(0 0 0 / 0.04),
+    0 2px 8px 0 rgb(0 0 0 / 0.05);
+  padding: 0;
+}
+/* 表头行: 透明 */
+.doc-table .table__header {
+  background: transparent;
+}
+/* 表头单元格: 柔和灰、字重适中、底部一条细分隔线 */
+.doc-table .table__column {
+  background: transparent;
+  padding: 0.625rem 0.875rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+/* 去掉列间竖线 */
+.doc-table .table__column::after {
+  content: none;
+}
+/* 正文单元格: 透明背景、细分隔线、去掉圆角 */
+.doc-table .table__cell {
+  background: transparent;
+  padding: 0.75rem 0.875rem;
+  border-bottom: 1px solid color-mix(in oklab, var(--separator) 55%, transparent);
+  border-radius: 0;
+}
+/* 覆盖 primary 变体对首/末单元格的圆角 */
+.doc-table .table__body tr:first-child td:first-child,
+.doc-table .table__body tr:first-child td:last-child,
+.doc-table .table__body tr:last-child td:first-child,
+.doc-table .table__body tr:last-child td:last-child {
+  border-radius: 0;
+}
+/* 行悬停高亮 */
+@media (hover: hover) {
+  .doc-table .table__row:hover .table__cell,
+  .doc-table .table__row[data-hovered="true"] .table__cell {
+    background: color-mix(in oklab, var(--foreground) 4%, transparent);
+  }
+}
+/* 最后一行无分隔线 */
+.doc-table .table__row:last-child .table__cell {
+  border-bottom: none;
+}
+
+/* ---------------------------------------------------------------------------
+   文档搜索框：主题默认表单字段无边框（--border 也太淡），
+   这里给一圈浅色边框 + 轻微投影。取前景色低比例混透明：
+   浅色主题得到淡灰、深色主题得到柔和的浅灰，两种主题下都可见且不突兀。
+   聚焦环基于 box-shadow 实现，会被下方阴影覆盖，故在聚焦规则中一并还原。
+--------------------------------------------------------------------------- */
+.doc-search [data-slot="input"] {
+  border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.06);
+}
+.doc-search [data-slot="input"]:hover:not(:focus) {
+  border-color: color-mix(in oklab, var(--foreground) 14%, transparent);
+}
+.doc-search [data-slot="input"]:focus,
+.doc-search [data-slot="input"][data-focused="true"] {
+  border-color: var(--field-border-focus, var(--accent));
+  box-shadow:
+    0 1px 3px rgb(0 0 0 / 0.06),
+    0 0 0 2px var(--focus, var(--accent));
+}
+
+/* 表格行选择复选框：主题默认 field 边框为透明 + 0 宽导致看不清，
+   补上与搜索框一致的浅色边框 */
+.doc-table .checkbox__control {
+  border-width: 1px;
+  border-color: color-mix(in oklab, var(--foreground) 18%, transparent);
+}
+.doc-table .checkbox:hover .checkbox__control,
+.doc-table .checkbox [data-slot="checkbox-content"][data-hovered="true"] .checkbox__control {
+  border-color: color-mix(in oklab, var(--foreground) 28%, transparent);
+}
+
+/* 聊天输入区: 文本框自身聚焦时不显示主题色 ring/边框/背景变化,
+   聚焦反馈统一由外层容器的边框变色提供（避免"框中框"穿帮） */
+.chat-composer textarea:focus {
+  border-color: transparent;
+  box-shadow: none;
+  background-color: var(--surface);
+}
+/* 主题切换同步: 组件库给 textarea 的 background-color 带了 .15s 过渡,
+   外层容器若也过渡背景则两者时长不一致, 切换明暗主题时会短暂出现两层不同色。
+   因此背景色不参与过渡, 随主题变量瞬时切换; 边框/阴影过渡保留给聚焦效果 */
+.chat-composer textarea {
+  transition-property: border-color, box-shadow;
+}
+
+/* ---------------------------------------------------------------------------
+   聊天消息动效
+--------------------------------------------------------------------------- */
+/* 消息气泡入场: 淡入 + 轻微上浮。
+   注意 fill-mode 用 backwards 而非 both: 入场结束后不保留动画填充,
+   避免元素被浏览器长期标记为"带填充动画"而在 hover 等样式重算时
+   反复重新合成（旧版 Chromium 下表现为整条消息随鼠标移动闪烁） */
+@keyframes msg-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+.msg-in {
+  animation: msg-in 0.3s var(--ease-out, ease-out) backwards;
+}
+
+/* Thinking 等待圆点: 依次弹跳 */
+@keyframes thinking-dot {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+.thinking-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+.thinking-dots > span {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background-color: var(--accent);
+  animation: thinking-dot 1.2s infinite ease-in-out;
+}
+.thinking-dots > span:nth-child(2) { animation-delay: 0.15s; }
+.thinking-dots > span:nth-child(3) { animation-delay: 0.3s; }
+
+/* 流式输出光标: 呼吸闪烁 */
+@keyframes cursor-blink {
+  0%, 45% { opacity: 1; }
+  55%, 100% { opacity: 0; }
+}
+.stream-cursor {
+  display: inline-block;
+  margin-left: 2px;
+  width: 7px;
+  height: 1em;
+  vertical-align: text-bottom;
+  border-radius: 1px;
+  background: var(--accent); /* 旧浏览器回退（不支持 color-mix） */
+  background: linear-gradient(180deg, var(--accent), color-mix(in oklab, var(--accent) 60%, var(--foreground)));
+  animation: cursor-blink 1s infinite;
+}
+
+/* 流式增量文本淡入: 新内容以渐显方式出现（配合前端平滑缓冲）。
+   同 msg-in: fill 用 backwards, 结束后不保留动画状态 */
+@keyframes text-appear {
+  from { opacity: 0.35; }
+  to { opacity: 1; }
+}
+.text-appear {
+  animation: text-appear 0.4s ease-out backwards;
+}
+
+/* ---------------------------------------------------------------------------
+   聊天滚动区渲染稳定性
+--------------------------------------------------------------------------- */
+/* HeroUI 按钮基类自带 transform: translateZ(0) + will-change: transform,
+   使每个按钮都成为永久合成层。消息区内每条消息含复制/重新生成按钮,
+   层数量随消息线性增长; 旧版 Chromium + Windows GPU 驱动下, 鼠标划过
+   触发 hover 重绘时这些层反复重合成, 表现为内容闪烁。在消息滚动区内
+   取消按钮的永久层提升（:not(#\#) 链为对齐组件库选择器优先级,
+   !important 兜底）; 按压反馈等交互不受影响, 仅去掉常驻提升。 */
+.chat-msg-scroll .button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  will-change: auto !important;
+  transform: none !important;
+}
