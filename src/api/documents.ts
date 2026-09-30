@@ -2,8 +2,9 @@ import { apiClient } from './client'
 import type { Document, DocChunksResponse, DocMarkdownResponse, DocStatusResponse, DocTerminologyResponse } from '@/types/api'
 
 export async function listDocuments(): Promise<Document[]> {
-  const { data } = await apiClient.get<Document[]>('/documents')
-  return data
+  // 后端文档接口返回分页信封 { items, total }，前端状态只需要文档数组。
+  const { data } = await apiClient.get<{ items?: Document[]; total?: number } | Document[]>('/documents')
+  return Array.isArray(data) ? data : (data?.items ?? [])
 }
 
 /** 更新文档摘要（详情页编辑保存） */

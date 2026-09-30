@@ -4,7 +4,7 @@ export const MAX_CONVERSATION_HISTORY = 20
 export const API_BASE = "/api"
 
 /** 可选 LLM 模型列表（对话输入区切换） */
-export const LLM_MODELS = ['deepseek-v4-flash', 'kimi26', 'glm-51-local']
+export const LLM_MODELS = ['kimi-for-coding', 'deepseek-v4-flash', 'deepseek-v4-flash-0731-think', 'glm-51-local']
 export const DEFAULT_LLM_MODEL = LLM_MODELS[0]!
 
 /** 检索模式选项（仅中文文案, id 与后端 mode 对应） */

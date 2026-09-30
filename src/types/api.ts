@@ -259,6 +259,17 @@ export interface ConversationSearchMatch {
   created_time: string
 }
 
+/** 回答采纳状态（由后端反馈快照接口返回） */
+export interface AnswerFeedbackStatus {
+  feedback_uid?: string | null
+  conversation_id: number
+  message_seq: number
+  action: 'accepted' | 'revoked' | null
+  effective: boolean
+  index_status?: 'pending' | 'synced' | 'failed' | 'deleted' | null
+  updated_time?: string | null
+}
+
 export type MessageStatus = 'done' | 'generating' | 'interrupted'
 
 export interface ConversationMessage {

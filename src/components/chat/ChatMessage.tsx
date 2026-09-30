@@ -2,7 +2,7 @@ import { memo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
-import { ChevronDown, ChevronRight, Copy, Check, RefreshCw, Search, Zap } from 'lucide-react'
+import { ChevronDown, ChevronRight, Copy, Check, RefreshCw, Search, Zap, ThumbsUp, ThumbsDown } from 'lucide-react'
 import { Button } from '@heroui/react'
 import { cn, formatChatTime } from '@/lib/utils'
 import type { ChatMessage as ChatMsg } from '@/stores/chatStore'
@@ -118,7 +118,13 @@ function RetrievalDetailPanel({ detail }: { detail: NonNullable<ChatMsg['retriev
 // 主组件
 // ---------------------------------------------------------------------------
 
-function ChatMessageComponent({ msg, onCopy, onRegenerate }: { msg: ChatMsg; onCopy?: (content: string) => Promise<boolean>; onRegenerate?: (id: string) => void }) {
+function ChatMessageComponent({ msg, onCopy, onRegenerate, feedbackAction, onFeedback }: {
+  msg: ChatMsg
+  onCopy?: (content: string) => Promise<boolean>
+  onRegenerate?: (id: string) => void
+  feedbackAction?: 'accepted' | 'revoked' | null
+  onFeedback?: (action: 'accepted' | 'revoked') => Promise<void>
+}) {
   const isUser = msg.role === 'user'
   const [thinkExpanded, setThinkExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -246,6 +252,32 @@ function ChatMessageComponent({ msg, onCopy, onRegenerate }: { msg: ChatMsg; onC
             <Button variant="ghost" size="sm" isIconOnly className="size-6" onPress={() => onRegenerate(msg.id)} aria-label="重新生成">
               <RefreshCw className="size-3" />
             </Button>
+          )}
+          {!isGenerating && onFeedback && (
+            <>
+              <Button
+                variant={feedbackAction === 'accepted' ? 'primary' : 'ghost'}
+                size="sm"
+                isIconOnly
+                className="size-6"
+                onPress={() => onFeedback(feedbackAction === 'accepted' ? 'revoked' : 'accepted')}
+                aria-label={feedbackAction === 'accepted' ? '取消采纳' : '采纳回答'}
+              >
+                <ThumbsUp className="size-3" />
+              </Button>
+              {feedbackAction === 'accepted' && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  isIconOnly
+                  className="size-6"
+                  onPress={() => onFeedback('revoked')}
+                  aria-label="取消采纳"
+                >
+                  <ThumbsDown className="size-3" />
+                </Button>
+              )}
+            </>
           )}
         </div>
       )}

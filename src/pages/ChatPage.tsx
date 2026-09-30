@@ -11,7 +11,7 @@ import { ChatComposer } from '@/components/chat/ChatComposer'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { ChatSettingsDialog } from '@/components/chat/ChatSettingsDialog'
 import { sendQuery, sendQueryStream, resumeQueryStream } from '@/api/query'
-import { getConversationMessages, stopMessageGeneration } from '@/api/conversations'
+import { getAnswerFeedback, getConversationMessages, setAnswerFeedback, stopMessageGeneration } from '@/api/conversations'
 import { cn } from '@/lib/utils'
 import { copyText } from '@/lib/clipboard'
 
@@ -69,6 +69,11 @@ export default function ChatPage() {
   /** 搜索跳转后短暂高亮的消息下标 */
   const [highlightIndex, setHighlightIndex] = useState<number | null>(null)
   const highlightTimerRef = useRef<number | null>(null)
+  const [feedbackByIndex, setFeedbackByIndex] = useState<Record<number, 'accepted' | 'revoked' | null>>({})
+  const feedbackKey = messages
+    .filter((message) => message.role === 'assistant' && message.serverIndex != null)
+    .map((message) => `${message.serverIndex}`)
+    .join('|')
 
   // ---- 流式平滑缓冲: SSE 片段先入缓冲, 定时器按节拍均匀追加到消息 ----
   const bufRef = useRef('')
@@ -122,6 +127,29 @@ export default function ChatPage() {
   useEffect(() => {
     loadConversations().catch(() => {})
   }, [loadConversations])
+
+  // 会话载入后读取服务端反馈状态，确保刷新或重新打开会话时按钮状态一致。
+  useEffect(() => {
+    setFeedbackByIndex({})
+    if (currentId == null || !feedbackKey) return
+    const indexes = feedbackKey.split('|').map(Number)
+    let cancelled = false
+    Promise.all(indexes.map(async (index) => {
+      try {
+        return await getAnswerFeedback(currentId, index)
+      } catch {
+        return null
+      }
+    })).then((statuses) => {
+      if (cancelled) return
+      const next: Record<number, 'accepted' | 'revoked' | null> = {}
+      statuses.forEach((status, i) => {
+        if (status) next[indexes[i]] = status.effective ? 'accepted' : null
+      })
+      setFeedbackByIndex(next)
+    })
+    return () => { cancelled = true }
+  }, [currentId, feedbackKey])
 
   const handleChatScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget
@@ -390,6 +418,17 @@ export default function ChatPage() {
     stopStreaming()
   }, [stopStreaming, stopFlusher])
 
+  const handleFeedback = useCallback(async (messageIndex: number | null, action: 'accepted' | 'revoked') => {
+    if (currentId == null || messageIndex == null) return
+    try {
+      const status = await setAnswerFeedback(currentId, messageIndex, action)
+      setFeedbackByIndex((prev) => ({ ...prev, [messageIndex]: status.effective ? 'accepted' : null }))
+      toast.success(action === 'accepted' ? '已采纳该回答' : '已取消采纳')
+    } catch (err) {
+      toast.danger(err instanceof Error ? err.message : '更新采纳状态失败')
+    }
+  }, [currentId])
+
   // 已完成过一次重连尝试的消息（convId:msgId）: no_active_stream / 失败后不再重试同一条,
   // 交由轮询兜底, 避免"重连→无任务→重载→重连"死循环; 新一轮问答 msgId 变化不受影响。
   const resumeAttemptedRef = useRef<string | null>(null)
@@ -601,6 +640,12 @@ export default function ChatPage() {
                       onRegenerate={
                         msg.role === 'assistant' && !msg.streaming && msg.status !== 'generating'
                           ? handleRegenerate
+                          : undefined
+                      }
+                      feedbackAction={msg.role === 'assistant' ? (feedbackByIndex[msg.serverIndex ?? -1] ?? null) : undefined}
+                      onFeedback={
+                        msg.role === 'assistant' && !msg.streaming && msg.status === 'done' && msg.serverIndex != null
+                          ? (action) => handleFeedback(msg.serverIndex, action)
                           : undefined
                       }
                     />
