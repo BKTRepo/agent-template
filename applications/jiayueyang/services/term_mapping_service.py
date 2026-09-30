@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import re
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
-from configure import LOGGER
+from configure import LOGGER, PROJECT_CONFIG
 
 from applications.jiayueyang.models.term_mapping_model import (
     RagTermMappingLearned,
@@ -54,19 +54,42 @@ class MappingMatch:
         }
 
 
-MappingCandidate = Tuple[MappingMatch, int, int, int]
+MappingCandidate = Tuple[MappingMatch, int, int, int, int]
 
-_FIELD_RE = re.compile(r"\b(?:field|de|f)\s*(\d{1,3}(?:\.\d+)?)\b|\b(\d{1,3}(?:\.\d+)?)\s*域", re.IGNORECASE)
+_FIELD_RE = re.compile(
+    r"\b(?:field|de|f)\s*(\d{1,3}(?:\.\d+)?)"
+    r"|字段\s*(\d{1,3}(?:\.\d+)?)(?:\s*域)?"
+    r"|(?<![A-Za-z0-9.])(\d{1,3}(?:\.\d+)?)\s*域",
+    re.IGNORECASE,
+)
+
+
+def _field_value(match: re.Match[str]) -> str:
+    return next((group for group in match.groups() if group), "").strip()
 
 
 def extract_field_variants(text: str) -> Set[str]:
     """查询侧统一 Field/DE/F/中文“域”写法；不修改数据库规范化值。"""
     values: Set[str] = set()
     for match in _FIELD_RE.finditer(text or ""):
-        value = (match.group(1) or match.group(2) or "").strip()
+        value = _field_value(match)
         if value:
-            values.add(value)
+            values.add(f"field:{value}")
     return values
+
+
+def normalize_mapping_query(query: str) -> str:
+    """仅供查询匹配使用的规范形式，不影响导入去重或 mapping_key。"""
+    return normalize_term(query)
+
+
+def _field_occurrence(query: str, field_key: str) -> Tuple[str, int, int]:
+    wanted = field_key.split(":", 1)[-1]
+    for match in _FIELD_RE.finditer(query or ""):
+        value = _field_value(match)
+        if value == wanted:
+            return match.group(0), match.start(), match.end()
+    return field_key, 0, max(1, len(field_key))
 
 
 def _is_parent_field(value: str) -> bool:
@@ -124,8 +147,9 @@ class TermMappingService:
         source: str,
         requested_scope: Optional[str],
     ) -> List[MappingCandidate]:
-        normalized_query = normalize_term(query)
-        query_fields = extract_field_variants(query)
+        normalized_query = normalize_mapping_query(query)
+        field_matching_enabled = bool(PROJECT_CONFIG.FIELD_VARIANT_NORMALIZATION_ENABLED)
+        query_fields = extract_field_variants(query) if field_matching_enabled else set()
         expand_children = _field_expansion_requested(query)
         candidates: List[MappingCandidate] = []
         if not normalized_query:
@@ -133,7 +157,10 @@ class TermMappingService:
 
         for row in rows:
             row_terms = self._row_terms(row)
-            row_fields = extract_field_variants(" ".join(item[1] for item in row_terms))
+            row_fields = (
+                extract_field_variants(" ".join(item[1] for item in row_terms))
+                if field_matching_enabled else set()
+            )
             field_match_type: Optional[str] = None
             if query_fields and row_fields:
                 exact_fields = query_fields & row_fields
@@ -146,16 +173,39 @@ class TermMappingService:
                     field_match_type = "parent_fallback"
                 else:
                     continue
-            # 最长词优先，避免 “auth” 抢在 “incremental auth” 前面。
-            row_terms.sort(key=lambda item: len(item[0]), reverse=True)
-            selected = next(
-                (item for item in row_terms if item[0] in normalized_query),
-                None,
+            # 人工标准词精确命中 > 字段键等价 > 普通别名命中。
+            term_candidates = [item for item in row_terms if item[0] in normalized_query]
+            term_candidates.sort(
+                key=lambda item: (
+                    1 if item[2] in ("canonical_zh", "official_en") else 0,
+                    len(item[0]),
+                ),
+                reverse=True,
             )
-            if not selected:
+            selected = term_candidates[0] if term_candidates else None
+            if selected:
+                normalized_value, matched_value, matched_field = selected
+                start = normalized_query.find(normalized_value)
+                end = start + len(normalized_value)
+                match_type = "normalized_exact"
+                match_priority = 3 if matched_field in ("canonical_zh", "official_en") else 1
+            elif field_match_type:
+                # 字段写法不同也可独立命中，不再要求映射行完整术语必须是查询子串。
+                query_key = next(
+                    (
+                        qf for qf in sorted(query_fields)
+                        if qf in row_fields
+                        or (field_match_type == "parent_expansion" and any(rf.startswith(qf + ".") for rf in row_fields))
+                        or (field_match_type == "parent_fallback" and any(qf.startswith(rf + ".") for rf in row_fields))
+                    ),
+                    sorted(query_fields)[0],
+                )
+                matched_value, start, end = _field_occurrence(query, query_key)
+                matched_field = "字段键等价"
+                match_type = "field_equivalent"
+                match_priority = 2
+            else:
                 continue
-            normalized_value, matched_value, matched_field = selected
-            start = normalized_query.find(normalized_value)
             rank = self._scope_rank(row.scope, requested_scope)
             match = MappingMatch(
                 mapping_id=self._row_id(row, source),
@@ -166,11 +216,11 @@ class TermMappingService:
                 scope=row.scope,
                 matched_value=matched_value,
                 matched_field=matched_field,
-                match_type="normalized_exact",
+                match_type=match_type,
                 field_match_type=field_match_type,
                 field_keys=sorted(row_fields),
             )
-            candidates.append((match, start, start + len(normalized_value), rank))
+            candidates.append((match, start, end, rank, match_priority))
         return candidates
 
     @staticmethod
@@ -192,7 +242,9 @@ class TermMappingService:
                 continue
             candidates_at_span = by_span[(start, end)]
             best_rank = max(candidate[3] for candidate in candidates_at_span)
-            best = [candidate[0] for candidate in candidates_at_span if candidate[3] == best_rank]
+            scoped = [candidate for candidate in candidates_at_span if candidate[3] == best_rank]
+            best_priority = max(candidate[4] for candidate in scoped)
+            best = [candidate[0] for candidate in scoped if candidate[4] == best_priority]
             canonical_terms = {normalize_term(item.canonical_zh) for item in best}
             if len(canonical_terms) > 1:
                 conflicts.append({

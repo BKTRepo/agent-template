@@ -18,13 +18,19 @@ _init_async_lock: Optional[asyncio.Lock] = None
 
 
 def reset_tortoise_orm_state() -> None:
-    global _tortoise_orm_initialized
+    global _tortoise_orm_initialized, _init_async_lock
     _tortoise_orm_initialized = False
+    # Worker 进程/事件循环重建后，旧锁可能绑定在已经失效的事件循环上。
+    # 必须一起丢弃，避免下一次初始化时跨 loop 等待旧 asyncio.Lock。
+    _init_async_lock = None
 
 
 def run_async(func: Union[Coroutine, Awaitable]) -> Any:
-    from common import AsyncEventLoopContextIOPool
-    return AsyncEventLoopContextIOPool.run_in_pool(func)
+    # 统一复用 celery_worker 的事件循环池。不要在这里再次通过
+    # AsyncEventLoopContextIOPool.singleton 间接创建另一条入口，避免
+    # Tortoise 连接池被不同事件循环交替使用。
+    from celery_scheduler.celery_worker import get_async_event_loop_pool
+    return get_async_event_loop_pool().run(func)
 
 
 async def init_tortoise_orm() -> None:
@@ -87,10 +93,10 @@ async def init_tortoise_orm() -> None:
 
 
 def ensure_tortoise_orm_initialized() -> None:
-    from common import AsyncEventLoopContextIOPool
-
     try:
-        AsyncEventLoopContextIOPool.run_in_pool(init_tortoise_orm())
+        from celery_scheduler.celery_worker import get_async_event_loop_pool
+
+        get_async_event_loop_pool().run(init_tortoise_orm())
     except Exception as e:
         LOGGER.error(f"【Base】确保数据库初始化失败: {str(e)}")
         raise

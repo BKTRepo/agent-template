@@ -17,6 +17,7 @@ from applications.jiayueyang.models.conversation_model import (
     MSG_DONE,
     MSG_GENERATING,
     MSG_INTERRUPTED,
+    MSG_TRUNCATED,
     RagConversation,
     RagConversationMessage,
     RagConversationRetrieval,
@@ -137,7 +138,7 @@ class ConversationCrud(ScaffoldCrud[RagConversation, Dict, Dict]):
     ) -> bool:
         """按 seq 更新消息内容/状态/思考耗时（生成中节流回写与终态落盘共用）。
 
-        终态（done/interrupted）同时刷新会话活跃时间; 生成中的高频回写
+        终态（done/interrupted/truncated）同时刷新会话活跃时间; 生成中的高频回写
         不打扰"最近对话"排序。
 
         :return: 消息存在返回 True; 否则 False（会话可能已被删除,
@@ -157,7 +158,7 @@ class ConversationCrud(ScaffoldCrud[RagConversation, Dict, Dict]):
             values["thinking_ms"] = thinking_ms
         if values:
             await RagConversationMessage.filter(id=msg.id).update(**values)
-        if status in (MSG_DONE, MSG_INTERRUPTED):
+        if status in (MSG_DONE, MSG_INTERRUPTED, MSG_TRUNCATED):
             await self.touch(conversation_id)
         return True
 

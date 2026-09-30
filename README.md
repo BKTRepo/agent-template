@@ -163,6 +163,30 @@ gunicorn -c gunicorn_config.py backend_main:app
 
 仓库提供的 `deploy/nginx.conf` 可作为反向代理配置起点，需要按实际域名、证书和端口修改。
 
+### 复杂问答与截断保护配置
+
+部署复用旧 `.env` 时可以依赖代码默认值，但建议显式同步以下配置，便于环境核对和回滚：
+
+```ini
+SUBQUERY_MAX_TOKENS=800
+SUBQUERY_MAX_COUNT=4
+SUBQUERY_MAX_LENGTH=40
+SUBQUERY_TRUNCATION_RETRY_ENABLED=true
+SUBQUERY_RULE_FALLBACK_ENABLED=true
+SUBQUERY_FALLBACK_CACHE_TTL=300
+SUBQUERY_QUOTA_BACKFILL_ENABLED=true
+SUBQUERY_MIN_FINAL_CHUNKS=1
+SUBQUERY_BACKFILL_MAX_TOTAL=3
+SUBQUERY_BACKFILL_MIN_SCORE=0
+SUBQUERY_BACKFILL_REQUIRE_ANCHOR=false
+ANSWER_TRUNCATION_RETRY_ENABLED=true
+ANSWER_PARTIAL_FALLBACK_ENABLED=true
+ANSWER_CONCISE_RETRY_MAX_CHARS=1500
+FIELD_VARIANT_NORMALIZATION_ENABLED=true
+```
+
+子问题候选先由各自检索和统一 rerank 排序，再做有限回填；不再要求单个分块同时包含字段、代码和完整业务含义，避免跨块表格证据被硬过滤。修改上述配置或代码后需重启 API；Celery Worker 只有在其任务也读取了相同配置时才需要同步重启。
+
 ## 测试与校验
 
 在已配置测试环境变量或 `.env` 后运行：

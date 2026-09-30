@@ -17,8 +17,14 @@ from applications.jiayueyang.rag.llm import LLMTruncatedError, chat_completion
 
 _DECOMPOSE_SYSTEM_PROMPT = """你是检索查询分析助手。判断用户问题是否为复合问题，即同时涉及多个相互独立的信息面。
 单一主题输出 is_compound=false、sub_queries=[]；复合问题拆成 2~4 个自包含的单面查询。
-每个子查询保留原问题中的专有名词、字段号、代码值，不改写不翻译。
+每个子查询不超过40个中文字符，保留原问题中的业务主体、专有名词、字段号和代码值，不改写不翻译。
+不要输出分析、解释、编号或 Markdown。
 严格只输出 JSON：{"is_compound": true/false, "sub_queries": ["..."]}。"""
+
+_DECOMPOSE_RETRY_SYSTEM_PROMPT = """只判断问题是否包含2~4个独立检索面。只输出一行JSON：
+{"is_compound":true,"sub_queries":["带业务主体的短问题"]}
+或 {"is_compound":false,"sub_queries":[]}。
+每项不超过40个中文字符，保留字段号和代码值；禁止解释、编号和Markdown。"""
 
 @dataclass(frozen=True)
 class DecomposeResult:
@@ -97,35 +103,79 @@ def _parse_decompose_result(raw: str, max_count: int) -> List[str]:
             continue
         value = value.strip()
         if value and value not in result:
-            result.append(value[:int(getattr(PROJECT_CONFIG, "SUBQUERY_MAX_LENGTH", 80))])
+            result.append(value[:int(getattr(PROJECT_CONFIG, "SUBQUERY_MAX_LENGTH", 40))])
         if len(result) >= max_count:
             break
     return result
+
+def _valid_fallback_query(value: str) -> bool:
+    compact = re.sub(r"[\W_]", "", value or "", flags=re.UNICODE)
+    if len(compact) < 4:
+        return False
+    generic = re.sub(r"[？?。.!！\s]", "", value or "")
+    return generic not in {"如何处理", "有什么区别", "分别说明", "是什么", "怎么处理"}
+
+
+def _field_list_fallback(query: str, max_count: int) -> List[str]:
+    """把 ``Field 11/37/62.2`` 展开为带原问题上下文的单字段查询。"""
+    match = re.search(
+        r"(?i)\b(?:field|de|f)\s*(\d{1,3}(?:\.\d+)?(?:\s*[/、,，]\s*\d{1,3}(?:\.\d+)?)*)",
+        query or "",
+    )
+    if not match:
+        return []
+    values = re.findall(r"\d{1,3}(?:\.\d+)?", match.group(1))
+    if len(values) < 2:
+        return []
+    prefix = (query[:match.start()] or "").strip(" ，,；;。")
+    suffix = (query[match.end():] or "").strip(" ，,；;。")
+    max_length = int(getattr(PROJECT_CONFIG, "SUBQUERY_MAX_LENGTH", 40))
+    result: List[str] = []
+    for field_no in values[:max_count]:
+        value = " ".join(part for part in (prefix, f"Field {field_no}", suffix) if part).strip()
+        value = value[:max_length]
+        if _valid_fallback_query(value) and value not in result:
+            result.append(value)
+    return result if len(result) >= 2 else []
+
 
 def _rule_fallback(query: str, max_count: int) -> List[str]:
     """模型不可用时保守切分，保留业务主体，避免产生裸数字子查询。"""
     q = (query or "").strip()
     if not q:
         return []
+    field_queries = _field_list_fallback(q, max_count)
+    if field_queries:
+        return field_queries
     pieces = [p.strip(" ，,；;。") for p in re.split(r"(?:分别|以及|同时|并且|还有|和|与|及)", q) if p.strip()]
     if len(pieces) < 2:
         pieces = [p.strip(" ，,；;。") for p in re.split(r"[?？;；]", q) if p.strip()]
     if len(pieces) < 2:
         return []
+    subject_match = re.search(
+        r"^(.+?)(?:的)?(?:触发条件|识别条件|关键匹配机制|匹配机制|处理逻辑|业务规则|使用规则)",
+        q,
+    )
+    subject = subject_match.group(1).strip(" ，,；;。") if subject_match else ""
     result: List[str] = []
+    max_length = int(getattr(PROJECT_CONFIG, "SUBQUERY_MAX_LENGTH", 40))
     for piece in pieces[:max_count]:
-        if len(re.sub(r"[\W_]", "", piece, flags=re.UNICODE)) < 4:
-            continue
-        value = piece[:int(getattr(PROJECT_CONFIG, "SUBQUERY_MAX_LENGTH", 80))]
-        if value and value not in result:
+        value = piece
+        if subject and subject not in value:
+            value = f"{subject}{value}"
+        value = value[:max_length]
+        if _valid_fallback_query(value) and value not in result:
             result.append(value)
     return result if len(result) >= 2 else []
 
-async def _call_decompose(q: str, max_tokens: int) -> str:
+async def _call_decompose(q: str, max_tokens: int, *, concise_retry: bool = False) -> str:
     return await asyncio.wait_for(
         chat_completion(
             messages=q,
-            system_prompt=_DECOMPOSE_SYSTEM_PROMPT,
+            system_prompt=(
+                _DECOMPOSE_RETRY_SYSTEM_PROMPT if concise_retry
+                else _DECOMPOSE_SYSTEM_PROMPT
+            ),
             response_format={"type": "json_object"},
             temperature=0.0,
             max_tokens=max_tokens,
@@ -141,17 +191,20 @@ async def decompose_query(query: str) -> DecomposeResult:
     if cached is not None:
         LOGGER.debug("子查询分解缓存命中: %s → %s", q[:50], len(cached.sub_queries))
         return cached
-    max_tokens = int(getattr(PROJECT_CONFIG, "SUBQUERY_MAX_TOKENS", 500))
+    max_tokens = int(getattr(PROJECT_CONFIG, "SUBQUERY_MAX_TOKENS", 800))
     retry_enabled = bool(getattr(PROJECT_CONFIG, "SUBQUERY_TRUNCATION_RETRY_ENABLED", True))
     retry_count = 0
     failure_reason: Optional[str] = None
     raw = ""
     for attempt in range(2 if retry_enabled else 1):
         try:
-            raw = await _call_decompose(q, max_tokens)
+            raw = await _call_decompose(q, max_tokens, concise_retry=attempt > 0)
             subs = _parse_decompose_result(raw if isinstance(raw, str) else "", PROJECT_CONFIG.SUBQUERY_MAX_COUNT)
             if subs:
-                result = DecomposeResult(subs, "compound", "llm", retry_count=retry_count)
+                result = DecomposeResult(
+                    subs, "compound", "llm_retry" if attempt > 0 else "llm",
+                    retry_count=retry_count,
+                )
                 _cache_set(q, result)
                 return result
             try:

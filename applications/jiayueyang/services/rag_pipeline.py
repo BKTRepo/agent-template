@@ -43,6 +43,11 @@ ROLLBACK_DOCUMENT_TASK = "celery_scheduler.tasks.task_rag_pipeline.rollback_docu
 # 增量更新 prev 归档目录后缀: output/rag_upload/<job_id>.prev 与 input/<job_id>.prev
 PREV_SUFFIX = ".prev"
 
+
+def _now_iso() -> str:
+    """返回带本地时区的日志时间戳，便于和接口/LLM日志直接对照。"""
+    return datetime.now().astimezone().isoformat(timespec="milliseconds")
+
 # 重复任务防护: 本进程内正在执行的 job_id 集合（+创建锁）。
 # 背景: task_acks_late 下 worker 崩溃时消息未确认, 重启后 Redis 会重投递,
 # 若用户同时又重新提交, 同一 job_id 会被两个任务并行执行、互相覆盖文档状态。
@@ -93,6 +98,21 @@ def _acquire_job_lock(job_id: str, token: str) -> bool:
         return True
 
 
+def _acquire_delete_job_lock(job_id: str, token: str) -> bool:
+    """删除流程专用的严格加锁。
+
+    与解析/写入流程使用同一个 ``job_id`` 锁 key，保证两类操作互斥；
+    但删除属于不可逆操作，Redis 不可用时禁止降级放行，直接抛出异常，
+    由删除任务的重试策略决定后续处理。
+    """
+    r = _redis_client()
+    key = _JOB_LOCK_PREFIX + job_id
+    if r.set(key, token, nx=True, px=_JOB_LOCK_TTL_MS):
+        return True
+    held = r.get(key)
+    return held is not None and held.decode() == token
+
+
 def _refresh_job_lock(job_id: str, token: str) -> None:
     """续期锁有效期（Worker 心跳写回时调用, 防长任务锁过期后被误抢占）。"""
     try:
@@ -107,10 +127,24 @@ def _refresh_job_lock(job_id: str, token: str) -> None:
 
 def _release_job_lock(job_id: str, token: str) -> None:
     """释放锁（Lua 检查并删除, 防误删其他执行者持有的锁）。"""
+    _release_job_lock_if_owner(job_id, token)
+
+
+def _release_job_lock_if_owner(job_id: str, token: str) -> bool:
+    """仅当锁仍属于指定 token 时释放，并返回是否实际释放。
+
+    巡检确认 Worker 已失联后会调用此方法清理遗留锁。Lua 脚本会在
+    Redis 内原子地比较 value 和 token，避免误删后来获得同一 job_id 锁的
+    新任务。
+    """
     try:
-        _redis_client().eval(_RELEASE_LOCK_LUA, 1, _JOB_LOCK_PREFIX + job_id, token)
+        result = _redis_client().eval(
+            _RELEASE_LOCK_LUA, 1, _JOB_LOCK_PREFIX + job_id, token,
+        )
+        return bool(result)
     except Exception as e:
         LOGGER.warning(f"任务锁释放失败（将等待自然过期）: job_id={job_id}, {e}")
+        return False
 
 
 class RagPipelineService:
@@ -229,12 +263,19 @@ class RagPipelineService:
         # 记录内容指纹: 首次增量更新即可走"文件未变化"快速通道（否则要等
         # 第一次更新后才写入, 首更白白重跑一遍完整流水线）
         doc_entry["file_sha256"] = hashlib.sha256(file_bytes).hexdigest()
-        # 先以 queued 态建条目: 表示"已落盘、待派发确认"。派发失败立即标 failed
-        # （防僵尸文档）; 派发成功再字段级更新为正式处理态（splitting/parsing）
+        # 先以 queued 态建条目: 表示"已落盘、待派发确认"。随后立即升级为正式
+        # 处理态（splitting/parsing）再派发; 派发失败立即标 failed（防僵尸文档）
         doc_entry["status"] = "queued"
         # 原子创建: 重名权威校验 + 唯一约束兜底在数据库侧完成, 防并发同名上传双双通过
         # （重名时抛 DataAlreadyExistsException, 视图层统一转为 DataAlreadyExistsResponse）
         await service.create_document(doc_entry)
+
+        # 先写正式处理态再派发（与 retry_document 的安全顺序一致）: 消息一旦投出,
+        # Worker 可能瞬间完成并写回终态; 若之后再用本函数的内存状态覆盖 status,
+        # 会把 complete/failed 打回 parsing（成功文档随后被巡检误标 failed）。
+        # 因此 send_task 之后本流程只允许写 celery_task_id, 不再触碰 status。
+        final_status = "splitting" if total_parts > 1 else "parsing"
+        await service.update_document(job_id, {"status": final_status})
 
         # 分发 Celery 任务（Worker 会读取仅携带 job_id 的消息，从而从留档目录中读取字节流
         from celery_scheduler.celery_worker import celery
@@ -244,7 +285,8 @@ class RagPipelineService:
                 kwargs={"job_id": job_id},
             )
         except Exception as exc:
-            # 派发失败（如消息队列不可用）: 立即标 failed, 文档不会滞留 queued 成僵尸
+            # 派发失败（如消息队列不可用）: 此刻消息确定未投出, 不存在 Worker
+            # 并发写回, 立即标 failed 防止文档滞留 parsing 成僵尸
             LOGGER.error(f"Celery 任务派发失败: {filename}, {type(exc).__name__}: {exc}")
             await service.update_document(job_id, {
                 "status": "failed",
@@ -252,13 +294,9 @@ class RagPipelineService:
                 "updated_at": service.now_time(),
             })
             raise ParameterException(message="任务派发失败, 请稍后重试")
-        # 回写 Celery 任务ID + 正式状态, 用字段级更新: 浅合并只动这两个字段,
-        # 不得以派发前快照整体覆盖 Worker 可能已写入的进度
-        final_status = "splitting" if total_parts > 1 else "parsing"
-        await service.update_document(job_id, {
-            "celery_task_id": async_result.id,
-            "status": final_status,
-        })
+        # 派发成功后只回写 Celery 任务ID, 不再触碰 status: task_id 与 Worker
+        # 写回的终态字段不相交（字段级合并互不覆盖）, 竞态无从发生
+        await service.update_document(job_id, {"celery_task_id": async_result.id})
 
         LOGGER.info(f"提交转换任务: {filename} (job_id={job_id}, 页数={page_count}), 子文档数={total_parts}")
         return {
@@ -325,10 +363,26 @@ class RagPipelineService:
         # 重新分发 Celery 任务（消息仅携带 job_id; Worker 依据 resume 标记
         # 决定续跑或从 input/ 留档重读源文件重跑完整流水线）
         from celery_scheduler.celery_worker import celery
-        async_result = celery.send_task(
-            PROCESS_DOCUMENT_TASK,
-            kwargs={"job_id": job_id},
-        )
+        try:
+            async_result = celery.send_task(
+                PROCESS_DOCUMENT_TASK,
+                kwargs={"job_id": job_id},
+            )
+        except Exception as exc:
+            # 状态已先重置为处理中，但消息可能因 Redis/Broker 不可用而未投递。
+            # 必须恢复 failed，否则前端会永久显示 parsing/terminology，且用户
+            # 无法再次点击重试。
+            LOGGER.error(
+                f"Celery 任务派发失败（重试文档）: job_id={job_id}, "
+                f"{type(exc).__name__}: {exc}"
+            )
+            await service.update_document(job_id, {
+                "status": "failed",
+                "summary": "重试任务派发失败（消息队列不可用）, 请稍后重试",
+                "error_trace": traceback.format_exc()[-5000:],
+                "updated_at": service.now_time(),
+            })
+            raise ParameterException(message="重试任务派发失败, 请稍后重试") from exc
         # 回写 Celery 任务ID 用字段级更新（浅合并, 避免旧快照覆盖 Worker 写入）
         await service.update_document(job_id, {"celery_task_id": async_result.id})
 
@@ -822,6 +876,12 @@ class RagPipelineService:
 
         返回值约定（与 zsj Celery 任务一致）: dict, success=False 表示业务失败。
         """
+        process_started = time.perf_counter()
+        process_started_at = _now_iso()
+        LOGGER.info(
+            f"RAG 文档解析任务开始: job_id={job_id}; "
+            f"start_at={process_started_at}"
+        )
         self._execution_token = execution_token or uuid.uuid4().hex
         with _ACTIVE_JOB_LOCK:
             if job_id in _ACTIVE_JOB_IDS:
@@ -841,6 +901,12 @@ class RagPipelineService:
         finally:
             with _ACTIVE_JOB_LOCK:
                 _ACTIVE_JOB_IDS.discard(job_id)
+            process_ended_at = _now_iso()
+            LOGGER.info(
+                f"RAG 文档解析任务结束: job_id={job_id}; "
+                f"end_at={process_ended_at}; "
+                f"耗时={round((time.perf_counter() - process_started) * 1000, 1)} ms"
+            )
 
     async def _process_document_inner(self, job_id: str) -> Dict[str, Any]:
         """process_document 的实际执行体（流水线本体）。
@@ -853,6 +919,15 @@ class RagPipelineService:
         doc = await service.get_document_entry(job_id)
         if not doc:
             return {"success": False, "error": f"文档不存在: job_id={job_id}"}
+        status = doc.get("status")
+        if status in {"complete", "failed", "deleting"}:
+            # task_acks_late 下，旧消息可能在 Worker 异常后重新投递。
+            # 锁只能防止同一时刻的并发执行，不能说明这条消息仍然对应
+            # 当前业务状态；终态任务必须在进入流水线前幂等跳过。
+            LOGGER.info(
+                f"任务状态为 {status}，跳过旧/重复解析任务: job_id={job_id}"
+            )
+            return {"success": True, "job_id": job_id, "skipped": status}
         # 初始化取消内存标记（派发前已被取消/删除的任务在此即被感知）
         self._note_cancel_state(doc)
 
@@ -950,6 +1025,11 @@ class RagPipelineService:
         """单文档流程: 原生 docling 离线解析 → 后处理管道。"""
         service = self.document_service
         start_time = time.time()
+        parse_started_at = _now_iso()
+        parse_started = time.perf_counter()
+        LOGGER.info(
+            f"RAG 单文档解析开始: job_id={job_id}; start_at={parse_started_at}"
+        )
 
         doc = await service.get_document_entry(job_id)
         if not doc:
@@ -969,11 +1049,20 @@ class RagPipelineService:
 
             # 原生 docling 离线解析（产物目录以 job_id 命名, 转换在独立线程执行）
             await service.add_history(f"开始解析: {filename}")
-            bundle = await convert_pdf_to_bundle(
-                file_bytes, filename, job_id,
-                do_ocr=doc.get("do_ocr", True),
-                force_ocr=doc.get("force_ocr", True),
-            )
+            conversion_started = time.perf_counter()
+            conversion_started_at = _now_iso()
+            try:
+                bundle = await convert_pdf_to_bundle(
+                    file_bytes, filename, job_id,
+                    do_ocr=doc.get("do_ocr", True),
+                    force_ocr=doc.get("force_ocr", True),
+                )
+            finally:
+                LOGGER.info(
+                    f"RAG PDF内容解析结束: job_id={job_id}; "
+                    f"start_at={conversion_started_at}; end_at={_now_iso()}; "
+                    f"耗时={round((time.perf_counter() - conversion_started) * 1000, 1)} ms"
+                )
 
             # 取消检查点
             if await self.refresh_cancel_state(job_id):
@@ -1032,6 +1121,12 @@ class RagPipelineService:
             await service.add_history(f"异常: {type(exc).__name__}: {exc}")
             await service.add_history(f"失败: {filename} -- {exc}")
             LOGGER.error(f"后台处理失败: {filename} -- {exc}")
+        finally:
+            LOGGER.info(
+                f"RAG 单文档解析结束: job_id={job_id}; "
+                f"start_at={parse_started_at}; end_at={_now_iso()}; "
+                f"耗时={round((time.perf_counter() - parse_started) * 1000, 1)} ms"
+            )
 
     async def process_split_document(
             self,
@@ -1046,10 +1141,21 @@ class RagPipelineService:
         阶段已逐个清理, 此处仅兜底扫描; 合并前被取消/中断时若不清理,
         这些目录会永久残留（前端清除只传递主产物目录, 看不到它们）。
         """
+        split_started = time.perf_counter()
+        split_started_at = _now_iso()
+        LOGGER.info(
+            f"RAG 分片文档解析开始: job_id={job_id}; start_at={split_started_at}; "
+            f"分片数={len(parts)}"
+        )
         try:
             await self._process_split_document_inner(job_id=job_id, parts=parts)
         finally:
             self._cleanup_part_dirs(job_id)
+            LOGGER.info(
+                f"RAG 分片文档解析结束: job_id={job_id}; "
+                f"end_at={_now_iso()}; "
+                f"耗时={round((time.perf_counter() - split_started) * 1000, 1)} ms"
+            )
 
     @staticmethod
     def _cleanup_part_dirs(job_id: str) -> None:

@@ -22,6 +22,7 @@ from applications.jiayueyang.services.scaffold import ScaffoldModel
 MSG_DONE = "done"
 MSG_GENERATING = "generating"
 MSG_INTERRUPTED = "interrupted"
+MSG_TRUNCATED = "truncated"
 
 
 class RagConversation(ScaffoldModel):

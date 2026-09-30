@@ -32,6 +32,7 @@ class RagDocumentCrud(ScaffoldCrud[RagDocument, Dict, Dict]):
     )
     # queued 之外的中间态（巡检候选只取这些, queued 按时长另行判定）
     ACTIVE_PROCESSING_STATUSES = ACTIVE_STATUSES[1:]
+    DELETING_STATUS = "deleting"
 
     def __init__(self):
         super().__init__(model=RagDocument)
@@ -41,6 +42,39 @@ class RagDocumentCrud(ScaffoldCrud[RagDocument, Dict, Dict]):
     async def get_by_job_id(self, job_id: str) -> Optional[RagDocument]:
         """按 job_id 获取文档（不存在返回 None）。"""
         return await self.model.filter(job_id=job_id).first()
+
+    async def mark_deleting(self, job_ids: List[str]) -> List[RagDocument]:
+        """在事务内把文档标记为 deleting，并返回删除所需的文档快照。
+
+        这里只改变 MySQL 状态，不物理删除文档记录；文件和向量由后续
+        Celery 删除任务清理。行级锁保证同一文档不会被并发删除流程重复领取。
+        """
+        ids = list(dict.fromkeys(j.strip() for j in job_ids if j and j.strip()))
+        if not ids:
+            return []
+
+        async with in_transaction():
+            docs = await self.model.filter(job_id__in=ids).select_for_update()
+            if not docs:
+                return []
+
+            deletable = [d for d in docs if d.status != self.DELETING_STATUS]
+            if deletable:
+                deletable_ids = [d.job_id for d in deletable]
+                await self.model.filter(job_id__in=deletable_ids).update(
+                    status=self.DELETING_STATUS,
+                    cancel_requested=True,
+                    deleting_retry_count=0,
+                    deletion_retryable=True,
+                    deletion_error_type=None,
+                    summary="删除任务已提交，等待后台清理",
+                    error_trace=None,
+                )
+                for doc in deletable:
+                    doc.status = self.DELETING_STATUS
+                    doc.cancel_requested = True
+
+            return list(docs)
 
     async def list_all(self) -> List[RagDocument]:
         """全部文档（按创建时间倒序）。"""
@@ -159,6 +193,10 @@ class RagDocumentCrud(ScaffoldCrud[RagDocument, Dict, Dict]):
             doc = await self.model.filter(job_id=job_id).select_for_update().first()
             if doc is None:
                 return None
+            if doc.status == self.DELETING_STATUS and not bypass_guard:
+                # 删除流程已经接管该文档，旧解析 Worker 的迟到回写不得
+                # 把 deleting 改回 parsing/embedding/complete 等状态。
+                return doc
             if self._is_cancelled(doc) and not bypass_guard:
                 fields = {**fields, "status": "failed", "summary": "用户取消"}
             doc.update_from_dict(fields)
@@ -188,6 +226,13 @@ class RagDocumentCrud(ScaffoldCrud[RagDocument, Dict, Dict]):
         return await self.model.filter(
             Q(status__in=self.ACTIVE_PROCESSING_STATUSES)
             & (Q(heartbeat_at__isnull=True) | Q(heartbeat_at__lt=heartbeat_threshold))
+        ).all()
+
+    async def list_stale_deleting_candidates(self, updated_threshold: datetime) -> List[RagDocument]:
+        """查询长时间停留在 deleting 的文档，供删除任务补偿使用。"""
+        return await self.model.filter(
+            status=self.DELETING_STATUS,
+            updated_time__lt=updated_threshold,
         ).all()
 
     async def mark_queued_failed(self, updated_before: datetime, summary: str) -> int:
@@ -229,3 +274,89 @@ class RagDocumentCrud(ScaffoldCrud[RagDocument, Dict, Dict]):
             if docs:
                 await self.model.filter(job_id__in=[d.job_id for d in docs]).delete()
         return list(docs)
+
+    async def remove_if_deleting(self, job_id: str) -> bool:
+        """仅在文档仍为 deleting 时物理删除 MySQL 记录。
+
+        删除任务必须先完成外部资源清理，再调用此方法，避免向量或磁盘
+        清理失败后文档记录已经丢失。条件删除也能防止其他流程误删记录。
+        """
+        if not job_id:
+            return False
+        deleted = await self.model.filter(
+            job_id=job_id, status=self.DELETING_STATUS,
+        ).delete()
+        return deleted > 0
+
+    async def set_deleting_task_id(self, job_id: str, task_id: str) -> bool:
+        """记录 deleting 文档对应的 Celery 任务ID。
+
+        仅允许仍处于 deleting 的文档写入，供后续任务状态查询、失败重试
+        和超时补偿使用。
+        """
+        if not job_id or not task_id:
+            return False
+        updated = await self.model.filter(
+            job_id=job_id, status=self.DELETING_STATUS,
+        ).update(celery_task_id=task_id)
+        return updated > 0
+
+    async def record_deletion_failure(
+            self,
+            job_id: str,
+            error_message: str,
+            error_trace: Optional[str] = None,
+            retryable: bool = True,
+            error_type: Optional[str] = None,
+    ) -> bool:
+        """记录删除本次执行失败，并保存是否允许巡检补偿。
+
+        这里不把文档改成 failed：failed 表示文档处理失败，而 deleting
+        表示外部产物尚未清理完，改成 failed 会让残留文件/向量失去处理入口。
+        ``retryable=False`` 时仍保留 deleting，但巡检不会再次投递，等待人工处理。
+        """
+        if not job_id:
+            return False
+        fields: Dict[str, Any] = {
+            "summary": (
+                f"删除暂时失败: {error_message}" if retryable
+                else f"删除失败（不可自动补偿）: {error_message}"
+            )[:1000],
+            "deletion_retryable": retryable,
+            "deletion_error_type": (error_type or "unknown")[:64],
+        }
+        if error_trace:
+            fields["error_trace"] = error_trace[-5000:]
+        updated = await self.model.filter(
+            job_id=job_id, status=self.DELETING_STATUS,
+        ).update(**fields)
+        return updated > 0
+
+    async def claim_deleting_recompensation(
+            self,
+            job_id: str,
+            max_count: int,
+    ) -> Optional[int]:
+        """原子领取一次删除补偿名额，返回递增后的次数。
+
+        使用行锁重新确认状态和次数，避免两个巡检实例同时给同一个
+        job_id 重复投递。达到上限返回 None，且始终不改成 failed。
+        """
+        if not job_id or max_count <= 0:
+            return None
+        async with in_transaction():
+            doc = await self.model.filter(
+                job_id=job_id,
+                status=self.DELETING_STATUS,
+                deletion_retryable=True,
+            ).select_for_update().first()
+            if doc is None:
+                return None
+            current = int(doc.deleting_retry_count or 0)
+            if current >= max_count:
+                return None
+            next_count = current + 1
+            await self.model.filter(
+                job_id=job_id, status=self.DELETING_STATUS,
+            ).update(deleting_retry_count=next_count)
+            return next_count

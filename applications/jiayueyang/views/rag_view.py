@@ -21,7 +21,7 @@ from applications.jiayueyang.dependencies import (
     get_rag_document_service,
     get_rag_pipeline_service,
 )
-from applications.jiayueyang.models.conversation_model import MSG_DONE, MSG_INTERRUPTED
+from applications.jiayueyang.models.conversation_model import MSG_DONE, MSG_INTERRUPTED, MSG_TRUNCATED
 from applications.jiayueyang.rag.memory import (
     compute_window_and_overflow,
     llm_fold_summary,
@@ -190,7 +190,10 @@ async def delete_files(
     """移除文档条目, 并由服务端清理其源文件留档、解析产物与向量库分块。"""
     try:
         result = await document_service.delete_files_and_docs(job_ids)
-        LOGGER.info(f"删除文件: 成功={result['deleted']}, 失败={result['failed']}")
+        # 删除任务现在由 Worker 异步执行，服务层返回 queued；保留 deleted
+        # 兼容旧实现，避免仅因日志读取旧字段把成功请求转换成 999999。
+        deleted = result.get("deleted", result.get("queued", []))
+        LOGGER.info(f"删除文件: 成功={deleted}, 失败={result.get('failed', [])}")
         return SuccessResponse(data=result)
     except Exception as e:
         LOGGER.error(f"删除文件失败: {e}")
@@ -501,6 +504,9 @@ def _build_retrieval_detail(raw_data: Optional[Dict[str, Any]]) -> Optional[Dict
         "subquery_failure_reason": meta.get("subquery_failure_reason"),
         "subquery_retry_count": meta.get("subquery_retry_count", 0),
         "subquery_coverage": meta.get("subquery_coverage") or {},
+        "subquery_evidence": meta.get("subquery_evidence") or {},
+        "per_query_candidate_counts": meta.get("per_query_candidate_counts") or {},
+        "per_query_candidates": meta.get("per_query_candidates") or {},
         "quota_backfill_count": meta.get("quota_backfill_count", 0),
         "query_mode": meta.get("query_mode", "naive"),
         "matched_mapping_ids": meta.get("matched_mapping_ids") or [],
@@ -551,6 +557,7 @@ def _build_retrieval_detail(raw_data: Optional[Dict[str, Any]]) -> Optional[Dict
                 "backfill_reason": c.get("backfill_reason"),
                 "passed_global_threshold": c.get("passed_global_threshold"),
                 "passed_backfill_guard": c.get("passed_backfill_guard"),
+                "matched_query_ids": c.get("_matched_query_ids") or [],
                 "order": c.get("order", c.get("chunk_order_index", 0)),
                 "chunk_order_index": c.get("chunk_order_index", c.get("order", 0)),
             }
@@ -624,7 +631,7 @@ async def _run_stream_job(
 
     客户端断连不影响本任务; 会话被删除 / 用户点了"停止"时提前收尾。
     """
-    from applications.jiayueyang.rag.query import run_query
+    from applications.jiayueyang.rag.query import _partial_answer_with_notice, run_query
 
     conv_id = request.conversation_id
     parts: List[str] = []
@@ -700,6 +707,12 @@ async def _run_stream_job(
         # 让前端和检索详情明确知道答案是正常结束还是达到长度上限。
         stream_status = getattr(result.response_iterator, "finish_reason", None)
         stream_truncated = stream_status == "length"
+        if stream_truncated:
+            # 流式调用无法像非流式调用一样复用证据重生成；将明确提示追加到
+            # 已输出内容并落盘，让前端和历史消息都能看到截断原因及处理建议。
+            notice = _partial_answer_with_notice("")
+            parts.append(notice)
+            job.publish(_sse("content", {"type": "content", "content": f"\n\n{notice}"}))
         if retrieval is not None:
             retrieval["answer_truncated"] = stream_truncated
             retrieval["answer_finish_reason"] = stream_status or "stop"
@@ -713,13 +726,17 @@ async def _run_stream_job(
             or assistant_index is None
             or await read_message_status(conv_id, assistant_index) != MSG_INTERRUPTED
         ):
-            await persist(MSG_DONE, extra={"thinking_ms": thinking_ms})
+            await persist(
+                MSG_TRUNCATED if stream_truncated else MSG_DONE,
+                extra={"thinking_ms": thinking_ms},
+            )
             if conv_id is not None and assistant_index is not None and retrieval is not None:
                 await save_retrieval_detail(conv_id, assistant_index, retrieval)
         # done 事件附带思考耗时: 刷新/切换后重连的客户端靠 replay 重建消息,
         # 拿不到本地测量值, 以服务端落盘的 thinking_ms 为准展示
         job.publish(_sse("done", {
             "type": "done",
+            "status": MSG_TRUNCATED if stream_truncated else MSG_DONE,
             "thinking_ms": thinking_ms,
             "truncated": stream_truncated,
             "finish_reason": stream_status or "stop",

@@ -676,8 +676,17 @@ def _merge_retrieval_queries(main_query: str, sub_queries: List[str]) -> List[st
 
 
 def _subquery_terms(text: str) -> Set[str]:
-    terms = {item.casefold() for item in re.findall(r"[A-Za-z][A-Za-z0-9_.-]{1,}|\d+(?:\.\d+)?", text or "")}
-    terms.update(item for item in re.findall(r"[\u4e00-\u9fff]{2,}", text or ""))
+    terms = {
+        item.casefold()
+        for item in re.findall(r"[A-Za-z][A-Za-z0-9_.-]{1,}|\d+(?:\.\d+)?", text or "")
+        if item.casefold() not in {"field", "code"}
+    }
+    cleaned = re.sub(
+        r"如何|怎么|是什么|哪些|分别|说明|作用|关系|规则|机制|条件|处理|识别|查询|使用|是否|参与|相关|问题",
+        " ",
+        text or "",
+    )
+    terms.update(item for item in re.findall(r"[\u4e00-\u9fff]{2,}", cleaned))
     return terms
 
 
@@ -685,62 +694,156 @@ def _candidate_identity(chunk: Dict[str, Any]) -> str:
     return str(chunk.get("id") or chunk.get("reference_id") or chunk.get("content", "")[:80])
 
 
-def _subquery_covered(subquery: str, chunks: List[Dict[str, Any]]) -> bool:
+def _subquery_anchor_count(subquery: str, content: str) -> int:
+    haystack = (content or "").casefold()
+    return sum(1 for term in _subquery_terms(subquery) if term and term in haystack)
+
+
+def _subquery_qualifier_compatible(subquery: str, content: str) -> bool:
+    """避免 CPS/非CPS 等互斥限定词仅因共享主体而被误判为同一证据。"""
+    query_text = (subquery or "").casefold()
+    content_text = (content or "").casefold()
+    query_non_cps = bool(re.search(r"(?:非|non[-\s]?)cps", query_text))
+    content_non_cps = bool(re.search(r"(?:非|non[-\s]?)cps", content_text))
+    if "cps" in query_text and "cps" in content_text and query_non_cps != content_non_cps:
+        return False
+    return True
+
+
+def _candidate_score(chunk: Dict[str, Any]) -> float:
+    for key in ("rerank_score", "_subquery_score", "score", "_rrf_score"):
+        value = chunk.get(key)
+        if value is not None:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+    return 0.0
+
+
+def _store_per_query_candidates(
+        target: Dict[str, List[Dict[str, Any]]],
+        ranked_lists: List[List[Dict[str, Any]]],
+        sub_queries: List[str],
+) -> None:
+    """在全局融合/过滤前，按子问题保存各自 top 候选。"""
+    top_k = int(getattr(PROJECT_CONFIG, "SUBQUERY_CANDIDATE_TOP_K", 3))
+    query_ids = {query: f"q{i + 1}" for i, query in enumerate(sub_queries)}
+    for ranked in ranked_lists:
+        if not ranked:
+            continue
+        retrieval_query = str(ranked[0].get("_retrieval_query") or "")
+        query_id = query_ids.get(retrieval_query)
+        if not query_id:
+            continue
+        bucket = target.setdefault(query_id, [])
+        existing = {_candidate_identity(item) for item in bucket}
+        for rank, item in enumerate(ranked[:top_k], 1):
+            identity = _candidate_identity(item)
+            if identity in existing:
+                continue
+            clone = dict(item)
+            clone.update({
+                "_subquery_id": query_id,
+                "_subquery_query": retrieval_query,
+                "_subquery_rank": rank,
+                "_subquery_score": _candidate_score(item),
+            })
+            bucket.append(clone)
+            existing.add(identity)
+        bucket.sort(key=lambda item: (int(item.get("_subquery_rank", 999)), -_candidate_score(item)))
+        del bucket[top_k:]
+
+
+def _subquery_supporting_chunks(
+        subquery: str,
+        chunks: List[Dict[str, Any]],
+        candidates: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """标记子问题对应的最终证据。
+
+    子问题自己的召回候选已经经过向量/BM25/RRF/rerank，不能再要求单个
+    分块同时包含字段、代码和完整业务含义。表格正文可能跨相邻分块，
+    因此这里采用软判断：候选属于该子问题即可计入覆盖；字段/代码和
+    关键词只作为额外的可解释信号。仅保留 CPS/非 CPS 这类明确互斥
+    条件的保护，避免把相反限定词的证据混用。
+    """
     constraints = _extract_technical_constraints(subquery)
+    candidate_ids = {_candidate_identity(item) for item in candidates}
+    supported: List[Dict[str, Any]] = []
     for chunk in chunks:
         content = chunk.get("content", "") or ""
+        if not _subquery_qualifier_compatible(subquery, content):
+            continue
+        # 子问题自己的候选已由检索链路排序，直接计入覆盖，不再用单块
+        # 字段+代码硬门槛把跨块表格证据挡掉。
+        if _candidate_identity(chunk) in candidate_ids:
+            supported.append(chunk)
+            continue
         if constraints and any(
             _field_in_text(content, item.field_no)
             and (not item.code_value or _code_in_text(content, item.code_value))
             for item in constraints
         ):
-            return True
-        terms = _subquery_terms(subquery)
-        if terms and len(terms & _subquery_terms(content)) >= max(1, min(2, len(terms))):
-            return True
-    return False
+            supported.append(chunk)
+            continue
+        # 非子问题候选仍允许通过关键词提供软覆盖；不再要求两个锚点。
+        if _subquery_anchor_count(subquery, content) >= 1:
+            supported.append(chunk)
+    return supported
 
 
 def _backfill_subquery_candidates(
         chunks: List[Dict[str, Any]],
-        candidate_pool: List[Dict[str, Any]],
+        per_query_candidates: Dict[str, List[Dict[str, Any]]],
         sub_queries: List[str],
         max_total: int,
         top_k: int,
         technical_constraints: Optional[List[TechnicalConstraint]] = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """为未覆盖子问题有限回填候选，且不绕过独立安全门槛。"""
-    coverage = {f"q{i + 1}": _subquery_covered(q, chunks) for i, q in enumerate(sub_queries)}
+    min_required = int(getattr(PROJECT_CONFIG, "SUBQUERY_MIN_FINAL_CHUNKS", 1))
+    support: Dict[str, List[Dict[str, Any]]] = {
+        f"q{i + 1}": _subquery_supporting_chunks(
+            q, chunks, per_query_candidates.get(f"q{i + 1}", []),
+        )
+        for i, q in enumerate(sub_queries)
+    }
+    coverage = {query_id: len(items) >= min_required for query_id, items in support.items()}
+    states: Dict[str, Dict[str, Any]] = {
+        f"q{i + 1}": {
+            "query": query,
+            "status": "direct" if coverage.get(f"q{i + 1}") else "evidence_insufficient",
+            "evidence_count": len(support.get(f"q{i + 1}", [])),
+            "evidence_ids": [_candidate_identity(item) for item in support.get(f"q{i + 1}", [])],
+        }
+        for i, query in enumerate(sub_queries)
+    }
     added: List[Dict[str, Any]] = []
     if not PROJECT_CONFIG.SUBQUERY_QUOTA_BACKFILL_ENABLED or not sub_queries:
-        return chunks, {"coverage": coverage, "count": 0}
+        return chunks, {"coverage": coverage, "states": states, "count": 0}
     identities = {_candidate_identity(item) for item in chunks}
     for index, subquery in enumerate(sub_queries):
         query_id = f"q{index + 1}"
         if coverage[query_id] or len(added) >= min(max_total, PROJECT_CONFIG.SUBQUERY_BACKFILL_MAX_TOTAL):
             continue
         candidates = [
-            item for item in candidate_pool
+            item for item in per_query_candidates.get(query_id, [])
             if _candidate_identity(item) not in identities
-            and (item.get("_retrieval_query") == subquery or _subquery_terms(subquery) & _subquery_terms(item.get("content", "")))
         ]
         if not candidates:
+            states[query_id]["reason"] = "no_subquery_candidate"
             continue
-        candidates.sort(key=lambda item: float(item.get("rerank_score", item.get("score", item.get("_rrf_score", 0))) or 0), reverse=True)
+        candidates.sort(key=lambda item: (int(item.get("_subquery_rank", 999)), -_candidate_score(item)))
         selected = candidates[0]
-        score = float(selected.get("rerank_score", selected.get("score", selected.get("_rrf_score", 0))) or 0)
-        constraints = _extract_technical_constraints(subquery)
         content = selected.get("content", "") or ""
-        direct_anchor = any(
-            _field_in_text(content, item.field_no)
-            and (not item.code_value or _code_in_text(content, item.code_value))
-            for item in constraints
-        )
-        overlap = len(_subquery_terms(subquery) & _subquery_terms(content))
-        if PROJECT_CONFIG.SUBQUERY_BACKFILL_REQUIRE_ANCHOR and not (direct_anchor or overlap >= 2):
+        if not _subquery_qualifier_compatible(subquery, content):
+            states[query_id]["reason"] = "conflicting_business_qualifier"
             continue
-        if not (direct_anchor or score >= PROJECT_CONFIG.SUBQUERY_BACKFILL_MIN_SCORE):
-            continue
+        # 候选来自该子问题自己的检索结果，已经经过统一排序；不要再以
+        # 单分块字段/代码共现作为硬门槛，否则表格跨块证据无法回填。
+        # SUBQUERY_BACKFILL_REQUIRE_ANCHOR / MIN_SCORE 保留配置字段仅为兼容
+        # 旧 .env，但不再阻止子问题候选进入上下文。
         clone = dict(selected)
         clone.update({
             "quota_backfill": True,
@@ -748,10 +851,17 @@ def _backfill_subquery_candidates(
             "backfill_reason": "subquery_not_covered",
             "passed_global_threshold": False,
             "passed_backfill_guard": True,
+            "_matched_query_ids": [query_id],
         })
         added.append(clone)
         identities.add(_candidate_identity(clone))
         coverage[query_id] = True
+        states[query_id].update({
+            "status": "backfilled",
+            "evidence_count": 1,
+            "evidence_ids": [_candidate_identity(clone)],
+            "reason": "subquery_not_covered",
+        })
     # 正常重排结果优先；窗口已满时只替换末尾普通块，绝不挤掉精确字段/代码块。
     result = list(chunks)
     for item in added:
@@ -770,7 +880,92 @@ def _backfill_subquery_candidates(
         )
         if replace_at is not None:
             result[replace_at] = item
-    return result, {"coverage": coverage, "count": len(added)}
+    return result, {"coverage": coverage, "states": states, "count": len(added)}
+
+
+def _annotate_subquery_matches(
+        chunks: List[Dict[str, Any]],
+        per_query_candidates: Dict[str, List[Dict[str, Any]]],
+        sub_queries: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    identity_queries: Dict[str, Set[str]] = {}
+    for query_id, candidates in per_query_candidates.items():
+        for candidate in candidates:
+            identity_queries.setdefault(_candidate_identity(candidate), set()).add(query_id)
+    annotated: List[Dict[str, Any]] = []
+    for chunk in chunks:
+        clone = dict(chunk)
+        matched = set(clone.get("_matched_query_ids") or [])
+        matched.update(identity_queries.get(_candidate_identity(clone), set()))
+        for index, subquery in enumerate(sub_queries or []):
+            query_id = f"q{index + 1}"
+            if _subquery_supporting_chunks(
+                subquery, [clone], per_query_candidates.get(query_id, []),
+            ):
+                matched.add(query_id)
+        if matched:
+            clone["_matched_query_ids"] = sorted(matched)
+        annotated.append(clone)
+    return annotated
+
+
+def _refresh_subquery_info(
+        chunks: List[Dict[str, Any]],
+        per_query_candidates: Dict[str, List[Dict[str, Any]]],
+        sub_queries: List[str],
+        previous: Dict[str, Any],
+) -> Dict[str, Any]:
+    """token 截断后重新核验，避免已回填证据又被预算删除。"""
+    min_required = int(getattr(PROJECT_CONFIG, "SUBQUERY_MIN_FINAL_CHUNKS", 1))
+    coverage: Dict[str, bool] = {}
+    states: Dict[str, Dict[str, Any]] = {}
+    for index, subquery in enumerate(sub_queries):
+        query_id = f"q{index + 1}"
+        supporting = _subquery_supporting_chunks(
+            subquery, chunks, per_query_candidates.get(query_id, []),
+        )
+        covered = len(supporting) >= min_required
+        coverage[query_id] = covered
+        is_backfill = any(
+            item.get("quota_backfill") and item.get("backfill_query_id") == query_id
+            for item in supporting
+        )
+        old_state = (previous.get("states") or {}).get(query_id, {})
+        states[query_id] = {
+            "query": subquery,
+            "status": (
+                "backfilled" if covered and is_backfill
+                else "direct" if covered
+                else "evidence_insufficient"
+            ),
+            "evidence_count": len(supporting),
+            "evidence_ids": [_candidate_identity(item) for item in supporting],
+        }
+        if not covered:
+            states[query_id]["reason"] = old_state.get("reason") or "removed_by_context_budget"
+    return {"coverage": coverage, "states": states, "count": previous.get("count", 0)}
+
+
+def _per_query_candidate_snapshot(
+        per_query_candidates: Dict[str, List[Dict[str, Any]]],
+        final_chunks: List[Dict[str, Any]],
+) -> Dict[str, List[Dict[str, Any]]]:
+    """保留足以区分“未召回/被淘汰/已入上下文”的轻量诊断轨迹。"""
+    final_ids = {_candidate_identity(item) for item in final_chunks}
+    return {
+        query_id: [
+            {
+                "id": _candidate_identity(item),
+                "rank": item.get("_subquery_rank"),
+                "score": round(_candidate_score(item), 6),
+                "doc_id": item.get("doc_id", ""),
+                "content_excerpt": (item.get("content", "") or "")[:2000],
+                "entered_final_context": _candidate_identity(item) in final_ids,
+            }
+            for item in candidates
+        ]
+        for query_id, candidates in per_query_candidates.items()
+    }
 
 
 async def _get_hybrid_context(
@@ -780,8 +975,9 @@ async def _get_hybrid_context(
         dense_top_k: Optional[int] = None,
         bm25_top_k: Optional[int] = None,
         sub_queries: Optional[List[str]] = None,
+        quota_sub_queries: Optional[List[str]] = None,
         filter_expr: str = "",
-        candidate_pool: Optional[List[Dict[str, Any]]] = None,
+        candidate_pool: Optional[Dict[str, List[Dict[str, Any]]]] = None,
 ) -> List[Dict[str, Any]]:
     """混合检索: 多查询 × 双通道（Dense + BM25）+ 文档级召回 → RRF 融合。
 
@@ -814,8 +1010,10 @@ async def _get_hybrid_context(
         return []
 
     if candidate_pool is not None:
-        per_query_top_k = int(getattr(PROJECT_CONFIG, "SUBQUERY_CANDIDATE_TOP_K", 3))
-        candidate_pool.extend(item for ranked in ranked_lists for item in ranked[:per_query_top_k])
+        _store_per_query_candidates(
+            candidate_pool, ranked_lists,
+            quota_sub_queries if quota_sub_queries is not None else (sub_queries or []),
+        )
 
     # RRF 融合全部候选列表（dense/bm25/定向注入一视同仁）
     return _rrf_merge(ranked_lists, merge_top_k)
@@ -1028,11 +1226,19 @@ def _build_llm_context(
     """
     chunks_context: List[Dict[str, str]] = []
     for c in chunks:
-        entry: Dict[str, str] = {
+        entry: Dict[str, Any] = {
             "reference_id": c.get("reference_id", ""),
             "content": c["content"],
             "chunk_order": str(c.get("order", "")),
         }
+        if c.get("_matched_query_ids"):
+            entry["matched_query_ids"] = list(c.get("_matched_query_ids") or [])
+        if c.get("quota_backfill"):
+            entry.update({
+                "quota_backfill": True,
+                "backfill_query_id": c.get("backfill_query_id"),
+                "evidence_role": "仅用于对应子问题的直接核对",
+            })
         chunks_context.append(entry)
 
     text_units_str = "\n".join(
@@ -1063,17 +1269,47 @@ _CONCISE_RETRY_INSTRUCTION = """
 """
 
 
+def _partial_answer_with_notice(partial: str) -> str:
+    text = (partial or "").rstrip()
+    notice = (
+        "回答达到长度上限，以上为已生成的部分内容。"
+        "问题过于复杂，建议拆分成几个子问题后分别提问。"
+    )
+    return f"{text}\n\n{notice}" if text else notice
+
+
 def _evidence_completeness_instruction(
         sub_queries: List[str],
-        coverage: Dict[str, Any],
+        states: Dict[str, Dict[str, Any]],
+        reference_list: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     if not sub_queries:
         return ""
-    uncovered = [f"q{i + 1}" for i in range(len(sub_queries)) if not coverage.get(f"q{i + 1}", False)]
+    status_labels = {
+        "direct": "已有直接证据",
+        "backfilled": "已有受控回填证据",
+        "evidence_insufficient": "当前没有对应候选",
+    }
+    lines: List[str] = []
+    for index, subquery in enumerate(sub_queries):
+        query_id = f"q{index + 1}"
+        state = states.get(query_id, {})
+        label = status_labels.get(state.get("status"), "当前证据不足")
+        lines.append(f"{index + 1}. [{query_id}] {subquery}——{label}")
+    scope_names = [
+        str(item.get("file_name") or item.get("file_path") or "").strip()
+        for item in (reference_list or [])
+        if str(item.get("file_name") or item.get("file_path") or "").strip()
+    ]
+    scope_line = "、".join(dict.fromkeys(scope_names)) or "当前检索到的知识库文档"
     return (
         "\n\n---证据覆盖约束---\n"
-        "复合问题的每个子问题必须分别核对证据；不要用一个子问题的资料推断另一个。\n"
-        + (f"未被最终证据充分覆盖的子问题：{', '.join(uncovered)}。这些要点请明确说明‘当前资料未充分涵盖’，不要猜测。\n" if uncovered else "所有子问题均有候选证据，但仍只能引用资料直接支持的内容。\n")
+        f"当前知识库范围：{scope_line}。\n"
+        "需要逐项覆盖以下子问题：\n"
+        + "\n".join(lines)
+        + "\n回答时按上述顺序逐项核对；同一子问题的多个候选分块可以合并理解，尤其是表头、代码行和相邻说明。\n"
+        "只有最终上下文确实没有对应候选时，才说明“当前资料未充分涵盖”。不要借用其他卡组织的资料补齐。\n"
+        "字段号、代码、时限必须以检索到的对应分块为依据；标记 quota_backfill=true 的分块仅用于其 backfill_query_id 对应的子问题。\n"
     )
 
 
@@ -1083,7 +1319,7 @@ async def _generate_answer_reusing_evidence(
         system_prompt: str,
         raw_data: Dict[str, Any],
 ) -> Union[str, AsyncIterator[str]]:
-    """生成答案；截断时仅用同一 system/context 做一次精简重生成。"""
+    """生成答案；截断或空内容时仅用同一 system/context 做一次重生成。"""
     metadata = raw_data.setdefault("metadata", {})
     metadata.setdefault("answer_truncated", False)
     metadata.setdefault("answer_retry_count", 0)
@@ -1102,7 +1338,7 @@ async def _generate_answer_reusing_evidence(
             model=query_param.model,
         )
     try:
-        return await chat_completion(
+        first = await chat_completion(
             messages=query,
             system_prompt=system_prompt,
             history_messages=query_param.conversation_history,
@@ -1113,13 +1349,51 @@ async def _generate_answer_reusing_evidence(
             temperature=query_param.temperature,
             model=query_param.model,
         )
+        if first and first.strip():
+            return first
+
+        # 上游偶尔会以 stop/空 content 返回成功响应。不能把它当作正常答案
+        # 落盘；复用同一批证据做一次精简重试，不重新检索、不增加固定检索调用。
+        metadata["answer_retry_count"] = 1
+        metadata["answer_fallback"] = "empty_retry"
+        concise_prompt = system_prompt + _CONCISE_RETRY_INSTRUCTION.format(
+            max_chars=PROJECT_CONFIG.ANSWER_CONCISE_RETRY_MAX_CHARS,
+        )
+        try:
+            second = await chat_completion(
+                messages=query,
+                system_prompt=concise_prompt,
+                history_messages=query_param.conversation_history,
+                conversation_summary=query_param.conversation_summary,
+                conversation_recall=query_param.conversation_recall,
+                stream=False,
+                enable_cot=query_param.enable_cot,
+                temperature=query_param.temperature,
+                model=query_param.model,
+            )
+        except LLMTruncatedError as empty_retry_error:
+            metadata["answer_truncated"] = True
+            metadata["answer_finish_reason"] = empty_retry_error.finish_reason
+            metadata["answer_fallback"] = "partial"
+            return (
+                _partial_answer_with_notice(empty_retry_error.partial)
+                if PROJECT_CONFIG.ANSWER_PARTIAL_FALLBACK_ENABLED else ""
+            )
+        if second and second.strip():
+            metadata["answer_finish_reason"] = "stop"
+            return second
+        metadata["answer_fallback"] = "empty"
+        return ""
     except LLMTruncatedError as first_error:
         metadata["answer_truncated"] = True
         metadata["answer_finish_reason"] = first_error.finish_reason
         metadata["answer_retry_count"] = 1
         if not PROJECT_CONFIG.ANSWER_TRUNCATION_RETRY_ENABLED:
             metadata["answer_fallback"] = "partial"
-            return first_error.partial if PROJECT_CONFIG.ANSWER_PARTIAL_FALLBACK_ENABLED else ""
+            return (
+                _partial_answer_with_notice(first_error.partial)
+                if PROJECT_CONFIG.ANSWER_PARTIAL_FALLBACK_ENABLED else ""
+            )
         concise_prompt = system_prompt + _CONCISE_RETRY_INSTRUCTION.format(
             max_chars=PROJECT_CONFIG.ANSWER_CONCISE_RETRY_MAX_CHARS,
         )
@@ -1141,7 +1415,10 @@ async def _generate_answer_reusing_evidence(
         except LLMTruncatedError as second_error:
             metadata["answer_finish_reason"] = second_error.finish_reason
             metadata["answer_fallback"] = "partial"
-            return second_error.partial or first_error.partial if PROJECT_CONFIG.ANSWER_PARTIAL_FALLBACK_ENABLED else ""
+            return (
+                _partial_answer_with_notice(second_error.partial or first_error.partial)
+                if PROJECT_CONFIG.ANSWER_PARTIAL_FALLBACK_ENABLED else ""
+            )
 
 
 # ==================== 检索为空兜底 ====================
@@ -1262,7 +1539,7 @@ async def naive_query(
 
     # 阶段 2: 历史范围与全库并行召回。两路各自融合后组成同一候选池，
     # 旧文档获得适度权重，新问题涉及的其他文档仍能进入同一次重排。
-    retrieval_side_candidates: List[Dict[str, Any]] = []
+    per_query_candidates: Dict[str, List[Dict[str, Any]]] = {}
     async def retrieve_candidates(filter_expr: str) -> List[Dict[str, Any]]:
         ranked_lists = await _retrieve_ranked_lists(
             queries,
@@ -1276,12 +1553,8 @@ async def naive_query(
         if not ranked_lists:
             return []
         combined = ranked_lists[0] if len(ranked_lists) == 1 else _rrf_merge(ranked_lists, search_top_k)
-        # 在全局 RRF/重排之前保留每路 top-N，供未覆盖子问题做安全回填。
-        per_query_top_k = int(getattr(PROJECT_CONFIG, "SUBQUERY_CANDIDATE_TOP_K", 3))
-        retrieval_side_candidates.extend(
-            item for ranked in ranked_lists for item in ranked[:per_query_top_k]
-        )
-        retrieval_side_candidates.extend(combined[:per_query_top_k])
+        # 在全局 RRF/重排之前按 q1/q2/... 隔离保存自身 top-N。
+        _store_per_query_candidates(per_query_candidates, ranked_lists, sub_queries)
         return combined
 
     chunks, used_guidance, retrieval_fallback, guided_count, global_count = (
@@ -1324,12 +1597,13 @@ async def naive_query(
     chunks = chunks[:PROJECT_CONFIG.RAG_CONTEXT_TOP_K]
     chunks, backfill_info = _backfill_subquery_candidates(
         chunks,
-        retrieval_side_candidates,
+        per_query_candidates,
         sub_queries,
         max_total=PROJECT_CONFIG.SUBQUERY_BACKFILL_MAX_TOTAL,
         top_k=PROJECT_CONFIG.RAG_CONTEXT_TOP_K,
         technical_constraints=technical_constraints,
     )
+    chunks = _annotate_subquery_matches(chunks, per_query_candidates, sub_queries)
 
     # 计算动态 token 预算（历史窗口 + 滚动摘要计入预算）
     available_tokens = _compute_token_budget(
@@ -1360,6 +1634,10 @@ async def naive_query(
             mapping_result=mapping_result,
         )
 
+    backfill_info = _refresh_subquery_info(
+        processed_chunks, per_query_candidates, sub_queries, backfill_info,
+    )
+
     # 构建响应的 raw_data
     raw_data: Dict[str, Any] = {
         "data": {
@@ -1387,6 +1665,13 @@ async def naive_query(
             "subquery_failure_reason": decompose_result.failure_reason,
             "subquery_retry_count": decompose_result.retry_count,
             "subquery_coverage": backfill_info["coverage"],
+            "subquery_evidence": backfill_info["states"],
+            "per_query_candidate_counts": {
+                query_id: len(items) for query_id, items in per_query_candidates.items()
+            },
+            "per_query_candidates": _per_query_candidate_snapshot(
+                per_query_candidates, processed_chunks,
+            ),
             "quota_backfill_count": backfill_info["count"],
             "matched_mapping_ids": [item.get("mapping_id") for item in mapping_matches],
             "matched_mapping_source": [item.get("mapping_source") for item in mapping_matches],
@@ -1431,7 +1716,9 @@ async def naive_query(
         user_prompt=user_prompt_str,
         content_data=context_content,
     )
-    sys_prompt += _evidence_completeness_instruction(sub_queries, backfill_info["coverage"])
+    sys_prompt += _evidence_completeness_instruction(
+        sub_queries, backfill_info["states"], reference_list,
+    )
 
     if query_param.only_need_prompt:
         prompt_content = f"{sys_prompt}\n\n---User Query---\n{query}"
@@ -1495,9 +1782,9 @@ async def hybrid_query(
     # 阶段 0c: 子查询分解——复合问题拆为单面查询, 每面独立走双通道召回;
     # 原查询保留在检索集合中作为兜底（分解不当不丢原始召回面）
     decompose_result = _coerce_decompose_result(await decompose_query(query_for_search))
-    sub_queries = decompose_result.sub_queries
-    sub_queries = [
-        *(sub_queries or []),
+    sub_queries = list(decompose_result.sub_queries or [])
+    retrieval_sub_queries = [
+        *sub_queries,
         *_technical_retrieval_queries(technical_constraints, resolved_query),
     ]
 
@@ -1505,18 +1792,18 @@ async def hybrid_query(
         resolved_query,
     )
 
-    retrieval_side_candidates: List[Dict[str, Any]] = []
+    per_query_candidates: Dict[str, List[Dict[str, Any]]] = {}
     async def retrieve_candidates(filter_expr: str) -> List[Dict[str, Any]]:
         result = await _get_hybrid_context(
             bilingual_query,
             merge_top_k=merge_top_k,
             dense_top_k=query_param.dense_top_k,
             bm25_top_k=query_param.bm25_top_k,
-            sub_queries=sub_queries,
+            sub_queries=retrieval_sub_queries,
+            quota_sub_queries=sub_queries,
             filter_expr=filter_expr,
-            candidate_pool=retrieval_side_candidates,
+            candidate_pool=per_query_candidates,
         )
-        retrieval_side_candidates.extend(result)
         return result
 
     chunks, used_guidance, retrieval_fallback, guided_count, global_count = (
@@ -1558,12 +1845,13 @@ async def hybrid_query(
     chunks = chunks[:PROJECT_CONFIG.RAG_CONTEXT_TOP_K]
     chunks, backfill_info = _backfill_subquery_candidates(
         chunks,
-        retrieval_side_candidates,
+        per_query_candidates,
         sub_queries,
         max_total=PROJECT_CONFIG.SUBQUERY_BACKFILL_MAX_TOTAL,
         top_k=PROJECT_CONFIG.RAG_CONTEXT_TOP_K,
         technical_constraints=technical_constraints,
     )
+    chunks = _annotate_subquery_matches(chunks, per_query_candidates, sub_queries)
 
     # 计算动态 token 预算 (用户可见的提示词使用原始查询; 历史窗口 + 滚动摘要计入预算)
     available_tokens = _compute_token_budget(
@@ -1594,6 +1882,10 @@ async def hybrid_query(
             mapping_result=mapping_result,
         )
 
+    backfill_info = _refresh_subquery_info(
+        processed_chunks, per_query_candidates, sub_queries, backfill_info,
+    )
+
     # 构建响应的 raw_data
     raw_data: Dict[str, Any] = {
         "data": {
@@ -1621,9 +1913,18 @@ async def hybrid_query(
             "subquery_failure_reason": decompose_result.failure_reason,
             "subquery_retry_count": decompose_result.retry_count,
             "subquery_coverage": backfill_info["coverage"],
+            "subquery_evidence": backfill_info["states"],
+            "per_query_candidate_counts": {
+                query_id: len(items) for query_id, items in per_query_candidates.items()
+            },
+            "per_query_candidates": _per_query_candidate_snapshot(
+                per_query_candidates, processed_chunks,
+            ),
             "quota_backfill_count": backfill_info["count"],
             "matched_mapping_ids": [item.get("mapping_id") for item in mapping_matches],
             "matched_mapping_source": [item.get("mapping_source") for item in mapping_matches],
+            "mapping_field_match_types": [item.get("field_match_type") for item in mapping_matches],
+            "mapping_field_keys": [item.get("field_keys") or [] for item in mapping_matches],
             "mapping_status": mapping_result.get("status", "unmatched"),
             "mapping_conflicts": mapping_result.get("conflicts") or [],
             "retrieval_route": (
@@ -1663,7 +1964,9 @@ async def hybrid_query(
         user_prompt=user_prompt_str,
         content_data=context_content,
     )
-    sys_prompt += _evidence_completeness_instruction(sub_queries, backfill_info["coverage"])
+    sys_prompt += _evidence_completeness_instruction(
+        sub_queries, backfill_info["states"], reference_list,
+    )
 
     if query_param.only_need_prompt:
         prompt_content = f"{sys_prompt}\n\n---User Query---\n{query}"
