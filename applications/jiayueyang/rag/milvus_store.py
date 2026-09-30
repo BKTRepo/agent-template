@@ -6,7 +6,7 @@ import re
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional, TypeVar
 
 # 尝试导入 pymilvus；milvus 后端为可选依赖，仅在使用该后端时需要安装
 try:
@@ -32,6 +32,42 @@ from common.milvus_pool import get_milvus_client_pool
 # 常量
 # ---------------------------------------------------------------------------
 _COLLECTION_NAME = "rag_chunks"
+_T = TypeVar("_T")
+
+
+def _is_transient_milvus_error(exc: Exception) -> bool:
+    """识别适合立即换连接重试一次的 Milvus/gRPC 短暂故障。"""
+    message = f"{type(exc).__name__}: {exc}".casefold()
+    return any(marker in message for marker in (
+        "closed channel",
+        "channel closed",
+        "transport is closing",
+        "failed to connect",
+        "connection refused",
+        "socket closed",
+        "statuscode.unavailable",
+        "statuscode.deadline_exceeded",
+    ))
+
+
+def _run_milvus_read_with_retry(
+        operation_name: str,
+        operation: Callable[[Any], _T],
+) -> _T:
+    """执行只读 Milvus 操作；连接类故障时丢弃坏客户端并重试一次。"""
+    for attempt in range(2):
+        try:
+            with _milvus_client() as client:
+                return operation(client)
+        except Exception as exc:
+            if attempt == 0 and _is_transient_milvus_error(exc):
+                LOGGER.warning(
+                    f"Milvus {operation_name} 遇到短暂连接故障，换连接重试一次: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                continue
+            raise
+    raise RuntimeError(f"Milvus {operation_name} 重试流程异常结束")
 
 
 def is_remote_milvus_uri(uri: str | None = None) -> bool:
@@ -549,31 +585,33 @@ def hybrid_query_chunks(
             )
         )
 
-    try:
-        with _milvus_client() as client:
-            _ensure_collection(client)
-            # Milvus 2.6 在空集合上执行 hybrid_search 可能返回服务端
-            # ``unsupported ID type``，而不是空结果。先做一次轻量主键探测，
-            # 将空集合稳定地视为无召回，避免把正常的冷启动误报成 ID 错误。
-            try:
-                if not client.query(
-                    collection_name=_COLLECTION_NAME,
-                    filter="id != ''",
-                    output_fields=["id"],
-                    limit=1,
-                ):
-                    return []
-            except Exception:
-                # 探测接口在部分旧版服务不可用时，继续让 hybrid_search
-                # 执行；真正的检索错误仍由下方统一捕获并降级。
-                pass
-            results = client.hybrid_search(
+    def _hybrid_search(client: Any) -> Any:
+        _ensure_collection(client)
+        # Milvus 2.6 在空集合上执行 hybrid_search 可能返回服务端
+        # ``unsupported ID type``，而不是空结果。先做一次轻量主键探测，
+        # 将空集合稳定地视为无召回，避免把正常的冷启动误报成 ID 错误。
+        try:
+            if not client.query(
                 collection_name=_COLLECTION_NAME,
-                reqs=requests,
-                ranker=RRFRanker(60),
-                limit=top_k,
-                output_fields=output_fields,
-            )
+                filter="id != ''",
+                output_fields=["id"],
+                limit=1,
+            ):
+                return []
+        except Exception:
+            # 探测接口在部分旧版服务不可用时，继续让 hybrid_search
+            # 执行；真正的检索错误仍由下方统一捕获并降级。
+            pass
+        return client.hybrid_search(
+            collection_name=_COLLECTION_NAME,
+            reqs=requests,
+            ranker=RRFRanker(60),
+            limit=top_k,
+            output_fields=output_fields,
+        )
+
+    try:
+        results = _run_milvus_read_with_retry("混合检索", _hybrid_search)
     except Exception as exc:
         LOGGER.error(f"Milvus 混合检索失败: {type(exc).__name__}: {exc}")
         # 部分 Milvus 版本在 BM25 分路无命中、而 Dense 分路有命中时，
@@ -628,8 +666,10 @@ def query_chunks(
         ``tokens``、``modality``、``order``、``distance``、``created_at``。
     """
     try:
-        with _milvus_client() as client:
-            return _search_chunks(client, query_vectors, top_k)
+        return _run_milvus_read_with_retry(
+            "向量检索",
+            lambda client: _search_chunks(client, query_vectors, top_k),
+        )
     except Exception as e:
         LOGGER.error(f"Milvus 查询分块失败: {e}")
         return []
@@ -647,10 +687,12 @@ def query_chunks_by_doc(
     if not doc_id:
         return []
     try:
-        with _milvus_client() as client:
-            return _search_chunks(
+        return _run_milvus_read_with_retry(
+            "文档范围检索",
+            lambda client: _search_chunks(
                 client, query_vectors, top_k, filter_expr=f'doc_id == "{doc_id}"'
-            )
+            ),
+        )
     except Exception as e:
         LOGGER.error(f"Milvus 按文档查询分块失败: doc_id={doc_id}, {e}")
         return []
@@ -689,42 +731,45 @@ def query_neighbor_chunks(
         "modality", "chunk_order_index", "created_at", "language",
         "table_name", "field_no", "code_value", "page_no",
     ]
-    neighbors: List[Dict[str, Any]] = []
+    def _query_neighbors(client: Any) -> List[Dict[str, Any]]:
+        _ensure_collection(client)
+        neighbors: List[Dict[str, Any]] = []
+        for doc_id, orders in grouped.items():
+            escaped_doc_id = doc_id.replace("\\", "\\\\").replace('"', '\\"')
+            order_values = ",".join(str(value) for value in sorted(orders))
+            rows = client.query(
+                collection_name=_COLLECTION_NAME,
+                filter=(
+                    f'doc_id == "{escaped_doc_id}" and '
+                    f'chunk_order_index in [{order_values}]'
+                ),
+                output_fields=output_fields,
+                limit=max(1, len(orders)),
+            )
+            for row in rows:
+                chunk_id = _normalize_primary_key(row.get("id"))
+                neighbors.append({
+                    "id": chunk_id,
+                    "chunk_id": chunk_id,
+                    "content": row.get("content", ""),
+                    "file_path": row.get("file_path", "unknown_source"),
+                    "file_name": row.get("file_name", ""),
+                    "doc_id": row.get("doc_id", ""),
+                    "tokens": row.get("tokens", 0),
+                    "modality": row.get("modality", "text"),
+                    "order": row.get("chunk_order_index", 0),
+                    "distance": None,
+                    "created_at": row.get("created_at"),
+                    "language": row.get("language", "mixed"),
+                    "table_name": row.get("table_name", ""),
+                    "field_no": row.get("field_no", ""),
+                    "code_value": row.get("code_value", ""),
+                    "page_no": row.get("page_no"),
+                })
+        return neighbors
+
     try:
-        with _milvus_client() as client:
-            _ensure_collection(client)
-            for doc_id, orders in grouped.items():
-                escaped_doc_id = doc_id.replace("\\", "\\\\").replace('"', '\\"')
-                order_values = ",".join(str(value) for value in sorted(orders))
-                rows = client.query(
-                    collection_name=_COLLECTION_NAME,
-                    filter=(
-                        f'doc_id == "{escaped_doc_id}" and '
-                        f'chunk_order_index in [{order_values}]'
-                    ),
-                    output_fields=output_fields,
-                    limit=max(1, len(orders)),
-                )
-                for row in rows:
-                    chunk_id = _normalize_primary_key(row.get("id"))
-                    neighbors.append({
-                        "id": chunk_id,
-                        "chunk_id": chunk_id,
-                        "content": row.get("content", ""),
-                        "file_path": row.get("file_path", "unknown_source"),
-                        "file_name": row.get("file_name", ""),
-                        "doc_id": row.get("doc_id", ""),
-                        "tokens": row.get("tokens", 0),
-                        "modality": row.get("modality", "text"),
-                        "order": row.get("chunk_order_index", 0),
-                        "distance": None,
-                        "created_at": row.get("created_at"),
-                        "language": row.get("language", "mixed"),
-                        "table_name": row.get("table_name", ""),
-                        "field_no": row.get("field_no", ""),
-                        "code_value": row.get("code_value", ""),
-                        "page_no": row.get("page_no"),
-                    })
+        neighbors = _run_milvus_read_with_retry("相邻分块查询", _query_neighbors)
     except Exception as exc:
         LOGGER.warning(f"Milvus 相邻分块查询失败: {type(exc).__name__}: {exc}")
         return []
@@ -1021,33 +1066,35 @@ def search_chat_memory(
     :param max_seq: 仅召回 seq <= max_seq 的轮次（用于排除近期窗口内轮次）。
     :return: 轮次字典列表（question/answer/seq/distance）。
     """
+    def _search_memory(client: Any) -> List[Dict[str, Any]]:
+        _ensure_memory_collection(client)
+        filter_expr = f'conversation_id == "{conversation_id}"'
+        if max_seq is not None:
+            filter_expr += f" and seq <= {int(max_seq)}"
+        results = client.search(
+            collection_name=_MEMORY_COLLECTION_NAME,
+            data=query_vectors,
+            limit=top_k,
+            filter=filter_expr,
+            output_fields=["question", "answer", "seq", "conversation_id"],
+            search_params={"metric_type": "COSINE"},
+        )
+        if not results:
+            return []
+        hits = results[0]
+        turns: List[Dict[str, Any]] = []
+        for hit in hits:
+            entity = hit.get("entity", {})
+            turns.append({
+                "question": entity.get("question", ""),
+                "answer": entity.get("answer", ""),
+                "seq": entity.get("seq", 0),
+                "distance": hit.get("distance", None),
+            })
+        return turns
+
     try:
-        with _milvus_client() as client:
-            _ensure_memory_collection(client)
-            filter_expr = f'conversation_id == "{conversation_id}"'
-            if max_seq is not None:
-                filter_expr += f" and seq <= {int(max_seq)}"
-            results = client.search(
-                collection_name=_MEMORY_COLLECTION_NAME,
-                data=query_vectors,
-                limit=top_k,
-                filter=filter_expr,
-                output_fields=["question", "answer", "seq", "conversation_id"],
-                search_params={"metric_type": "COSINE"},
-            )
-            if not results:
-                return []
-            hits = results[0]
-            turns: List[Dict[str, Any]] = []
-            for hit in hits:
-                entity = hit.get("entity", {})
-                turns.append({
-                    "question": entity.get("question", ""),
-                    "answer": entity.get("answer", ""),
-                    "seq": entity.get("seq", 0),
-                    "distance": hit.get("distance", None),
-                })
-            return turns
+        return _run_milvus_read_with_retry("对话记忆召回", _search_memory)
     except Exception as e:
         LOGGER.error(f"Milvus 召回对话记忆失败: {e}")
         return []
@@ -1185,34 +1232,36 @@ def search_query_memory(
     """按向量召回查询经验；返回结果后仍需回查 MySQL 校验有效性。"""
     if not query_vectors:
         return []
-    try:
-        with _milvus_client() as client:
-            _ensure_query_memory_collection(client)
-            filters = []
-            if source_types:
-                values = ", ".join('"' + str(value).replace('"', '\\"') + '"' for value in source_types)
-                filters.append(f"source_type in [{values}]")
-            if scope:
-                filters.append(f'scope == "{str(scope).replace(chr(34), chr(92)+chr(34))}"')
-            search_kwargs = {
-                "collection_name": _QUERY_MEMORY_COLLECTION_NAME,
-                "data": query_vectors,
-                "limit": max(1, int(top_k)),
-                "output_fields": ["source_type", "source_id", "query_text", "canonical_query", "scope", "created_at"],
-                "search_params": {"metric_type": "COSINE"},
+    def _search_memory(client: Any) -> List[Dict[str, Any]]:
+        _ensure_query_memory_collection(client)
+        filters = []
+        if source_types:
+            values = ", ".join('"' + str(value).replace('"', '\\"') + '"' for value in source_types)
+            filters.append(f"source_type in [{values}]")
+        if scope:
+            filters.append(f'scope == "{str(scope).replace(chr(34), chr(92)+chr(34))}"')
+        search_kwargs = {
+            "collection_name": _QUERY_MEMORY_COLLECTION_NAME,
+            "data": query_vectors,
+            "limit": max(1, int(top_k)),
+            "output_fields": ["source_type", "source_id", "query_text", "canonical_query", "scope", "created_at"],
+            "search_params": {"metric_type": "COSINE"},
+        }
+        if filters:
+            search_kwargs["filter"] = " and ".join(filters)
+        results = client.search(**search_kwargs)
+        hits = results[0] if results else []
+        return [
+            {
+                **(_hit_value(hit, "entity", {}) or {}),
+                "id": _normalize_primary_key(_hit_value(hit, "id")),
+                "distance": _hit_value(hit, "distance"),
             }
-            if filters:
-                search_kwargs["filter"] = " and ".join(filters)
-            results = client.search(**search_kwargs)
-            hits = results[0] if results else []
-            return [
-                {
-                    **(_hit_value(hit, "entity", {}) or {}),
-                    "id": _normalize_primary_key(_hit_value(hit, "id")),
-                    "distance": _hit_value(hit, "distance"),
-                }
-                for hit in hits
-            ]
+            for hit in hits
+        ]
+
+    try:
+        return _run_milvus_read_with_retry("查询经验召回", _search_memory)
     except Exception as e:
         LOGGER.error(f"Milvus 查询经验召回失败: {e}")
         return []
