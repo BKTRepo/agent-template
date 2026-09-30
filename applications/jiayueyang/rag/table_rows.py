@@ -7,7 +7,9 @@
 """
 
 import json
+import math
 import re
+from statistics import median
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -115,6 +117,107 @@ def _nearest_section_heading(texts: List[Dict[str, Any]], index: int) -> str:
     return ""
 
 
+_COLUMN_X_TOLERANCE = 8.0  # PDF 点；容忍同列字形/缩进产生的小幅偏移
+
+
+def _recover_code_table_columns(
+    header_cells: List[Dict[str, Any]],
+    row_groups: List[List[Dict[str, Any]]],
+) -> Optional[List[Tuple[float, str]]]:
+    """恢复多行表头的列起点；只有可验证的列名才参与值的配对。
+
+    Docling 可能把相邻表头合成一个节点。仅当 bbox 内的各词起点能与
+    已知列起点逐一对齐时拆开；无法确认时返回 None，不按非空值顺序猜列。
+    """
+    if not header_cells or not row_groups:
+        return None
+    anchors: List[float] = []
+    for cell in sorted(header_cells, key=lambda item: item["left"]):
+        if not anchors or cell["left"] - anchors[-1] > _COLUMN_X_TOLERANCE:
+            anchors.append(cell["left"])
+    code_left = median(row[0]["left"] for row in row_groups)
+    if not anchors or abs(anchors[0] - code_left) > _COLUMN_X_TOLERANCE:
+        return None
+
+    # 仅从至少两行都出现、且处于合并表头 bbox 内的起点补充列。
+    # 普通描述列内的缩进不应被误认成新列。
+    repeated: List[Tuple[float, set]] = []
+    for row_index, row in enumerate(row_groups):
+        for cell in row:
+            group = next((entry for entry in repeated
+                          if abs(entry[0] - cell["left"]) <= _COLUMN_X_TOLERANCE), None)
+            if group is None:
+                repeated.append((cell["left"], {row_index}))
+            else:
+                group[1].add(row_index)
+    for left, rows in repeated:
+        if len(rows) < 2 or any(abs(left - anchor) <= _COLUMN_X_TOLERANCE
+                                for anchor in anchors):
+            continue
+        for header in header_cells:
+            right = header.get("right")
+            if right is None or not (header["left"] + _COLUMN_X_TOLERANCE < left < right):
+                continue
+            words = list(re.finditer(r"\S+", header["text"]))
+            if any(abs(header["left"] + (right - header["left"])
+                       * word.start() / len(header["text"]) - left)
+                   <= _COLUMN_X_TOLERANCE for word in words[1:]):
+                anchors.append(left)
+                break
+    anchors.sort()
+    if len(anchors) < 2:
+        return None
+
+    parts: List[List[str]] = [[] for _ in anchors]
+    for cell in header_cells:
+        column = min(range(len(anchors)), key=lambda i: abs(anchors[i] - cell["left"]))
+        right = cell.get("right")
+        spanned = [i for i, anchor in enumerate(anchors)
+                   if i >= column and right is not None
+                   and cell["left"] - _COLUMN_X_TOLERANCE <= anchor < right]
+        if len(spanned) <= 1:
+            parts[column].append(cell["text"])
+            continue
+        # 宽表头可能是横跨多列的总标题，也可能是粘连的两个列名。
+        # 只接受词起点对齐的情况，否则保守放弃列语义恢复。
+        split_parts: Dict[int, List[str]] = {}
+        for word in re.finditer(r"\S+", cell["text"]):
+            word_left = cell["left"] + (right - cell["left"]) * word.start() / len(cell["text"])
+            target = min(spanned, key=lambda i: abs(anchors[i] - word_left))
+            if abs(anchors[target] - word_left) > _COLUMN_X_TOLERANCE:
+                return None
+            split_parts.setdefault(target, []).append(word.group())
+        if set(split_parts) != set(spanned):
+            return None
+        for target, words in split_parts.items():
+            parts[target].append(" ".join(words))
+    labels = [re.sub(r"/\s+", "/", " ".join(part)).strip() for part in parts]
+    if any(not label for label in labels) or len(set(labels)) != len(labels):
+        return None
+    return list(zip(anchors, labels))
+
+
+def _code_row_column_values(
+    row: List[Dict[str, Any]],
+    columns: List[Tuple[float, str]],
+) -> Optional[List[Dict[str, str]]]:
+    """按列起点分配文本，保留空列；跨列粘连的正文不强行赋予列名。"""
+    values: List[List[str]] = [[] for _ in columns]
+    for cell in row:
+        eligible = [i for i, (left, _) in enumerate(columns)
+                    if left <= cell["left"] + _COLUMN_X_TOLERANCE]
+        if not eligible:
+            return None
+        column = eligible[-1]
+        right = cell.get("right")
+        if column + 1 < len(columns) and right is not None \
+                and right > columns[column + 1][0] + _COLUMN_X_TOLERANCE:
+            return None
+        values[column].append(cell["text"])
+    return [{"column": label, "value": " ".join(values[i])}
+            for i, (_, label) in enumerate(columns)]
+
+
 def build_code_table_chunks_from_docling_json(
     docling_json_path: Any,
     filename: str = "",
@@ -124,7 +227,8 @@ def build_code_table_chunks_from_docling_json(
     某些 PDF 表格在 markdown/tables.json 中会退化为一整行文本，但 Docling
     JSON 仍保留每个单元格的文本、横坐标和纵坐标。本函数以 ``Table N``
     表题为边界，识别表格最左列中的短代码，并把该代码到下一代码之间的
-    单元格恢复为独立 ``table_row`` 分块。规则只依赖表格结构，不内置任何
+    单元格恢复为独立 ``table_row`` 分块，并按横坐标绑定列名、保留空列。
+    无法可靠恢复列关系时明确标记不确定。规则只依赖表格结构，不内置任何
     Visa 字段或代码值，因此也适用于响应码、处理码、原因码和结果码表。
     """
     if not docling_json_path:
@@ -168,9 +272,13 @@ def build_code_table_chunks_from_docling_json(
             try:
                 left = float(bbox.get("l"))
                 top = float(bbox.get("t"))
+                right = float(bbox["r"]) if bbox.get("r") is not None else None
             except (TypeError, ValueError):
                 continue
-            cells.append({"text": value, "left": left, "top": top})
+            if not math.isfinite(left) or not math.isfinite(top) \
+                    or (right is not None and (not math.isfinite(right) or right < left)):
+                continue
+            cells.append({"text": value, "left": left, "top": top, "right": right})
 
         if len(cells) < 4:
             continue
@@ -190,15 +298,23 @@ def build_code_table_chunks_from_docling_json(
         header_text = " ".join(cell["text"] for cell in cells[:starts[0]])
         field_match = _FIELD_NUMBER.search(f"{name} {header_text}")
         field_no = field_match.group(1) if field_match else ""
+        row_groups = [cells[start:starts[i + 1] if i + 1 < len(starts) else len(cells)]
+                      for i, start in enumerate(starts)]
+        columns = _recover_code_table_columns(cells[:starts[0]], row_groups)
 
-        for row_number, start in enumerate(starts, start=1):
-            end = starts[row_number] if row_number < len(starts) else len(cells)
-            row_cells = cells[start:end]
+        for row_cells in row_groups:
             code = row_cells[0]["text"]
             values = [cell["text"] for cell in row_cells[1:] if cell["text"]]
             if not values:
                 continue
-            row_text = " | ".join(values)
+            column_values = _code_row_column_values(row_cells, columns) if columns else None
+            if column_values:
+                row_text = " | ".join(
+                    f"{item['column']}: {item['value'] or '原表空白（未给值）'}"
+                    for item in column_values
+                )
+            else:
+                row_text = " | ".join(values)
             identity = (name.casefold(), page_no, code.casefold(), row_text.casefold())
             if identity in seen:
                 continue
@@ -208,6 +324,8 @@ def build_code_table_chunks_from_docling_json(
                 f"代码: {code} | 内容: {row_text}\n"
                 f"行描述: 在「{name}」中，代码 {code} 对应 {row_text}。"
             )
+            if not column_values:
+                content += "\n列关系未可靠恢复；以上为原始文本，不能按非空值顺序推断列含义。"
             chunks.append({
                 "content": content,
                 "tokens": max(1, len(content) // 2),
@@ -217,8 +335,79 @@ def build_code_table_chunks_from_docling_json(
                 "code_value": code,
                 "page_no": page_no,
                 "source_filename": filename,
+                "column_values": column_values or [],
+                "column_alignment": "recovered" if column_values else "uncertain",
             })
     return chunks
+
+
+def merge_derived_table_chunks(
+    existing: List[Dict[str, Any]],
+    derived: List[Dict[str, Any]],
+) -> Tuple[int, int]:
+    """续跑时原位更新同一代码表行，返回（新增数，更新数）。
+
+    内容排重只能识别完全相同的版本。列恢复后内容会变化，故仅对具有
+    唯一表名、页号及代码的代码表行使用稳定身份；正文和其他表格块仍
+    只按内容排重。保留原分块 ID/顺序，避免把新版再追加为第二份证据。
+    """
+    def normalize(chunk: Dict[str, Any]) -> str:
+        return " ".join(str(chunk.get("content") or "").split()).casefold()
+
+    def identity(chunk: Dict[str, Any]) -> Optional[Tuple[str, int, str]]:
+        if chunk.get("modality") != "table_row" \
+                or not str(chunk.get("content") or "").startswith("[代码表行]"):
+            return None
+        name, page, code = chunk.get("table_name"), chunk.get("page_no"), chunk.get("code_value")
+        if not name or not isinstance(page, int) or not code:
+            return None
+        return str(name).casefold(), page, str(code).casefold()
+
+    known = {normalize(chunk) for chunk in existing if normalize(chunk)}
+    positions: Dict[Tuple[str, int, str], List[int]] = {}
+    for i, chunk in enumerate(existing):
+        key = identity(chunk)
+        if key:
+            positions.setdefault(key, []).append(i)
+    # 不为同一表中重复代码的不同记录猜测对应关系。
+    derived_counts: Dict[Tuple[str, int, str], int] = {}
+    for chunk in derived:
+        key = identity(chunk)
+        if key:
+            derived_counts[key] = derived_counts.get(key, 0) + 1
+
+    appended = updated = 0
+    for chunk in derived:
+        content = normalize(chunk)
+        if not content or content in known:
+            continue
+        key = identity(chunk)
+        matches = positions.get(key, []) if key else []
+        if matches and (len(matches) != 1 or derived_counts.get(key) != 1):
+            LOGGER.warning(f"代码表行身份不唯一, 保留历史记录且不追加新版: {key}")
+            continue
+        if len(matches) == 1 and derived_counts.get(key) == 1:
+            index = matches[0]
+            old = existing[index]
+            replacement = {**old, **chunk}
+            for preserved in ("id", "chunk_id", "chunk_order_index"):
+                if preserved in old:
+                    replacement[preserved] = old[preserved]
+            # 内容改变后旧向量/检索文本失效，由调用方重新嵌入和建索引。
+            replacement.pop("vector", None)
+            replacement.pop("search_text", None)
+            existing[index] = replacement
+            known.add(content)
+            updated += 1
+        else:
+            replacement = dict(chunk)
+            replacement["chunk_order_index"] = len(existing)
+            existing.append(replacement)
+            if key:
+                positions.setdefault(key, []).append(len(existing) - 1)
+            known.add(content)
+            appended += 1
+    return appended, updated
 
 
 def _parse_markdown_pipe_table(table_text: str) -> List[List[str]]:

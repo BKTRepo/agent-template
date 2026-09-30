@@ -1729,6 +1729,7 @@ class RagPipelineService:
                     build_code_table_chunks_from_docling_json,
                     build_table_chunks,
                     build_table_chunks_from_markdown,
+                    merge_derived_table_chunks,
                 )
                 derived_table_chunks: List[Dict[str, Any]] = []
                 derived_table_chunks.extend(build_table_chunks(
@@ -1741,21 +1742,8 @@ class RagPipelineService:
                 derived_table_chunks.extend(build_code_table_chunks_from_docling_json(
                     docling_json_path, filename,
                 ))
-                known = {
-                    " ".join(str(chunk.get("content") or "").split()).casefold()
-                    for chunk in all_chunks
-                    if (chunk.get("content") or "").strip()
-                }
-                appended = 0
-                for chunk in derived_table_chunks:
-                    normalized = " ".join(str(chunk.get("content") or "").split()).casefold()
-                    if not normalized or normalized in known:
-                        continue
-                    chunk["chunk_order_index"] = len(all_chunks)
-                    all_chunks.append(chunk)
-                    known.add(normalized)
-                    appended += 1
-                if appended:
+                appended, replaced = merge_derived_table_chunks(all_chunks, derived_table_chunks)
+                if appended or replaced:
                     chunks_changed = True
                     chunks_dict = {f"chunk-{i:04d}": c for i, c in enumerate(all_chunks)}
                     chunks_file.write_text(
@@ -1763,7 +1751,7 @@ class RagPipelineService:
                         encoding="utf-8",
                     )
                     await service.add_history(
-                        f"为历史分块补充表格派生块 {appended} 个: {filename}"
+                        f"为历史分块补充表格派生块 {appended} 个, 原位更新 {replaced} 个: {filename}"
                     )
             doc["status"] = "chunking"
             doc["updated_at"] = service.now_time()
