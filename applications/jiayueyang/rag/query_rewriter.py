@@ -906,19 +906,6 @@ async def rewrite_query(
     doc_ids: Optional[FrozenSet[str]] = None,
     mapping_hints: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
-    """改写查询；保持原有字符串接口，失败仍返回原问题。"""
-    result, _ = await _rewrite_query_with_status(
-        query, doc_ids=doc_ids, mapping_hints=mapping_hints,
-    )
-    return result
-
-
-async def _rewrite_query_with_status(
-    query: str,
-    *,
-    doc_ids: Optional[FrozenSet[str]] = None,
-    mapping_hints: Optional[List[Dict[str, Any]]] = None,
-) -> Tuple[str, bool]:
     """使用匹配文档的术语索引改写用户查询（词典富集 → LLM 改写）。
 
     流程：
@@ -941,7 +928,7 @@ async def _rewrite_query_with_status(
     cached = _cache_get(cache_query, doc_ids)
     if cached is not None:
         LOGGER.info(f"改写缓存命中: '{query[:60]}' -> '{cached[:200]}'")
-        return cached, True
+        return cached
 
     # 2. 加载相关索引
     indices: List[Dict[str, Any]] = []
@@ -958,7 +945,7 @@ async def _rewrite_query_with_status(
         # 索引尚未就绪: 返回原始查询, 但不写缓存——否则索引生成后
         # 缓存仍会把"未改写"的旧结果返回整整一个 TTL 周期
         LOGGER.debug("尚未加载任何术语索引——返回原始查询（不缓存）")
-        return query, False
+        return query
 
     # 3. 阶段 1 — 词典匹配富集: 匹配结果只作为 LLM 的输入提示,
     #    绝不直接拼进检索查询（由 LLM 取舍融合, 误匹配不会污染搜索）
@@ -987,16 +974,15 @@ async def _rewrite_query_with_status(
     except Exception as exc:
         LOGGER.warning(f"LLM 改写失败: {exc}——使用原始查询")
 
-    # 5. 仅有效的模型结果进入长缓存；正常返回原问题也可能是有效结果。
+    # 5. 写入缓存并返回
     result = rewritten or query
-    if rewritten:
-        _cache_set(cache_query, doc_ids, result)
+    _cache_set(cache_query, doc_ids, result)
     # LLM 改写最终结果打印到后台日志（失败回退时也记录, 便于排查）
     if rewritten:
         LOGGER.info(f"LLM 改写结果: '{query[:60]}' -> '{result[:200]}'")
     else:
         LOGGER.info(f"LLM 改写未产出有效结果, 使用原始查询: '{query[:60]}'")
-    return result, bool(rewritten)
+    return result
 
 
 def _extract_identifiers(*texts: str) -> Tuple[str, ...]:
@@ -1051,7 +1037,7 @@ async def rewrite_query_bilingual(
     if cached and _time.time() - _cache_times.get(cache_key, 0) < _cache_ttl:
         return cached
 
-    primary, primary_succeeded = await _rewrite_query_with_status(
+    primary = await rewrite_query(
         query, doc_ids=doc_ids, mapping_hints=mapping_matches,
     )
     primary = _append_deterministic_mapping_terms(primary, mapping_matches)
@@ -1067,7 +1053,6 @@ async def rewrite_query_bilingual(
         english = await _llm_translate_query(primary) or ""
     except Exception as exc:
         LOGGER.warning(f"英文检索词生成失败: {exc}——保留中文与 Dense 检索")
-    english_succeeded = bool(english)
     if english:
         english = _append_missing_identifiers(english, identifiers)
     english = _append_canonical_english_aliases(query, english)
@@ -1079,10 +1064,8 @@ async def rewrite_query_bilingual(
         english_query=english,
         identifiers=identifiers,
     )
-    # 内层回退不能借外层缓存长期固化；确定性补词不代表 LLM 已成功。
-    if primary_succeeded and english_succeeded:
-        _bilingual_cache[cache_key] = result
-        _cache_times[cache_key] = _time.time()
+    _bilingual_cache[cache_key] = result
+    _cache_times[cache_key] = _time.time()
     LOGGER.info(
         f"双语检索词: primary='{primary[:160]}', english='{english[:160]}', "
         f"identifiers={list(identifiers)}"
@@ -1094,38 +1077,27 @@ async def rewrite_query_bilingual(
 # LLM 改写
 # ---------------------------------------------------------------------------
 
-async def _short_query_completion(prompt: str, max_tokens: int, stage: str) -> Any:
-    """短查询预算独立配置；仅截断时使用相同提示词扩大预算重试一次。"""
-    from applications.jiayueyang.rag.llm import chat_completion, LLMTruncatedError
-
-    retry_budget = min(max_tokens * 2, PROJECT_CONFIG.QUERY_REWRITE_RETRY_MAX_TOKENS)
-    try:
-        return await chat_completion(
-            messages=prompt, stream=False, max_tokens=max_tokens, temperature=0.0,
-        )
-    except LLMTruncatedError:
-        if not PROJECT_CONFIG.QUERY_REWRITE_TRUNCATION_RETRY_ENABLED or retry_budget <= max_tokens:
-            raise
-        LOGGER.warning(f"{stage}输出截断，复用原提示词重试一次: {max_tokens} -> {retry_budget}")
-        return await chat_completion(
-            messages=prompt, stream=False, max_tokens=retry_budget, temperature=0.0,
-        )
-
-
 async def _llm_rewrite(
     query: str,
     matched_terms: str,
     terminology_text: str,
 ) -> Optional[str]:
     """调用 LLM 改写查询（输入含词典匹配提示与全量术语表）。失败时返回 None。"""
+    # 延迟导入：避免在模块加载阶段引入 LLM 客户端及其依赖
+    from applications.jiayueyang.rag.llm import chat_completion
+
     prompt = _REWRITE_PROMPT.format(
         matched_terms=matched_terms,
         terminology_text=terminology_text or "(empty)",
         query=query,
     )
 
-    response = await _short_query_completion(
-        prompt, PROJECT_CONFIG.QUERY_REWRITE_MAX_TOKENS, "中文查询改写",
+    # 使用较小的 max_tokens——改写后的查询应当短小
+    response = await chat_completion(
+        messages=prompt,
+        stream=False,
+        max_tokens=150,
+        temperature=0.0,  # 确定性输出
     )
 
     if isinstance(response, str):
@@ -1146,10 +1118,13 @@ async def _llm_rewrite(
 
 async def _llm_translate_query(query: str) -> Optional[str]:
     """将主检索查询转换为英文关键词查询，不依赖术语索引。"""
-    response = await _short_query_completion(
-        _ENGLISH_QUERY_PROMPT.format(query=query),
-        PROJECT_CONFIG.QUERY_TRANSLATE_MAX_TOKENS,
-        "英文检索词生成",
+    from applications.jiayueyang.rag.llm import chat_completion
+
+    response = await chat_completion(
+        messages=_ENGLISH_QUERY_PROMPT.format(query=query),
+        stream=False,
+        max_tokens=120,
+        temperature=0.0,
     )
     if not isinstance(response, str) or not response.strip():
         return None
