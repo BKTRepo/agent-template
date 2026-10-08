@@ -2,20 +2,26 @@
 """Thread-safe bounded pool for synchronous pymilvus clients."""
 
 import atexit
+import logging
 import os
 import queue
 import threading
+import time
 import uuid
 from contextlib import contextmanager
+from importlib.metadata import version
 from typing import Any, Callable, Dict, Iterator, Tuple, Type
 
 from pymilvus import MilvusClient
+
+_PYMILVUS_MAJOR_VERSION = int(version("pymilvus").split(".", 1)[0])
+_LOGGER = logging.getLogger(__name__)
 
 
 class MilvusClientPool:
     """Lazily creates, reuses, and bounds independent Milvus clients.
 
-    Each client must own a unique pymilvus connection alias. A borrowed client
+    Each client must own an independent pymilvus connection. A borrowed client
     is used by only one thread at a time; returning it makes it available for
     the next request. Clients involved in failed operations are discarded so
     a later acquisition reconnects cleanly.
@@ -36,7 +42,7 @@ class MilvusClientPool:
         self._max_size = max_size
         self._acquire_timeout = acquire_timeout
         self._idle: queue.LifoQueue[Any] = queue.LifoQueue(maxsize=max_size)
-        self._lock = threading.Lock()
+        self._lock = threading.Condition()
         self._created = 0
         self._closed = False
 
@@ -46,40 +52,46 @@ class MilvusClientPool:
             return self._created
 
     def acquire(self) -> Any:
+        deadline = time.monotonic() + self._acquire_timeout
         with self._lock:
-            if self._closed:
-                raise RuntimeError("Milvus client pool is closed")
-        try:
-            return self._idle.get_nowait()
-        except queue.Empty:
-            pass
+            while True:
+                if self._closed:
+                    raise RuntimeError("Milvus client pool is closed")
+                try:
+                    return self._idle.get_nowait()
+                except queue.Empty:
+                    pass
+                if self._created < self._max_size:
+                    self._created += 1
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError(
+                        f"Timed out waiting {self._acquire_timeout:g}s for a Milvus connection"
+                    )
+                # A discarded connection frees capacity without adding an idle
+                # client. Waiting on the queue alone would miss that event.
+                self._lock.wait(remaining)
 
-        should_create = False
+        try:
+            client = self._factory()
+        except Exception:
+            with self._lock:
+                self._created -= 1
+                self._lock.notify_all()
+            raise
         with self._lock:
-            if self._created < self._max_size:
-                self._created += 1
-                should_create = True
-
-        if should_create:
-            try:
-                return self._factory()
-            except Exception:
-                with self._lock:
-                    self._created -= 1
-                raise
-
-        try:
-            return self._idle.get(timeout=self._acquire_timeout)
-        except queue.Empty as exc:
-            raise TimeoutError(
-                f"Timed out waiting {self._acquire_timeout:g}s for a Milvus connection"
-            ) from exc
+            if not self._closed:
+                return client
+        self._discard(client)
+        raise RuntimeError("Milvus client pool is closed")
 
     def release(self, client: Any, *, broken: bool = False) -> None:
         with self._lock:
             if not broken and not self._closed:
                 try:
                     self._idle.put_nowait(client)
+                    self._lock.notify()
                     return
                 except queue.Full:
                     pass
@@ -88,9 +100,14 @@ class MilvusClientPool:
     def _discard(self, client: Any) -> None:
         try:
             client.close()
+        except Exception:
+            # Cleanup failure must not mask the original RPC error or prevent
+            # the read wrapper from attempting its one permitted retry.
+            _LOGGER.warning("Failed to close a discarded Milvus client", exc_info=True)
         finally:
             with self._lock:
                 self._created = max(0, self._created - 1)
+                self._lock.notify_all()
 
     @contextmanager
     def connection(self) -> Iterator[Any]:
@@ -106,6 +123,7 @@ class MilvusClientPool:
     def close(self) -> None:
         with self._lock:
             self._closed = True
+            self._lock.notify_all()
         while True:
             try:
                 client = self._idle.get_nowait()
@@ -142,9 +160,15 @@ def get_milvus_client_pool(
         def factory() -> Any:
             kwargs: Dict[str, Any] = {
                 "uri": uri,
-                # Prevent pymilvus from reusing its URI-derived global alias.
-                "alias": f"milvus-pool-{os.getpid()}-{uuid.uuid4().hex}",
             }
+            if _PYMILVUS_MAJOR_VERSION >= 3:
+                # 3.x shares handlers by endpoint/auth; an alias no longer
+                # creates an independent channel. Dedicated connections are
+                # also closed immediately when a broken client is discarded.
+                kwargs["dedicated"] = True
+            else:
+                # 2.x honours an explicit unique alias in create_connection.
+                kwargs["alias"] = f"milvus-pool-{os.getpid()}-{uuid.uuid4().hex}"
             if user:
                 kwargs["user"] = user
             if password:
