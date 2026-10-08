@@ -1,0 +1,12 @@
+title: 按本次选择生成可交付测试指引
+status: implemented
+last_updated: 2026-10-08
+id: US-001
+feature: ../feature-specs/F-01-strategy-trimmer.yaml
+story: 作为测试经理，完成裁剪与协作确认后，获得可预览、复制及下载的 Markdown。
+acceptance:
+  - 功能与非功能明细仅包含已选择技术栈。
+  - 裁剪备注、系统资产、工具、门禁和干系人进入工件。
+  - 不保存原始选择 JSON 或参数日志；保存 Markdown 及需求下载索引。
+  - 资产关系 Excel 导入更新，前端只读。
+  - 按需求编号或名称查找最新 Markdown 并下载。

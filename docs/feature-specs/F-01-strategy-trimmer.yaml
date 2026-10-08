@@ -1,0 +1,10 @@
+title: 信创策略 Markdown 生成
+status: implemented
+last_updated: 2026-10-08
+id: F-01
+prd: ../product-requirements.yaml
+prototype: ../prototype/demo-终版-0826-裁剪设计.html
+implementation: applications/strategy_trimmer
+frontend: frontend
+details: ../strategy-trimmer.md
+stories: [US-001]

@@ -113,6 +113,13 @@ async def logging_middleware(request: Request, call_next):
     :param call_next: 下一层 ASGI 可调用对象。
     :returns: 下游返回的 Response。
     """
+    # 裁剪器选择和生成内容不写参数日志/审计；文档及索引由业务服务保存。
+    # 在读取请求体之前跳过，同时覆盖该应用的校验失败和文档请求。
+    if request.url.path == '/strategy-trimmer' or request.url.path.startswith('/strategy-trimmer/'):
+        response = await call_next(request)
+        response.headers['Cache-Control'] = 'no-store'
+        return response
+
     # 接口服务时间
     start_time = time.time()
     request_time: str = time.strftime(GLOBAL_CONFIG.DATETIME_FORMAT2, time.localtime(start_time))

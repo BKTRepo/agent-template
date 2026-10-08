@@ -3,8 +3,10 @@ from fastapi import FastAPI
 
 from applications.example.services.init_data import init_example_data
 from applications.user.services.init_data import init_database_user
+from applications.strategy_trimmer.services import init_trimmer_data
 
 
 async def init_database_table(app: FastAPI):
     await init_database_user()
     await init_example_data()
+    await init_trimmer_data()

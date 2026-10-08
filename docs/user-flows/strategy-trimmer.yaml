@@ -1,0 +1,6 @@
+title: 六步裁剪流程
+status: implemented
+last_updated: 2026-10-08
+feature: F-01
+sequence: [需求分析, 功能测试裁剪, 非功能测试裁剪, 工具集选择, 门禁确认, 协作与干系人确认, 生成 Markdown]
+blocking: 缺少需求/范围、裁剪备注、额外硬性门禁确认或协作确认时不生成。

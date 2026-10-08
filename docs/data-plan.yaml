@@ -1,0 +1,11 @@
+title: 裁剪器数据处理
+status: implemented
+last_updated: 2026-10-08
+feature: F-01
+server_selection_storage: none
+server_generated_file_storage: output/docs/strategy_trimmer，TRIMMER_DOCUMENT_DIR 可覆盖
+rules: keenrobot_trimmer_config，catalog.json 仅初始化种子
+history: 浏览器 localStorage，最多 50 条，不上传后端。
+download: 读取保存的 Markdown 文件，历史版本保持不变。
+assets: keenrobot_system_automation_asset，Excel 事务导入
+documents: keenrobot_trimmer_markdown_document，需求匹配最新版本

@@ -76,6 +76,12 @@ async def auth_middleware(request: Request, call_next):
         "GET /",
         "GET /health",
 
+        # 裁剪器生成、查询、下载；资产导入继续走原项目鉴权。
+        "GET /strategy-trimmer/catalog",
+        "POST /strategy-trimmer/generate",
+        "GET /strategy-trimmer/automation-assets/template",
+        "GET /strategy-trimmer/documents/*",
+
         # openapi/docs
         f"GET {PROJECT_CONFIG.APP_DOCS_URL}",
         f"GET {PROJECT_CONFIG.APP_REDOC_URL}",

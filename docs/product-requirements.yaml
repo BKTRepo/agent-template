@@ -1,0 +1,8 @@
+title: 信创裁剪器增量需求
+status: implemented
+last_updated: 2026-10-08
+scope: 在 agent-template master 增加裁剪器，沿用现有后端，React 前端单独目录。
+features:
+  - id: F-01
+    spec: feature-specs/F-01-strategy-trimmer.yaml
+    acceptance: 前端选择生成对应六章 Markdown，后端不保存选择。

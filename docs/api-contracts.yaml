@@ -1,0 +1,28 @@
+title: 新增裁剪器接口契约
+status: implemented
+last_updated: 2026-10-08
+feature: F-01
+response: 沿用 core.responses.SuccessResponse 和 ParameterResponse
+endpoints:
+  - method: GET
+    path: /strategy-trimmer/catalog
+    purpose: 数据库规则及系统资产目录
+  - method: POST
+    path: /strategy-trimmer/generate
+    request_schema: applications.strategy_trimmer.schemas.strategy_schema.GenerateRequest
+    response_schema: applications.strategy_trimmer.schemas.strategy_schema.GenerateEnvelope
+    persistence: Markdown 文件及需求下载索引
+  - method: GET
+    path: /strategy-trimmer/automation-assets/template
+    purpose: 下载 Excel 模板
+  - method: POST
+    path: /strategy-trimmer/automation-assets/import
+    purpose: Excel 事务新增或更新系统资产关系
+    authentication: 原项目 token 鉴权
+  - method: GET
+    path: /strategy-trimmer/documents/latest
+    purpose: 编号或名称精确匹配最新版本
+  - method: GET
+    path: /strategy-trimmer/documents/{documentId}/download
+    purpose: 下载已保存 Markdown
+details: strategy-trimmer.md

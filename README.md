@@ -605,4 +605,10 @@ DATABASE_NAME=rag_system
 
 ---
 
-*文档最后更新：2026-06-15*
+*文档最后更新：2026-10-08*
+
+## 信创测试策略裁剪器（master 新增）
+
+React 前端位于 `frontend/`，新增后端模块位于 `applications/strategy_trimmer/`，已通过原路由注册接入 `backend_main.py`。规则从数据库读取，系统自动化资产单表存储并支持 Excel 导入、前端只读。根据六步选择生成并保存 Markdown，可按需求编号或名称查询最新文档下载；不保存原始选择 JSON。
+
+使用原后端启动方式（默认 `8519`），在 `frontend/` 运行 `npm ci` 和 `npm run dev`，访问 `http://127.0.0.1:5173`。完整启动、接口、原型来源及验证说明见 [裁剪器说明](docs/strategy-trimmer.md)。

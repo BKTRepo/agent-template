@@ -1,0 +1,8 @@
+title: 裁剪器增量架构
+status: implemented
+last_updated: 2026-10-08
+feature: F-01
+flow: React -> 原 FastAPI 路由 -> Pydantic 校验 -> 数据库规则及资产快照 -> Markdown 保存及索引 -> 统一响应
+registration: core/initializations/app_initialization.py
+audit: 原审计中间件在读取裁剪器请求体前跳过。
+test_entrypoint: trimmer_main.py 复用路由及模型，持久化 SQLite；backend_main.py 使用原 MySQL。

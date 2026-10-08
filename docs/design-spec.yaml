@@ -1,0 +1,8 @@
+title: 裁剪器原型还原
+status: implemented
+last_updated: 2026-10-08
+feature: F-01
+reference: prototype/demo-终版-0826-裁剪设计.html
+styles: 原型五层 CSS 加末轮修订样式，保留原加载顺序。
+components: React 六步导航、选择表单、裁剪表、门禁表、干系人表、Markdown 弹窗、只读资产列和最新文档查询弹窗。
+adaptation: 表格局部横向滚动，窄屏导航横向滚动。

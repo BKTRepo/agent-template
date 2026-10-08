@@ -1,0 +1,39 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>信创项目测试裁剪设计 · 0826版</title>
+  <link rel="stylesheet" href="demo.css"/>
+  <link rel="stylesheet" href="demo-final.css"/>
+  <link rel="stylesheet" href="demo-0826-design.css"/>
+  <link rel="stylesheet" href="demo-0826-design-fix.css"/>
+  <link rel="stylesheet" href="demo-0826-design-request-fix.css"/>
+</head>
+<body class="design-page">
+  <div class="app-shell">
+    <header class="topbar">
+      <div><div class="eyebrow">信创项目测试指引 0826 · 裁剪设计</div><h1>信创测试策略裁剪器</h1><p>按需求分析、功能裁剪、非功能裁剪、工具选用、门禁确认和协作确认形成最终测试指引。</p></div>
+      <div class="topbar-actions"><button id="d82HistoryBtn" class="history-btn">历史策略 <span id="d82HistoryCount" class="history-count">0</span></button><div class="source-pill"><span class="live-dot"></span>已加载：0826测试指引 · 9.1/9.2/9.3裁剪明细</div></div>
+    </header>
+    <main class="workspace">
+      <aside class="stepbar" aria-label="六步裁剪流程"><div class="stepbar-title">裁剪设计路径</div><button class="step active" data-step="0"><b>01</b><span>需求分析<small>基本信息、系统与前道工件</small></span></button><button class="step" data-step="1"><b>02</b><span>功能测试裁剪<small>参考 9.1 裁剪明细</small></span></button><button class="step" data-step="2"><b>03</b><span>非功能测试裁剪<small>参考 9.2 裁剪明细</small></span></button><button class="step" data-step="3"><b>04</b><span>工具集选择<small>参考 9.3 裁剪明细</small></span></button><button class="step" data-step="4"><b>05</b><span>门禁确认<small>6 项硬性指标默认必选</small></span></button><button class="step" data-step="5"><b>06</b><span>协作与干系人确认<small>完成后生成最终指引</small></span></button><div class="role-note"><strong>输出门槛</strong>只能按顺序完成六步；6项硬性门禁和协作确认完成后，才生成最终测试指引。</div></aside>
+      <section class="editor"><div id="stepContent"></div><div class="nav-actions"><button id="prevBtn" class="btn secondary">← 上一步</button><span id="stepHint" class="step-hint"></span><button id="nextBtn" class="btn primary">下一步 →</button></div></section>
+      <aside class="preview-panel" aria-hidden="true"><div id="previewTitle"></div><div id="riskTags"></div><strong id="depthText"></strong><small id="scoreText"></small><i id="scoreBar"></i><ul id="scopePreview"></ul><div id="toolPreview"></div><b id="hardCount"></b><b id="softCount"></b><b id="redCount"></b><ul id="gatePreview"></ul><code id="ruleTrace"></code></aside>
+    </main>
+  </div>
+
+  <dialog id="d82OutputDialog"><article class="output-sheet"><button id="d82OutputClose" class="dialog-close">×</button><div class="eyebrow">最终测试指引 · 待测试经理确认</div><h2 id="d82OutputTitle"></h2><p class="muted">本指引依据《信创项目测试指引0826》生成。最终范围、责任和例外结论由测试经理确认。</p><div id="d82OutputBody"></div><div class="output-actions"><button id="d82Copy" class="btn secondary">复制指引内容</button></div></article></dialog>
+  <dialog id="d82HistoryDialog" class="history-dialog"><section class="history-shell"><div class="history-head"><div><div class="eyebrow">本机历史策略</div><h2>查询已生成的裁剪设计</h2><p class="muted">历史记录保存在当前浏览器，可载入后重新按六步校核。</p></div><button id="d82HistoryClose" class="history-close">×</button></div><div class="history-filters"><input id="d82HistorySearch" placeholder="搜索需求名称、系统等级或改造类型"/><select id="d82HistoryGrade"><option>全部</option><option>A类系统</option><option>B类系统</option><option>其他类型</option></select></div><div id="d82HistoryList" class="history-list"></div><div class="history-note">载入历史策略后会回到第 01 步，避免直接沿用旧门禁或旧裁剪结论。</div></section></dialog>
+
+  <!-- 兼容基础脚本所需的隐藏元素 -->
+  <dialog id="outputDialog"><button id="closeDialog">×</button><h2 id="outputTitle"></h2><div id="outputBody"></div><button id="copyBtn">复制</button><button id="downloadBtn">下载</button></dialog><button id="saveBtn" hidden></button><div id="toast" class="toast"></div>
+  <script src="demo.js"></script>
+  <script src="demo-0826-design.js"></script>
+  <script src="demo-0826-design-fix.js"></script>
+  <script src="demo-0826-design-request-fix.js"></script>
+  <script src="demo-0826-output-fix.js"></script>
+  <script src="demo-0826-request-revision.js"></script>
+  <script src="demo-0826-compact-fix.js"></script>
+</body>
+</html>

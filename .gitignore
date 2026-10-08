@@ -26,6 +26,11 @@ output/upload/*
 docling_offline/
 
 workspace/*
+frontend/
+.venv-trimmer/
+output/docs/strategy_trimmer/
+output/trimmer.sqlite3*
+.playwright-cli/
 !workspace/.claude
 !workspace/.claude/**
 
