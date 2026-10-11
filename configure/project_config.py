@@ -489,6 +489,8 @@ class ProjectConfig(BaseSettings):
         ),
     )
 
+    RAG_FIELD_ALIASES_ENABLED: bool = Field(default=False, description="候选字段别名展开，默认关闭")
+
     # ==================== Rerank 配置 ====================
     RERANK_BINDING_HOST: str = Field(default="https://api.siliconflow.cn/v1/rerank", description="Rerank API 地址")
     RERANK_MODEL: str = Field(default="BAAI/bge-reranker-v2-m3", description="Rerank 模型")

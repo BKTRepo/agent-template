@@ -1,0 +1,335 @@
+{
+  "version": 1,
+  "status": "待服务器配对回归；截图分数为此前人工评估，不能当作新版本实测",
+  "sources": {
+    "VISA": "VISA2025-visanet-authorization-only-online-messages-technical-specifications.pdf",
+    "Mastercard": "mc_CustInterfaceSpec(1).pdf"
+  },
+  "cases": [
+    {
+      "id": "visa_f63_3",
+      "question": "VISA F63.3的内容和应用是什么",
+      "category": "保护现有回答",
+      "screenshot_score": 8.5,
+      "scheme": "VISA",
+      "pages": "364—367",
+      "required_facts": [
+        "字段为Message Reason Code，4N、BCD、2字节",
+        "用途与报文类型一致；不用于响应报文",
+        "全额ATM撤销2501/2502/2503，部分撤销2504"
+      ],
+      "prior_questions": [],
+      "history_requirement": "固定相同历史并记录是否新对话"
+    },
+    {
+      "id": "visa_f63_3_repeat",
+      "question": "VISA F63.3的内容和应用是什么",
+      "category": "保护现有回答",
+      "screenshot_score": 8.5,
+      "scheme": "VISA",
+      "pages": "364—367",
+      "required_facts": [
+        "不得因换用思考模式或规范化而丢失格式、用途及撤销条件"
+      ],
+      "prior_questions": [],
+      "history_requirement": "固定相同历史并记录是否新对话"
+    },
+    {
+      "id": "visa_reject_0400",
+      "question": "VISA拒绝码0400什么意思",
+      "category": "保护现有回答",
+      "screenshot_score": 8.5,
+      "scheme": "VISA",
+      "pages": "1015、1024",
+      "required_facts": [
+        "Parse error/invalid length",
+        "可能涉及多个字段；不能单凭拒绝码确定具体字段",
+        "区分拒绝码0400与MTI 0400"
+      ],
+      "prior_questions": [],
+      "history_requirement": "固定相同历史并记录是否新对话"
+    },
+    {
+      "id": "visa_response_85",
+      "question": "VISA39域返回85什么意思",
+      "category": "保护正确部分并修正范围",
+      "screenshot_score": 7.5,
+      "scheme": "VISA",
+      "pages": "171—172、182",
+      "required_facts": [
+        "按账户验证、地址/CVV2验证等具体场景解释85",
+        "不把特定VSDC ATM脚本条件推广为所有授权成功"
+      ],
+      "prior_questions": [],
+      "history_requirement": "固定相同历史并记录是否新对话"
+    },
+    {
+      "id": "visa_f34_reversal",
+      "question": "VISA F34在0400报文中如何使用",
+      "category": "保护正确部分并修正条件",
+      "screenshot_score": 6.5,
+      "scheme": "VISA",
+      "pages": "721、863—865",
+      "required_facts": [
+        "保留字段条件、表格报文方向与C+图例语义",
+        "不能把C+改说成原请求有就必须回传"
+      ],
+      "prior_questions": [],
+      "history_requirement": "固定相同历史并记录是否新对话"
+    },
+    {
+      "id": "visa_account_verification",
+      "question": "VISA账户验证的发出报文是什么条件",
+      "category": "保护正确部分并修正条件",
+      "screenshot_score": 7,
+      "scheme": "VISA",
+      "pages": "134、248、400—401",
+      "required_facts": [
+        "0100请求、F4金额为0、F25为51",
+        "F25是POS Condition Code；不能称作F3处理码",
+        "区分发卡行支持与收单方填写，不能要求收单方普遍填写F51",
+        "普通账户验证与特殊AFT/OCT处理分支分开"
+      ],
+      "prior_questions": [],
+      "history_requirement": "固定相同历史并记录是否新对话"
+    },
+    {
+      "id": "visa_f56_usage",
+      "question": "VISA F56使用场景",
+      "category": "修复失败",
+      "screenshot_score": 2,
+      "scheme": "VISA",
+      "pages": "287—297",
+      "required_facts": [
+        "召回客户相关数据专章，不能声称文档没有",
+        "包括VFC POS、OCT/AFT、账户姓名查询等场景"
+      ],
+      "prior_questions": [],
+      "history_requirement": "固定相同历史并记录是否新对话"
+    },
+    {
+      "id": "visa_f56_max",
+      "question": "VISA F56最大长度是多少",
+      "category": "修复失败",
+      "screenshot_score": 2,
+      "scheme": "VISA",
+      "pages": "287—288",
+      "required_facts": [
+        "单字节格式255字节数据、含长度前缀256字节",
+        "双字节格式1535字节数据、含长度前缀1537字节",
+        "ISO定义支持9999不等于Visa此版本实现最大值"
+      ],
+      "prior_questions": [],
+      "history_requirement": "固定相同历史并记录是否新对话"
+    },
+    {
+      "id": "visa_0114",
+      "question": "VISA报错0114是什么原因导致的",
+      "category": "修复失败",
+      "screenshot_score": 6,
+      "scheme": "VISA",
+      "pages": "1010，表466",
+      "required_facts": [
+        "Invalid value",
+        "F63.3与F125 Usage 2是两个独立可能出错字段",
+        "必须结合错误字段定位；不存在本表所称F63.3用途2"
+      ],
+      "prior_questions": [],
+      "history_requirement": "固定相同历史并记录是否新对话"
+    },
+    {
+      "id": "visa_f111_context",
+      "question": "F111适用于哪些报文类型",
+      "category": "修复失败",
+      "screenshot_score": 3,
+      "scheme": "VISA",
+      "pages": "498—508、739",
+      "required_facts": [
+        "继承最近明确的Visa语境",
+        "使用Visa Additional Transaction Specific Data定义，不能当作Currency Conversion Assessment Amount",
+        "从对应消息表读取类型、方向和条件"
+      ],
+      "prior_questions": [
+        "VISA F56使用场景"
+      ],
+      "history_requirement": "重放完整原对话；不能只用问题标题模拟历史"
+    },
+    {
+      "id": "visa_0400_followup",
+      "question": "如何修改使报文通过",
+      "category": "修复失败",
+      "screenshot_score": 2,
+      "scheme": "VISA",
+      "pages": "1015、1024",
+      "required_facts": [
+        "继续围绕解析错误/无效长度排查",
+        "需要原报文及错误字段后才能给具体修复",
+        "不得无依据引入F34 DF1F、7.5或建议四舍五入"
+      ],
+      "prior_questions": [
+        "VISA拒绝码0400什么意思"
+      ],
+      "history_requirement": "重放完整原对话；不能只用问题标题模拟历史"
+    },
+    {
+      "id": "visa_f56_field_form",
+      "question": "VISA Field 56的使用场景是什么",
+      "category": "同义表达",
+      "screenshot_score": null,
+      "scheme": "VISA",
+      "pages": "287—297",
+      "required_facts": [
+        "与F56使用场景得到同一组正确证据及事实"
+      ],
+      "prior_questions": [],
+      "history_requirement": "固定相同历史并记录是否新对话"
+    },
+    {
+      "id": "visa_f56_cn_form",
+      "question": "VISA 56域的最大长度是多少",
+      "category": "同义表达",
+      "screenshot_score": null,
+      "scheme": "VISA",
+      "pages": "287—288",
+      "required_facts": [
+        "正确区分数据长度、前缀长度和两种格式"
+      ],
+      "prior_questions": [],
+      "history_requirement": "固定相同历史并记录是否新对话"
+    },
+    {
+      "id": "visa_f56_cn_field",
+      "question": "VISA字段56的使用场景是什么",
+      "category": "同义表达",
+      "screenshot_score": null,
+      "scheme": "VISA",
+      "pages": "287—297",
+      "required_facts": [
+        "召回客户相关数据专章及具体使用场景"
+      ],
+      "prior_questions": [],
+      "history_requirement": "固定相同历史并记录是否新对话"
+    },
+    {
+      "id": "visa_f111_field_form",
+      "question": "VISA Field 111的定义和适用报文是什么",
+      "category": "同义表达",
+      "screenshot_score": null,
+      "scheme": "VISA",
+      "pages": "498—508、739",
+      "required_facts": [
+        "按Visa定义和消息表回答；不得串用其他规范同号字段"
+      ],
+      "prior_questions": [],
+      "history_requirement": "固定相同历史并记录是否新对话"
+    },
+    {
+      "id": "mc_de56",
+      "question": "万事达DE56是什么",
+      "category": "卡组织隔离",
+      "screenshot_score": null,
+      "scheme": "Mastercard",
+      "pages": "692—693",
+      "required_facts": [
+        "按所给Mastercard版本的Payment Account Data/PAR内容回答",
+        "不能引用Visa Customer Related Data作为Mastercard定义"
+      ],
+      "prior_questions": [],
+      "history_requirement": "固定相同历史并记录是否新对话"
+    },
+    {
+      "id": "mc_f56",
+      "question": "万事达F56是什么",
+      "category": "卡组织隔离与同义表达",
+      "screenshot_score": null,
+      "scheme": "Mastercard",
+      "pages": "692—693",
+      "required_facts": [
+        "与万事达DE56得到同一正确定义；不能混成Visa F56"
+      ],
+      "prior_questions": [],
+      "history_requirement": "固定相同历史并记录是否新对话"
+    },
+    {
+      "id": "mc_de111",
+      "question": "万事达DE111有什么用途",
+      "category": "卡组织隔离",
+      "screenshot_score": null,
+      "scheme": "Mastercard",
+      "pages": "1006",
+      "required_facts": [
+        "按所给版本回答Reserved for ISO Use及当前不使用",
+        "不能当作Visa F111或其他版本的金额字段"
+      ],
+      "prior_questions": [],
+      "history_requirement": "固定相同历史并记录是否新对话"
+    },
+    {
+      "id": "scheme_compare_f56",
+      "question": "VISA和Mastercard的F56有什么不同",
+      "category": "跨规范比较",
+      "screenshot_score": null,
+      "scheme": "VISA + Mastercard",
+      "pages": "VISA287—297；Mastercard692—693",
+      "required_facts": [
+        "分别说明两份规范的定义并分别引用",
+        "不能因单品牌过滤导致另一份文档缺证"
+      ],
+      "prior_questions": [],
+      "history_requirement": "固定相同历史并记录是否新对话"
+    },
+    {
+      "id": "visa_mti_0400",
+      "question": "VISA报文类型0400是什么意思",
+      "category": "区分码的类别",
+      "screenshot_score": null,
+      "scheme": "VISA",
+      "pages": "消息类型表，需要复核具体引用页",
+      "required_facts": [
+        "回答授权撤销请求消息类型；不能套用拒绝码解析错误"
+      ],
+      "prior_questions": [],
+      "history_requirement": "固定相同历史并记录是否新对话"
+    },
+    {
+      "id": "negative_hex_tag",
+      "question": "十六进制标签F56应该怎么解析",
+      "category": "标识歧义",
+      "screenshot_score": null,
+      "scheme": "不应自动推断卡组织",
+      "pages": "不适用，需识别标签语境",
+      "required_facts": [
+        "不能自动把标签解释成Field 56；证据不足时澄清"
+      ],
+      "prior_questions": [],
+      "history_requirement": "固定相同历史并记录是否新对话"
+    },
+    {
+      "id": "negative_path",
+      "question": "检查路径/api/F56/test的含义",
+      "category": "标识保护",
+      "screenshot_score": null,
+      "scheme": "不应自动推断卡组织",
+      "pages": "不适用",
+      "required_facts": [
+        "路径原样保留，不展开路径中的F56，不编造支付字段解释"
+      ],
+      "prior_questions": [],
+      "history_requirement": "固定相同历史并记录是否新对话"
+    },
+    {
+      "id": "negative_business_value",
+      "question": "VISA F34 DF1F出现7.5，能直接四舍五入吗",
+      "category": "禁止无证据修改",
+      "screenshot_score": null,
+      "scheme": "VISA",
+      "pages": "157及实际交易业务规则",
+      "required_facts": [
+        "保留DF1F及7.5，不能因格式要求而自动批准四舍五入业务值",
+        "区分允许编码范围与业务值如何产生"
+      ],
+      "prior_questions": [],
+      "history_requirement": "固定相同历史并记录是否新对话"
+    }
+  ]
+}

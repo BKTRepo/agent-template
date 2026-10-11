@@ -214,6 +214,21 @@ Retrieval query: {query}
 
 English retrieval query:"""
 
+_FIELD_ALIAS_RE = re.compile(
+    r"(?<![A-Za-z0-9_./-])F\s*(\d{1,3}(?:\.\d+)?)(?![A-Za-z0-9_./-])",
+    re.IGNORECASE,
+)
+_FIELD_IDENTIFIER_RE = re.compile(
+    r"(?<![A-Za-z0-9_./-])(?:Field|DE)\s*\d{1,3}(?:\.\d+)?(?![A-Za-z0-9_./-])",
+    re.IGNORECASE,
+)
+
+
+def _normalize_field_aliases(text: str) -> str:
+    """展开独立的F字段缩写；兼容中文紧邻，保留路径、十六进制标签等标识。"""
+    return _FIELD_ALIAS_RE.sub(lambda match: f"Field {match.group(1)}", text)
+
+
 _IDENTIFIER_RE = re.compile(
     r"(?<![\w])(?:[A-Za-z]{2,}\s*-?\s*\d[A-Za-z0-9_.:/-]*|"
     r"/[A-Za-z0-9_./-]+|[A-Za-z]+_[A-Za-z0-9_]+|"
@@ -985,12 +1000,20 @@ async def rewrite_query(
     return result
 
 
-def _extract_identifiers(*texts: str) -> Tuple[str, ...]:
+def _extract_identifiers(*texts: str, enable_field_aliases: bool = False) -> Tuple[str, ...]:
     """确定性提取技术编号、接口路径、snake_case 与 camelCase 标识。"""
     values: List[str] = []
     seen = set()
     for text in texts:
-        for match in _IDENTIFIER_RE.finditer(text or ""):
+        text = _normalize_field_aliases(text or "") if enable_field_aliases else (text or "")
+        matches = _IDENTIFIER_RE.finditer(text)
+        if enable_field_aliases:
+            fields = list(_FIELD_IDENTIFIER_RE.finditer(text))
+            # 旧模式可能在中文紧邻时回退为子字段前缀，只保留完整字段匹配。
+            matches = [*fields, *(m for m in matches if not any(
+                f.start() <= m.start() and m.end() <= f.end() for f in fields
+            ))]
+        for match in matches:
             value = " ".join(match.group(0).split())
             key = value.casefold()
             if value and key not in seen:
@@ -1027,25 +1050,32 @@ async def rewrite_query_bilingual(
     *,
     doc_ids: Optional[FrozenSet[str]] = None,
     mapping_matches: Optional[List[Dict[str, Any]]] = None,
+    enable_field_aliases: Optional[bool] = None,
 ) -> BilingualQuery:
-    """生成主查询与英文查询；即使术语索引为空也执行英文扩展。"""
+    """生成双语查询；字段别名扩展须显式启用，以便与原流程对照验证。"""
+    if enable_field_aliases is None:
+        enable_field_aliases = bool(getattr(PROJECT_CONFIG, "RAG_FIELD_ALIASES_ENABLED", False))
     doc_ids = doc_ids or frozenset()
     mapping_matches = mapping_matches or []
     mapping_cache_suffix = json.dumps(mapping_matches, ensure_ascii=False, sort_keys=True)
-    cache_key = _cache_key(f"bilingual:{query}|mapping:{mapping_cache_suffix}", doc_ids)
+    cache_prefix = "bilingual:field-alias-v2:" if enable_field_aliases else "bilingual:"
+    cache_key = _cache_key(f"{cache_prefix}{query}|mapping:{mapping_cache_suffix}", doc_ids)
     cached = _bilingual_cache.get(cache_key)
     if cached and _time.time() - _cache_times.get(cache_key, 0) < _cache_ttl:
         return cached
 
     primary = await rewrite_query(
-        query, doc_ids=doc_ids, mapping_hints=mapping_matches,
+        _normalize_field_aliases(query) if enable_field_aliases else query,
+        doc_ids=doc_ids, mapping_hints=mapping_matches,
     )
     primary = _append_deterministic_mapping_terms(primary, mapping_matches)
     # 主查询也必须携带规范英文术语：子查询分解基于 primary，若只在独立的
     # english_query 中补词，子查询仍会沿用“追加授权(Authorization)”这一
     # 模糊说法，外层 RRF 反而把只在主查询命中的精确证据稀释掉。
     primary = _append_canonical_english_aliases(query, primary)
-    identifiers = _extract_identifiers(query, primary)
+    if enable_field_aliases:
+        primary = _normalize_field_aliases(primary)
+    identifiers = _extract_identifiers(query, primary, enable_field_aliases=enable_field_aliases)
     primary = _append_missing_identifiers(primary, identifiers)
 
     english = ""
@@ -1054,6 +1084,8 @@ async def rewrite_query_bilingual(
     except Exception as exc:
         LOGGER.warning(f"英文检索词生成失败: {exc}——保留中文与 Dense 检索")
     if english:
+        if enable_field_aliases:
+            english = _normalize_field_aliases(english)
         english = _append_missing_identifiers(english, identifiers)
     english = _append_canonical_english_aliases(query, english)
     english = _append_deterministic_mapping_english(english, mapping_matches)
@@ -1123,7 +1155,7 @@ async def _llm_translate_query(query: str) -> Optional[str]:
     response = await chat_completion(
         messages=_ENGLISH_QUERY_PROMPT.format(query=query),
         stream=False,
-        max_tokens=120,
+        max_tokens=1024,
         temperature=0.0,
     )
     if not isinstance(response, str) or not response.strip():

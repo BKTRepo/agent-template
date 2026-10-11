@@ -1,0 +1,485 @@
+{
+  "description": "Frozen pre-field-alias query preparation under deterministic mocked rewrite/translation; not an answer-accuracy result.",
+  "cases": [
+    {
+      "question": "VISA F56使用场景",
+      "translation_fails": false,
+      "rewrite_inputs": [
+        "VISA F56使用场景"
+      ],
+      "result": [
+        "VISA F56使用场景",
+        "VISA F56使用场景",
+        "VISA F56使用场景",
+        [],
+        "VISA F56使用场景"
+      ],
+      "cache_keys": [
+        "bilingual:VISA F56使用场景|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "VISA F56最大长度是多少",
+      "translation_fails": false,
+      "rewrite_inputs": [
+        "VISA F56最大长度是多少"
+      ],
+      "result": [
+        "VISA F56最大长度是多少",
+        "VISA F56最大长度是多少",
+        "VISA F56最大长度是多少",
+        [],
+        "VISA F56最大长度是多少"
+      ],
+      "cache_keys": [
+        "bilingual:VISA F56最大长度是多少|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "F111适用于哪些报文类型",
+      "translation_fails": false,
+      "rewrite_inputs": [
+        "F111适用于哪些报文类型"
+      ],
+      "result": [
+        "F111适用于哪些报文类型",
+        "F111适用于哪些报文类型",
+        "F111适用于哪些报文类型",
+        [],
+        "F111适用于哪些报文类型"
+      ],
+      "cache_keys": [
+        "bilingual:F111适用于哪些报文类型|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "VISA F63.3内容和应用",
+      "translation_fails": false,
+      "rewrite_inputs": [
+        "VISA F63.3内容和应用"
+      ],
+      "result": [
+        "VISA F63.3内容和应用",
+        "VISA F63.3内容和应用",
+        "VISA F63.3内容和应用",
+        [],
+        "VISA F63.3内容和应用"
+      ],
+      "cache_keys": [
+        "bilingual:VISA F63.3内容和应用|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "VISA拒绝码0400什么意思",
+      "translation_fails": false,
+      "rewrite_inputs": [
+        "VISA拒绝码0400什么意思"
+      ],
+      "result": [
+        "VISA拒绝码0400什么意思",
+        "VISA拒绝码0400什么意思",
+        "VISA拒绝码0400什么意思",
+        [],
+        "VISA拒绝码0400什么意思"
+      ],
+      "cache_keys": [
+        "bilingual:VISA拒绝码0400什么意思|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "VISA39域返回85什么意思",
+      "translation_fails": false,
+      "rewrite_inputs": [
+        "VISA39域返回85什么意思"
+      ],
+      "result": [
+        "VISA39域返回85什么意思",
+        "VISA39域返回85什么意思",
+        "VISA39域返回85什么意思",
+        [],
+        "VISA39域返回85什么意思"
+      ],
+      "cache_keys": [
+        "bilingual:VISA39域返回85什么意思|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "VISA账户验证的发出报文是什么条件",
+      "translation_fails": false,
+      "rewrite_inputs": [
+        "VISA账户验证的发出报文是什么条件"
+      ],
+      "result": [
+        "VISA账户验证的发出报文是什么条件",
+        "VISA账户验证的发出报文是什么条件",
+        "VISA账户验证的发出报文是什么条件",
+        [],
+        "VISA账户验证的发出报文是什么条件"
+      ],
+      "cache_keys": [
+        "bilingual:VISA账户验证的发出报文是什么条件|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "如何修改使报文通过",
+      "translation_fails": false,
+      "rewrite_inputs": [
+        "如何修改使报文通过"
+      ],
+      "result": [
+        "如何修改使报文通过",
+        "如何修改使报文通过",
+        "如何修改使报文通过",
+        [],
+        "如何修改使报文通过"
+      ],
+      "cache_keys": [
+        "bilingual:如何修改使报文通过|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "万事达DE56用途",
+      "translation_fails": false,
+      "rewrite_inputs": [
+        "万事达DE56用途"
+      ],
+      "result": [
+        "万事达DE56用途",
+        "万事达DE56用途",
+        "万事达DE56用途",
+        [],
+        "万事达DE56用途"
+      ],
+      "cache_keys": [
+        "bilingual:万事达DE56用途|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "万事达DE111用途",
+      "translation_fails": false,
+      "rewrite_inputs": [
+        "万事达DE111用途"
+      ],
+      "result": [
+        "万事达DE111用途",
+        "万事达DE111用途",
+        "万事达DE111用途",
+        [],
+        "万事达DE111用途"
+      ],
+      "cache_keys": [
+        "bilingual:万事达DE111用途|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "VISA和Mastercard的F56有何不同",
+      "translation_fails": false,
+      "rewrite_inputs": [
+        "VISA和Mastercard的F56有何不同"
+      ],
+      "result": [
+        "VISA和Mastercard的F56有何不同",
+        "VISA和Mastercard的F56有何不同",
+        "VISA和Mastercard的F56有何不同",
+        [],
+        "VISA和Mastercard的F56有何不同"
+      ],
+      "cache_keys": [
+        "bilingual:VISA和Mastercard的F56有何不同|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "F34 DF1F值为7.5",
+      "translation_fails": false,
+      "rewrite_inputs": [
+        "F34 DF1F值为7.5"
+      ],
+      "result": [
+        "F34 DF1F值为7.5",
+        "F34 DF1F值为7.5",
+        "F34 DF1F值为7.5",
+        [],
+        "F34 DF1F值为7.5"
+      ],
+      "cache_keys": [
+        "bilingual:F34 DF1F值为7.5|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "检查 /api/F56/test",
+      "translation_fails": false,
+      "rewrite_inputs": [
+        "检查 /api/F56/test"
+      ],
+      "result": [
+        "检查 /api/F56/test",
+        "检查 /api/F56/test",
+        "检查 /api/F56/test",
+        [
+          "/api/F56/test"
+        ],
+        "检查 /api/F56/test"
+      ],
+      "cache_keys": [
+        "bilingual:检查 /api/F56/test|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "十六进制标签F56",
+      "translation_fails": false,
+      "rewrite_inputs": [
+        "十六进制标签F56"
+      ],
+      "result": [
+        "十六进制标签F56",
+        "十六进制标签F56",
+        "十六进制标签F56",
+        [],
+        "十六进制标签F56"
+      ],
+      "cache_keys": [
+        "bilingual:十六进制标签F56|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "VISA F56使用场景",
+      "translation_fails": true,
+      "rewrite_inputs": [
+        "VISA F56使用场景"
+      ],
+      "result": [
+        "VISA F56使用场景",
+        "VISA F56使用场景",
+        "",
+        [],
+        "VISA F56使用场景"
+      ],
+      "cache_keys": [
+        "bilingual:VISA F56使用场景|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "VISA F56最大长度是多少",
+      "translation_fails": true,
+      "rewrite_inputs": [
+        "VISA F56最大长度是多少"
+      ],
+      "result": [
+        "VISA F56最大长度是多少",
+        "VISA F56最大长度是多少",
+        "",
+        [],
+        "VISA F56最大长度是多少"
+      ],
+      "cache_keys": [
+        "bilingual:VISA F56最大长度是多少|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "F111适用于哪些报文类型",
+      "translation_fails": true,
+      "rewrite_inputs": [
+        "F111适用于哪些报文类型"
+      ],
+      "result": [
+        "F111适用于哪些报文类型",
+        "F111适用于哪些报文类型",
+        "",
+        [],
+        "F111适用于哪些报文类型"
+      ],
+      "cache_keys": [
+        "bilingual:F111适用于哪些报文类型|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "VISA F63.3内容和应用",
+      "translation_fails": true,
+      "rewrite_inputs": [
+        "VISA F63.3内容和应用"
+      ],
+      "result": [
+        "VISA F63.3内容和应用",
+        "VISA F63.3内容和应用",
+        "",
+        [],
+        "VISA F63.3内容和应用"
+      ],
+      "cache_keys": [
+        "bilingual:VISA F63.3内容和应用|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "VISA拒绝码0400什么意思",
+      "translation_fails": true,
+      "rewrite_inputs": [
+        "VISA拒绝码0400什么意思"
+      ],
+      "result": [
+        "VISA拒绝码0400什么意思",
+        "VISA拒绝码0400什么意思",
+        "",
+        [],
+        "VISA拒绝码0400什么意思"
+      ],
+      "cache_keys": [
+        "bilingual:VISA拒绝码0400什么意思|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "VISA39域返回85什么意思",
+      "translation_fails": true,
+      "rewrite_inputs": [
+        "VISA39域返回85什么意思"
+      ],
+      "result": [
+        "VISA39域返回85什么意思",
+        "VISA39域返回85什么意思",
+        "",
+        [],
+        "VISA39域返回85什么意思"
+      ],
+      "cache_keys": [
+        "bilingual:VISA39域返回85什么意思|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "VISA账户验证的发出报文是什么条件",
+      "translation_fails": true,
+      "rewrite_inputs": [
+        "VISA账户验证的发出报文是什么条件"
+      ],
+      "result": [
+        "VISA账户验证的发出报文是什么条件",
+        "VISA账户验证的发出报文是什么条件",
+        "",
+        [],
+        "VISA账户验证的发出报文是什么条件"
+      ],
+      "cache_keys": [
+        "bilingual:VISA账户验证的发出报文是什么条件|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "如何修改使报文通过",
+      "translation_fails": true,
+      "rewrite_inputs": [
+        "如何修改使报文通过"
+      ],
+      "result": [
+        "如何修改使报文通过",
+        "如何修改使报文通过",
+        "",
+        [],
+        "如何修改使报文通过"
+      ],
+      "cache_keys": [
+        "bilingual:如何修改使报文通过|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "万事达DE56用途",
+      "translation_fails": true,
+      "rewrite_inputs": [
+        "万事达DE56用途"
+      ],
+      "result": [
+        "万事达DE56用途",
+        "万事达DE56用途",
+        "",
+        [],
+        "万事达DE56用途"
+      ],
+      "cache_keys": [
+        "bilingual:万事达DE56用途|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "万事达DE111用途",
+      "translation_fails": true,
+      "rewrite_inputs": [
+        "万事达DE111用途"
+      ],
+      "result": [
+        "万事达DE111用途",
+        "万事达DE111用途",
+        "",
+        [],
+        "万事达DE111用途"
+      ],
+      "cache_keys": [
+        "bilingual:万事达DE111用途|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "VISA和Mastercard的F56有何不同",
+      "translation_fails": true,
+      "rewrite_inputs": [
+        "VISA和Mastercard的F56有何不同"
+      ],
+      "result": [
+        "VISA和Mastercard的F56有何不同",
+        "VISA和Mastercard的F56有何不同",
+        "",
+        [],
+        "VISA和Mastercard的F56有何不同"
+      ],
+      "cache_keys": [
+        "bilingual:VISA和Mastercard的F56有何不同|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "F34 DF1F值为7.5",
+      "translation_fails": true,
+      "rewrite_inputs": [
+        "F34 DF1F值为7.5"
+      ],
+      "result": [
+        "F34 DF1F值为7.5",
+        "F34 DF1F值为7.5",
+        "",
+        [],
+        "F34 DF1F值为7.5"
+      ],
+      "cache_keys": [
+        "bilingual:F34 DF1F值为7.5|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "检查 /api/F56/test",
+      "translation_fails": true,
+      "rewrite_inputs": [
+        "检查 /api/F56/test"
+      ],
+      "result": [
+        "检查 /api/F56/test",
+        "检查 /api/F56/test",
+        "",
+        [
+          "/api/F56/test"
+        ],
+        "检查 /api/F56/test"
+      ],
+      "cache_keys": [
+        "bilingual:检查 /api/F56/test|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    },
+    {
+      "question": "十六进制标签F56",
+      "translation_fails": true,
+      "rewrite_inputs": [
+        "十六进制标签F56"
+      ],
+      "result": [
+        "十六进制标签F56",
+        "十六进制标签F56",
+        "",
+        [],
+        "十六进制标签F56"
+      ],
+      "cache_keys": [
+        "bilingual:十六进制标签F56|mapping:[{\"term\": \"fixed\"}]"
+      ]
+    }
+  ]
+}

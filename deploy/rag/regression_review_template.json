@@ -1,0 +1,372 @@
+{
+  "review_instructions": "相同模型/参数/历史/文档版本，分别重放原流程和候选流程。人工对照PDF填写；不要以重排分代替答案分。每条引用需核对页码和文档。所有null均表示尚未验证。",
+  "cases": [
+    {
+      "id": "visa_f63_3",
+      "before": null,
+      "after": null,
+      "record_example": {
+        "score": 8.5,
+        "facts": [
+          true,
+          true,
+          true
+        ],
+        "critical_errors": 0,
+        "citations_checked": true,
+        "evidence_recall": 1,
+        "trace": "保存请求ID、实际模型上下文、引用和来源版本的文件路径"
+      }
+    },
+    {
+      "id": "visa_f63_3_repeat",
+      "before": null,
+      "after": null,
+      "record_example": {
+        "score": 8.5,
+        "facts": [
+          true
+        ],
+        "critical_errors": 0,
+        "citations_checked": true,
+        "evidence_recall": 1,
+        "trace": "保存请求ID、实际模型上下文、引用和来源版本的文件路径"
+      }
+    },
+    {
+      "id": "visa_reject_0400",
+      "before": null,
+      "after": null,
+      "record_example": {
+        "score": 8.5,
+        "facts": [
+          true,
+          true,
+          true
+        ],
+        "critical_errors": 0,
+        "citations_checked": true,
+        "evidence_recall": 1,
+        "trace": "保存请求ID、实际模型上下文、引用和来源版本的文件路径"
+      }
+    },
+    {
+      "id": "visa_response_85",
+      "before": null,
+      "after": null,
+      "record_example": {
+        "score": 8.5,
+        "facts": [
+          true,
+          true
+        ],
+        "critical_errors": 0,
+        "citations_checked": true,
+        "evidence_recall": 1,
+        "trace": "保存请求ID、实际模型上下文、引用和来源版本的文件路径"
+      }
+    },
+    {
+      "id": "visa_f34_reversal",
+      "before": null,
+      "after": null,
+      "record_example": {
+        "score": 8.5,
+        "facts": [
+          true,
+          true
+        ],
+        "critical_errors": 0,
+        "citations_checked": true,
+        "evidence_recall": 1,
+        "trace": "保存请求ID、实际模型上下文、引用和来源版本的文件路径"
+      }
+    },
+    {
+      "id": "visa_account_verification",
+      "before": null,
+      "after": null,
+      "record_example": {
+        "score": 8.5,
+        "facts": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "critical_errors": 0,
+        "citations_checked": true,
+        "evidence_recall": 1,
+        "trace": "保存请求ID、实际模型上下文、引用和来源版本的文件路径"
+      }
+    },
+    {
+      "id": "visa_f56_usage",
+      "before": null,
+      "after": null,
+      "record_example": {
+        "score": 8.5,
+        "facts": [
+          true,
+          true
+        ],
+        "critical_errors": 0,
+        "citations_checked": true,
+        "evidence_recall": 1,
+        "trace": "保存请求ID、实际模型上下文、引用和来源版本的文件路径"
+      }
+    },
+    {
+      "id": "visa_f56_max",
+      "before": null,
+      "after": null,
+      "record_example": {
+        "score": 8.5,
+        "facts": [
+          true,
+          true,
+          true
+        ],
+        "critical_errors": 0,
+        "citations_checked": true,
+        "evidence_recall": 1,
+        "trace": "保存请求ID、实际模型上下文、引用和来源版本的文件路径"
+      }
+    },
+    {
+      "id": "visa_0114",
+      "before": null,
+      "after": null,
+      "record_example": {
+        "score": 8.5,
+        "facts": [
+          true,
+          true,
+          true
+        ],
+        "critical_errors": 0,
+        "citations_checked": true,
+        "evidence_recall": 1,
+        "trace": "保存请求ID、实际模型上下文、引用和来源版本的文件路径"
+      }
+    },
+    {
+      "id": "visa_f111_context",
+      "before": null,
+      "after": null,
+      "record_example": {
+        "score": 8.5,
+        "facts": [
+          true,
+          true,
+          true
+        ],
+        "critical_errors": 0,
+        "citations_checked": true,
+        "evidence_recall": 1,
+        "trace": "保存请求ID、实际模型上下文、引用和来源版本的文件路径"
+      }
+    },
+    {
+      "id": "visa_0400_followup",
+      "before": null,
+      "after": null,
+      "record_example": {
+        "score": 8.5,
+        "facts": [
+          true,
+          true,
+          true
+        ],
+        "critical_errors": 0,
+        "citations_checked": true,
+        "evidence_recall": 1,
+        "trace": "保存请求ID、实际模型上下文、引用和来源版本的文件路径"
+      }
+    },
+    {
+      "id": "visa_f56_field_form",
+      "before": null,
+      "after": null,
+      "record_example": {
+        "score": 8.5,
+        "facts": [
+          true
+        ],
+        "critical_errors": 0,
+        "citations_checked": true,
+        "evidence_recall": 1,
+        "trace": "保存请求ID、实际模型上下文、引用和来源版本的文件路径"
+      }
+    },
+    {
+      "id": "visa_f56_cn_form",
+      "before": null,
+      "after": null,
+      "record_example": {
+        "score": 8.5,
+        "facts": [
+          true
+        ],
+        "critical_errors": 0,
+        "citations_checked": true,
+        "evidence_recall": 1,
+        "trace": "保存请求ID、实际模型上下文、引用和来源版本的文件路径"
+      }
+    },
+    {
+      "id": "visa_f56_cn_field",
+      "before": null,
+      "after": null,
+      "record_example": {
+        "score": 8.5,
+        "facts": [
+          true
+        ],
+        "critical_errors": 0,
+        "citations_checked": true,
+        "evidence_recall": 1,
+        "trace": "保存请求ID、实际模型上下文、引用和来源版本的文件路径"
+      }
+    },
+    {
+      "id": "visa_f111_field_form",
+      "before": null,
+      "after": null,
+      "record_example": {
+        "score": 8.5,
+        "facts": [
+          true
+        ],
+        "critical_errors": 0,
+        "citations_checked": true,
+        "evidence_recall": 1,
+        "trace": "保存请求ID、实际模型上下文、引用和来源版本的文件路径"
+      }
+    },
+    {
+      "id": "mc_de56",
+      "before": null,
+      "after": null,
+      "record_example": {
+        "score": 8.5,
+        "facts": [
+          true,
+          true
+        ],
+        "critical_errors": 0,
+        "citations_checked": true,
+        "evidence_recall": 1,
+        "trace": "保存请求ID、实际模型上下文、引用和来源版本的文件路径"
+      }
+    },
+    {
+      "id": "mc_f56",
+      "before": null,
+      "after": null,
+      "record_example": {
+        "score": 8.5,
+        "facts": [
+          true
+        ],
+        "critical_errors": 0,
+        "citations_checked": true,
+        "evidence_recall": 1,
+        "trace": "保存请求ID、实际模型上下文、引用和来源版本的文件路径"
+      }
+    },
+    {
+      "id": "mc_de111",
+      "before": null,
+      "after": null,
+      "record_example": {
+        "score": 8.5,
+        "facts": [
+          true,
+          true
+        ],
+        "critical_errors": 0,
+        "citations_checked": true,
+        "evidence_recall": 1,
+        "trace": "保存请求ID、实际模型上下文、引用和来源版本的文件路径"
+      }
+    },
+    {
+      "id": "scheme_compare_f56",
+      "before": null,
+      "after": null,
+      "record_example": {
+        "score": 8.5,
+        "facts": [
+          true,
+          true
+        ],
+        "critical_errors": 0,
+        "citations_checked": true,
+        "evidence_recall": 1,
+        "trace": "保存请求ID、实际模型上下文、引用和来源版本的文件路径"
+      }
+    },
+    {
+      "id": "visa_mti_0400",
+      "before": null,
+      "after": null,
+      "record_example": {
+        "score": 8.5,
+        "facts": [
+          true
+        ],
+        "critical_errors": 0,
+        "citations_checked": true,
+        "evidence_recall": 1,
+        "trace": "保存请求ID、实际模型上下文、引用和来源版本的文件路径"
+      }
+    },
+    {
+      "id": "negative_hex_tag",
+      "before": null,
+      "after": null,
+      "record_example": {
+        "score": 8.5,
+        "facts": [
+          true
+        ],
+        "critical_errors": 0,
+        "citations_checked": true,
+        "evidence_recall": 1,
+        "trace": "保存请求ID、实际模型上下文、引用和来源版本的文件路径"
+      }
+    },
+    {
+      "id": "negative_path",
+      "before": null,
+      "after": null,
+      "record_example": {
+        "score": 8.5,
+        "facts": [
+          true
+        ],
+        "critical_errors": 0,
+        "citations_checked": true,
+        "evidence_recall": 1,
+        "trace": "保存请求ID、实际模型上下文、引用和来源版本的文件路径"
+      }
+    },
+    {
+      "id": "negative_business_value",
+      "before": null,
+      "after": null,
+      "record_example": {
+        "score": 8.5,
+        "facts": [
+          true,
+          true
+        ],
+        "critical_errors": 0,
+        "citations_checked": true,
+        "evidence_recall": 1,
+        "trace": "保存请求ID、实际模型上下文、引用和来源版本的文件路径"
+      }
+    }
+  ]
+}
