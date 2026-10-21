@@ -133,23 +133,9 @@ class InterceptHandler(logging.Handler):
         "python_multipart.*",
         "faker.factory",
         "httpcore.*",
-        "passlib.*",
         "concurrent_log_handler",
         "portalocker",
         "loguru",
-    })
-
-    # Celery / broker 框架 DEBUG 不转发到 Loguru（如 TaskPool、Redis MAINT_NOTIFICATIONS）
-    _QUIET_DEBUG_LOGGER_PREFIXES = (
-        "celery.",
-        "kombu",
-        "billiard",
-        "redis",
-        "redbeat",
-        "amqp",
-    )
-    _QUIET_DEBUG_LOGGER_NAMES = frozenset({
-        "celery", "kombu", "billiard", "redis", "logging", "root",
     })
 
     @classmethod
@@ -173,19 +159,9 @@ class InterceptHandler(logging.Handler):
             return "INFO"
         return "DEBUG"
 
-    @classmethod
-    def _is_quiet_debug(cls, record: logging.LogRecord) -> bool:
-        if record.levelno >= logging.INFO:
-            return False
-        name = record.name or ""
-        if name in cls._QUIET_DEBUG_LOGGER_NAMES:
-            return True
-        return any(name.startswith(prefix) for prefix in cls._QUIET_DEBUG_LOGGER_PREFIXES)
-
     def emit(self, record: logging.LogRecord) -> None:
         if (
                 self.is_excluded(record.name)
-                or self._is_quiet_debug(record)
                 or getattr(_intercept_guard, "active", False)
         ):
             return

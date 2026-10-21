@@ -11,7 +11,6 @@ from core.initializations import (
     register_exceptions,
     register_middlewares,
     register_routers,
-    init_database_table,
 )
 from core.responses import SuccessResponse
 
@@ -26,19 +25,18 @@ except ImportError:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
-        await register_database(app)
-    except DBConnectionError as e:
-        raise RuntimeError(f"数据库连接失败, 请检查主机地址是否可达: {e}")
-    await init_database_table(app)
+        try:
+            await register_database(app)
+        except DBConnectionError as exc:
+            raise RuntimeError(f"数据库连接失败，请检查连接配置: {exc}") from exc
 
-    for route in app.routes:
-        if isinstance(route, APIRoute):
-            ROUTER_SUMMARY[route.path] = route.summary
-            ROUTER_TAGS[route.path] = route.tags
-
-    yield
-
-    await Tortoise.close_connections()
+        for route in app.routes:
+            if isinstance(route, APIRoute):
+                ROUTER_SUMMARY[route.path] = route.summary
+                ROUTER_TAGS[route.path] = route.tags
+        yield
+    finally:
+        await Tortoise.close_connections()
 
 
 app = FastAPI(
@@ -80,10 +78,3 @@ if __name__ == '__main__':
         log_config=None,
         log_level=None,
     )
-
-    # ========== 启动命令（在项目根目录下执行，且保证 PYTHONPATH 含所在目录）==========
-    # Worker（消费 default + autotest_queue）：
-    #   Windows（单线程）：celery -A celery_scheduler.celery_worker worker -Q default,autotest_queue --pool=solo -l INFO
-    #   Linux：          celery -A celery_scheduler.celery_worker worker -Q default,autotest_queue -c 4 -l INFO
-    # Beat（定时下发 scan_and_dispatch_tasks，必须单独起一个进程）：
-    #   celery -A celery_scheduler.celery_worker beat -l INFO

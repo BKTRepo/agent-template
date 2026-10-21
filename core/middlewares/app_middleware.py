@@ -175,6 +175,7 @@ async def logging_middleware(request: Request, call_next):
     # 路由排除（静态文件&OpenApi文档）
     if not request_router.startswith("/static/") and request_router not in (
             '/',
+            '/health',
             '/base/audit/list',
             PROJECT_CONFIG.APP_DOCS_URL,
             PROJECT_CONFIG.APP_REDOC_URL,

@@ -1,24 +1,29 @@
 # -*- coding: utf-8 -*-
+import secrets
+
 import jwt
-from passlib import pwd
-from passlib.context import CryptContext
+from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHashError, VerificationError
 
 from applications.base.schemas.token_schema import JWTPayload
 from configure import PROJECT_CONFIG
 
-pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
+password_hasher = PasswordHasher()
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        return password_hasher.verify(hashed_password, plain_password)
+    except (InvalidHashError, VerificationError):
+        return False
 
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    return password_hasher.hash(password)
 
 
 def generate_password() -> str:
-    return pwd.genword()
+    return secrets.token_urlsafe(16)
 
 
 def create_access_token(*, data: JWTPayload, token_version: int = 0):
