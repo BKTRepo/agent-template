@@ -29,7 +29,7 @@ export default function App() {
   const [mobileMenu, setMobileMenu] = useState(false)
   const { implementations } = useDeveloperStore()
   const { actor, setActor } = useAccessStore()
-  const pending = implementations.filter(item => item.creatorId === actor.id && ['草稿', '已生成', '调试中'].includes(item.status)).length
+  const pending = implementations.filter(item => ['草稿', '已生成', '调试中'].includes(item.status)).length
   const label = navigation.flatMap(group => group.items).find(item => item.id === page)?.label ?? '开发者中心'
   return <ErrorBoundary><div className="platform">
     {mobileMenu && <button className="sidebar-shade" aria-label="关闭导航" onClick={() => setMobileMenu(false)} />}

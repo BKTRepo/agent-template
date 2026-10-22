@@ -3,20 +3,18 @@ import { LoaderCircle } from 'lucide-react'
 import Dialog from './Dialog'
 import ResourceUpload from './ResourceUpload'
 import DebugResult from './DebugResult'
-import { runSandbox, validateInput } from '@/api/developer'
+import { validateInput } from '@/api/developer'
 import { debugDocumentLimit, downloadRealtimeDocument, realtimeDebugEnabled, runRealtimeDebug } from '@/api/realtimeDebug'
 import { debugDocumentLimits, documentExtensions, validateResourceFiles } from '@/lib/skillForm'
 import { renderSkillMarkdown } from '@/api/skillArchive'
 import { skillDefinition } from '@/lib/skillDefinition'
 import { downloadBlob, readBlob } from '@/lib/resourceStorage'
-import { resources } from '@/mocks/developerData'
 import type { DebugInput, Implementation } from '@/types/developer'
 
-export default function DebugDialog({ item, onClose, onEdit, onPublish, onSaveDefinition, onResult }: { item: Implementation; onClose: () => void; onEdit?: () => void; onPublish?: () => Promise<void>; onSaveDefinition?: (markdown: string) => Promise<void>; onResult: (debug: Implementation['debug']) => void }) {
+export default function DebugDialog({ item, onClose, onEdit, onPublish, onSaveDefinition, onResult }: { item: Implementation; onClose: () => void; onEdit?: () => void; onPublish?: () => Promise<void>; onSaveDefinition?: (markdown: string) => Promise<void>; onResult: (debug: Implementation['debug']) => void | Promise<void> }) {
   const initial = item.debug?.input
   const [input, setInput] = useState<DebugInput>({ conversation: typeof initial === 'string' ? initial : initial?.conversation ?? '', documentText: '', documents: [] })
   const [files, setFiles] = useState<{ id: string; file: File }[]>([])
-  const [scenario, setScenario] = useState('passed')
   const [busy, setBusy] = useState<'run' | 'publish' | 'definition' | 'document' | null>(null)
   const [error, setError] = useState('')
   const [definitionNotice, setDefinitionNotice] = useState('')
@@ -30,7 +28,7 @@ export default function DebugDialog({ item, onClose, onEdit, onPublish, onSaveDe
   }, [item.debug?.id, busy])
   const definition = skillDefinition(item)
   const markdown = item.buildOrigin === 'backend' ? item.skillMarkdown || definition?.map(([label,value]) => `## ${label}\n${value}`).join('\n\n') || '' : renderSkillMarkdown(item)
-  const mounted = item.knowledgeBases ?? resources.filter(row => item.resourceIds.includes(row.id)).map(row => ({ id: row.id, name: row.name }))
+  const mounted = item.knowledgeBases ?? []
   const mountedResources = item.buildOrigin === 'backend' ? (item.build?.files ?? []).filter(row => row.path !== 'SKILL.md').map(row => ({ id: row.path, name: row.path })) : [...mounted, ...(item.uploadedResources ?? [])]
   function change(value: DebugInput) { setInput(value); setError(''); onResult(undefined) }
   function addDocuments(selected: File[]) {
@@ -54,9 +52,10 @@ export default function DebugDialog({ item, onClose, onEdit, onPublish, onSaveDe
       validateInput(item, input)
       setError(''); setBusy('run')
       // 先写入持久化状态。关闭弹窗不会中断请求，返回结果后仍会覆盖为成功或失败状态。
-      onResult({ id: crypto.randomUUID(), buildId: item.buildId!, input, status: 'running', output: '正在运行调试，请稍候。', origin: realtimeDebugEnabled ? 'backend' : 'mock' })
-      const result = realtimeDebugEnabled ? await runRealtimeDebug(item, input, markdown, files) : await runSandbox(item, input, 30, scenario)
-      onResult(result)
+      if (!realtimeDebugEnabled) throw new Error('沙箱调试服务尚未配置，不能使用前端模拟结果。')
+      onResult({ id: crypto.randomUUID(), buildId: item.buildId!, input, status: 'running', output: '正在运行调试，请稍候。', origin: 'backend' })
+      const result = await runRealtimeDebug(item, input, markdown, files)
+      await onResult(result)
       if (result.status === 'passed' && result.artifact) await download(result)
     } catch (error) { setError((error as Error).message) } finally { setBusy(null) }
   }
@@ -70,7 +69,7 @@ export default function DebugDialog({ item, onClose, onEdit, onPublish, onSaveDe
       const artifact = await downloadRealtimeDocument(item.debug.runId, item.name, controller.signal)
       if (controller.signal.aborted) return
       const result = { ...item.debug, artifact, documentError: undefined }
-      onResult(result)
+      await onResult(result)
       await download(result)
     } catch (error) { setError(controller.signal.aborted ? '下载请求超时，请重试下载。' : (error as Error).message) }
     finally { window.clearTimeout(timer); requestRef.current = null; setBusy(null) }
@@ -93,14 +92,13 @@ export default function DebugDialog({ item, onClose, onEdit, onPublish, onSaveDe
     <button className="button primary" disabled={!!busy || running || !definition} onClick={run}>{running ? <><LoaderCircle size={16} className="spin" />运行中…</> : '运行调试'}</button>
   </>}>
     <section className="form-field"><div className="field-heading"><span>Skill 定义（Markdown · 只读预览）</span>{onSaveDefinition && <button className="button small" disabled={!!busy || !definition} onClick={() => { setEditor(markdown); setOriginal(markdown); setDiscard(false); setError('') }}>编辑</button>}</div><pre className="markdown-preview">{markdown || '未读取到本次构建定义，请关闭后重新查询。'}</pre></section>
-    <div className="form-field"><span>运行环境</span><p className="sandbox-settings">{realtimeDebugEnabled ? '真实调试服务 · 执行后生成 Excel 测试用例文档' : '沙箱 · 隔离环境 · 仅模拟执行 · 不写入外部系统'}</p></div>
+    <div className="form-field"><span>运行环境</span><p className="sandbox-settings">沙箱 · 隔离环境 · 执行后生成 Excel 测试用例文档</p></div>
     {definitionNotice && <p className="form-hint" role="status">{definitionNotice}</p>}
     <label className="form-field"><span>对话输入（自然语言描述调试诉求）</span><textarea disabled={!!busy} value={input.conversation} placeholder="例如：帮我生成转账场景的正向、异常、边界用例，覆盖幂等与权限边界" onChange={event => change({ ...input, conversation: event.target.value })} /></label>
     <ResourceUpload label="文档输入（上传文件）" hint="拖拽或点击上传需求文档" extensions={documentExtensions} limits={debugDocumentLimits} items={input.documents} activeIds={files.map(row => row.id)} disabled={!!busy} onAdd={addDocuments} onRemove={id => { setFiles(previous => previous.filter(row => row.id !== id)); change({ ...input, documents: input.documents.filter(row => row.id !== id) }) }} />
     <div className="form-field"><span>挂载资源（本次调试关联，只读确认）</span>{mountedResources.map(row => <div className="resource-row" key={row.id}><span>{row.name}</span><span className="status-tag blue">已挂载</span></div>)}{!mountedResources.length && <p className="helper-text">未挂载资源</p>}</div>
     <div ref={resultRef}><DebugResult result={item.debug} running={running} downloading={busy === 'document'} onRetry={item.debug?.runId ? retryDocument : undefined} /></div>
-    {!realtimeDebugEnabled && <details className="simulation-options"><summary>模拟调试场景</summary><select aria-label="模拟调试场景" disabled={!!busy} value={scenario} onChange={event => { setScenario(event.target.value); onResult(undefined) }}><option value="passed">执行成功</option><option value="failed">执行失败</option><option value="timeout">执行超时</option></select></details>}
-    <p className="helper-text">{realtimeDebugEnabled ? '运行调试将提交 Skill 定义、对话输入与原始文件；完成后可下载真实 Excel 结果。最多10份需求文档、20份挂载资源。' : '当前为模拟调试，输出可下载的 Markdown 文档，最多10条；未解析文件或执行脚本。'}</p>
+    <p className="helper-text">运行调试将提交 Skill 定义、对话输入与原始文件；完成后可下载真实 Excel 结果。最多10份需求文档、20份挂载资源。</p>
     {error && editor === null && <p className="error-banner" role="alert">{error}</p>}
   </Dialog>{editor !== null && <Dialog wide title="编辑 Skill 定义（Markdown）" busy={!!busy} onClose={closeEditor} footer={discard ? <><span role="alert">存在未保存修改，确认放弃？</span><button className="button" onClick={() => setDiscard(false)}>继续编辑</button><button className="button danger" onClick={() => { setEditor(null); setDiscard(false) }}>放弃修改</button></> : <><button className="button" disabled={!!busy} onClick={closeEditor}>取消</button><button className="button primary" disabled={!!busy} onClick={saveDefinition}>{busy ? '保存中…' : '保存'}</button></>}><p className="helper-text">保存后同步至我创建的技能，系统递增版本并使旧调试结果失效。版本由系统管理。</p><textarea className="markdown-editor" aria-label="Markdown Skill 定义" maxLength={200000} value={editor} disabled={!!busy} onChange={event => setEditor(event.target.value)} spellCheck={false} />{error && <p className="error-banner" role="alert">{error}</p>}</Dialog>}</>
 }

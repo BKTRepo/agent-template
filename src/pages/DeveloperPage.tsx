@@ -3,16 +3,15 @@ import { ArrowRight, Check, LoaderCircle, Plus } from 'lucide-react'
 import Dialog from '@/components/developer/Dialog'
 import DebugDialog from '@/components/developer/DebugDialog'
 import SkillFields from '@/components/developer/SkillFields'
-import { buildMockArchive, restoreSkillUploads } from '@/api/skillArchive'
-import { applicationText, canEditImplementation, canViewKnowledge } from '@/lib/access'
+import { restoreSkillUploads } from '@/api/skillArchive'
+import { applicationText, canViewKnowledge } from '@/lib/access'
 import { useAccessStore } from '@/stores/accessStore'
 import { useKnowledgeStore } from '@/stores/knowledgeStore'
 import { skillResourceExtensions, validateResourceFiles, validateSkillForm } from '@/lib/skillForm'
 import { checkSkillName, ensureSkill, readSkillDefinition, SkillApiError } from '@/api/skillClient'
 import { hasSkillSession, skillAccount, skillBackendEnabled } from '@/api/skillSession'
 import { generateSkill } from '@/api/developer'
-import { deleteDraft as deleteDraftRecord, publishSkill, saveOnlineChanges, takeSkillOffline } from '@/api/developerLifecycle'
-import { resources, skillClasses } from '@/mocks/developerData'
+import { createDeveloperSkill, deleteDeveloperSkill, offlineDeveloperSkill, publishDeveloperSkill, recordDeveloperDebugResult, updateDeveloperSkill } from '@/api/developerCenter'
 import { useDeveloperStore } from '@/stores/developerStore'
 import { readBlob, saveBlobs } from '@/lib/resourceStorage'
 import type { Implementation, ImplementationForm, SkillUploads } from '@/types/developer'
@@ -24,7 +23,7 @@ const statusClass = (status: string) => ['已上线', '调试通过'].includes(s
 function Status({ status }: { status: string }) { return <span className={`status-tag ${statusClass(status)}`}>{status}</span> }
 
 export default function DeveloperPage() {
-  const { implementations, save, patch, applyPublication } = useDeveloperStore()
+  const { implementations, skillClasses, applications, load, replace, patch, remove } = useDeveloperStore()
   const actor = useAccessStore(state => state.actor)
   const team = ''
   const [preview, setPreview] = useState<Partial<Implementation>>({})
@@ -42,9 +41,10 @@ export default function DeveloperPage() {
   const [draftDeletePrompt, setDraftDeletePrompt] = useState(false)
   const record = implementations.find(item => item.id === selectedId)
   const selected = record ? { ...record, ...preview } : undefined
-  const readonly = !!selected && !canEditImplementation(selected, actor)
+  // 列表接口已按当前登录人过滤，服务端负责最终的本人编辑权限校验。
+  const readonly = false
   const online = selected?.status === '已上线'
-  const mine = implementations.filter(item => item.creatorId === actor.id)
+  const mine = implementations
   const pending = mine.filter(item => ['草稿', '已生成', '调试中'].includes(item.status)).length
   const activeUploads = [...uploads.references, ...uploads.scripts]
   const validationErrors = Object.entries(errors).filter(([, value]) => !!value)
@@ -66,6 +66,7 @@ export default function DeveloperPage() {
   }
 
   useEffect(() => { if (!notice) return; const timer = window.setTimeout(() => setNotice(''), 4000); return () => window.clearTimeout(timer) }, [notice])
+  useEffect(() => { void load().catch(error => setMessage((error as Error).message)) }, [load])
   function update<K extends keyof ImplementationForm>(key: K, value: ImplementationForm[K]) {
     setForm(previous => ({ ...previous, [key]: value }))
     setErrors(previous => ({ ...previous, [key]: '', ...(key === 'resourceIds' || key === 'uploadedResources' ? { resourceUsage: '' } : {}) })); setMessage('')
@@ -74,13 +75,13 @@ export default function DeveloperPage() {
     nameCheckSequence.current++
     setUploads({ references: [], scripts: [] })
     setPreview({})
-    const editable = item && canEditImplementation(item, actor) ? item.pendingChanges ?? item : item
+    const editable = item?.pendingChanges ?? item
     const sequence = nameCheckSequence.current
     if (editable?.uploadedResources?.length) void Promise.all(editable.uploadedResources.map(async row => {
       const blob = await readBlob(`resource:${row.id}`)
       return blob ? { id: row.id, file: new File([blob], row.name, { lastModified: row.lastModified }), usage: row.category ?? '' } : undefined
     })).then(rows => { if (sequence === nameCheckSequence.current) { const found = rows.filter((row): row is NonNullable<typeof row> => !!row); setUploads({ references: found.filter(row => row.usage !== '脚本'), scripts: found.filter(row => row.usage === '脚本') }) } }).catch(() => { /* 缺失文件由生成/保存时提示重新选择。 */ })
-    const knowledgeBases = editable?.knowledgeBases ?? resources.filter(row => row.kind === 'knowledge' && editable?.resourceIds.includes(row.id)).map(row => ({ id: row.id, name: row.name, source: 'mock' as const }))
+    const knowledgeBases = editable?.knowledgeBases ?? []
     setSelectedId(item?.id); setForm(editable ? { ...editable, applicationIds: editable.applicationIds ?? [editable.system], technicalName: editable.technicalName || `skill-${crypto.randomUUID()}`, version: editable.version ?? '', resourceIds: knowledgeBases.map(row => row.id), knowledgeBases, resourceUsage: editable.resourceUsage ?? '', uploadedResources: editable.uploadedResources ?? [] } : blankForm(team)); setErrors({}); setMessage(''); setOfflinePrompt(false); setDraftDeletePrompt(false); setPanel('form')
   }
   function addFiles(files: File[]) {
@@ -121,7 +122,7 @@ export default function DeveloperPage() {
       const definition = await readSkillDefinition(item)
       if (definition.build.build_id !== item.buildId) throw new Error('后端技能已更新，请重新查询当前构建后再调试。')
       const details = { build: definition.build, skillMarkdown: definition.markdown, version: definition.version, backendVersion: definition.version }
-      if (canEditImplementation(item, actor)) patch(item.id, details); else setPreview(details); setPanel('debug')
+      patch(item.id, details); setPanel('debug')
     } catch (error) { setMessage((error as Error).message); setPanel(null) }
     finally { setBusy(null) }
   }
@@ -131,9 +132,9 @@ export default function DeveloperPage() {
     setBusy('save')
     try {
       const restored = await restoreSkillUploads(form, uploads)
-      await saveBlobs([...restored.references, ...restored.scripts].map(row => ({ key: `resource:${row.id}`, blob: row.file })))
-      if (useAccessStore.getState().actor.id !== actor.id) throw new Error('用户已切换，草稿未保存。')
-      save(form, selectedId); setPanel(null); setNotice('技能已保存，版本由系统生成，附件已保存在本机浏览器。')
+      void restored
+      const saved = selectedId ? await updateDeveloperSkill(selectedId, form) : await createDeveloperSkill(form)
+      replace(saved); setPanel(null); setNotice('草稿已保存到后端数据库。')
     } catch (error) { setMessage((error as Error).message) } finally { setBusy(null) }
   }
   async function savePublished() {
@@ -142,28 +143,26 @@ export default function DeveloperPage() {
     if (showFormErrors(issues)) return
     setBusy('save'); setMessage('')
     try {
-      const changes = await saveOnlineChanges(selected, form, implementations, uploads)
-      if (useDeveloperStore.getState().implementations.find(row => row.id === selected.id)?.updatedAt !== selected.updatedAt) throw new Error('技能已发生变化，请重新打开后保存。')
-      patch(selected.id, changes); setPanel(null)
-      setNotice('修改已保存，版本由系统自动递增（本地模拟）。')
+      const saved = await updateDeveloperSkill(selected.id, form)
+      replace(saved); setPanel(null)
+      setNotice('修改已保存为新草稿，需重新调试后再上线。')
     } catch (error) { setMessage((error as Error).message) } finally { setBusy(null) }
   }
   async function offline() {
     if (!selected || busy) return
     setBusy('offline'); setMessage('')
     try {
-      const changes = await takeSkillOffline(selected)
-      if (useDeveloperStore.getState().implementations.find(row => row.id === selected.id)?.updatedAt !== selected.updatedAt) throw new Error('技能已发生变化，请重新打开后保存。')
-      patch(selected.id, changes); setPanel(null); setOfflinePrompt(false)
-      setNotice('技能已下线（模拟），仅更新本地演示状态；真实对外停用由后端处理。')
+      const saved = await offlineDeveloperSkill(selected.id)
+      replace(saved); setPanel(null); setOfflinePrompt(false)
+      setNotice('技能已下线。')
     } catch (error) { setMessage((error as Error).message) } finally { setBusy(null) }
   }
   async function removeDraft() {
     if (!selected || selected.status !== '草稿' || busy) return
     setBusy('delete'); setMessage('')
     try {
-      const id = await deleteDraftRecord(selected)
-      useDeveloperStore.getState().remove(id)
+      await deleteDeveloperSkill(selected.id)
+      remove(selected.id)
       setPanel(null); setDraftDeletePrompt(false)
       setNotice('草稿已删除。')
     } catch (error) { setMessage((error as Error).message) } finally { setBusy(null) }
@@ -175,14 +174,12 @@ export default function DeveloperPage() {
     if (showFormErrors(issues)) return
     setBusy('build'); setMessage('')
     try {
-      const item = save(form, selectedId); setSelectedId(item.id)
-      if (!skillBackendEnabled) {
-        const next = patchForDebug(item, await buildMockArchive(item, await restoreSkillUploads(item, uploads)))
-        setNotice('Skill 示例 ZIP 已生成，可以运行沙箱调试。'); await openDebug(next); return
-      }
+      const item = selectedId ? await updateDeveloperSkill(selectedId, form) : await createDeveloperSkill(form)
+      replace(item); setSelectedId(item.id)
+      if (!skillBackendEnabled) throw new SkillApiError('后端生成服务尚未启用，不能使用前端模拟生成。')
       if (!hasSkillSession()) throw new SkillApiError('本地后端尚未配置有效会话，请检查联调服务与认证配置。')
       if (item.knowledgeBases?.some(row => row.source === 'mock')) throw new SkillApiError('真实生成不能使用示例知识库，请重新选择真实知识库或改用资源上传。', { resourceIds: '请使用真实知识库，或取消示例挂载。' })
-      const backendSkillId = await ensureSkill(item)
+      const backendSkillId = item.id
       const backendAccount = skillAccount()
       patch(item.id, { backendSkillId, backendAccount })
       const readyUploads = await restoreSkillUploads(item, uploads)
@@ -197,9 +194,17 @@ export default function DeveloperPage() {
   }
   async function publish() {
     const item = useDeveloperStore.getState().implementations.find(row => row.id === selectedId)
-    if (!item) throw new Error('该实现类不存在，请刷新后重试。')
-    applyPublication(await publishSkill(item))
-    setPanel(null); setNotice('自测通过，技能已上线（模拟）。')
+    if (!item) throw new Error('该技能不存在，请刷新后重试。')
+    const saved = await publishDeveloperSkill(item.id)
+    replace(saved)
+    setPanel(null); setNotice('技能已上线。')
+  }
+  async function saveDebugResult(debug: Implementation['debug']) {
+    if (!selectedId) return
+    patch(selectedId, { debug })
+    if (!debug?.runId || debug.status === 'running') return
+    const saved = await recordDeveloperDebugResult(selectedId, debug)
+    if (saved) replace({ ...saved, build: selected?.build, buildId: debug.buildId, buildOrigin: 'backend', debug })
   }
   const primaryBusy = <><LoaderCircle className="spin" size={16} />处理中…</>
 
@@ -209,7 +214,7 @@ export default function DeveloperPage() {
     <section className="surface implementation-section" aria-labelledby="implementation-title">
       <div className="section-heading"><h2 id="implementation-title">我创建的技能</h2><span className="status-tag orange">{pending} 个待处理</span></div>
       <div className="implementation-table-wrap"><table className="implementation-table"><thead><tr>{['实现名称', '技能类', '所属应用', '版本', '状态', '更新时间', '操作'].map(label => <th key={label} scope="col">{label}</th>)}</tr></thead><tbody>
-        {mine.map(item => <tr key={item.id}><td className="implementation-name">{item.name}{!canEditImplementation(item, actor) && <span className="status-tag neutral">其他创建者 · 只读</span>}{item.pendingChanges && <span className="status-tag orange">有编辑稿</span>}</td><td>{skillClasses.find(row => row.id === item.classId)?.name}</td><td>{applicationText(item)}</td><td>{item.version}</td><td><Status status={item.status} /></td><td>{dateText(item.updatedAt)}</td><td><button className="button small" disabled={!!busy} onClick={() => { if (item.status === '调试中') openDebug(item); else openForm(item) }}>{item.status === '调试中' ? '调试' : '详情'}</button></td></tr>)}
+        {mine.map(item => <tr key={item.id}><td className="implementation-name">{item.name}{item.pendingChanges && <span className="status-tag orange">有编辑稿</span>}</td><td>{skillClasses.find(row => row.id === item.classId)?.name}</td><td>{applicationText(item)}</td><td>{item.version}</td><td><Status status={item.status} /></td><td>{dateText(item.updatedAt)}</td><td><button className="button small" disabled={!!busy} onClick={() => { if (item.status === '调试中') openDebug(item); else openForm(item) }}>{item.status === '调试中' ? '调试' : '详情'}</button></td></tr>)}
         {!mine.length && <tr><td colSpan={7} className="empty-table">暂无实现类，点击“新建技能类”开始创建。</td></tr>}
       </tbody></table></div>
     </section>
@@ -232,12 +237,12 @@ export default function DeveloperPage() {
       </>}
     </>}>
       {readonly && <p className="form-hint">创建者：{selected?.creatorName || '历史创建者'}。仅创建者本人可编辑此实现类。</p>}
-      {online && !readonly && <p className="helper-text">保存修改后系统自动递增版本；当前操作为前端模拟。{selected?.pendingChangedAt && `编辑稿保存于 ${dateText(selected.pendingChangedAt)}。`}</p>}
+      {online && !readonly && <p className="helper-text">保存修改后系统自动递增版本，并回到草稿状态重新调试。{selected?.pendingChangedAt && `编辑稿保存于 ${dateText(selected.pendingChangedAt)}。`}</p>}
       {selected?.status === '已下线' && <p className="helper-text">该技能已下线。可继续编辑，重新调试通过后重新上线。</p>}
-      <div ref={formRoot}><SkillFields form={form} update={update} errors={errors} disabled={!!busy || readonly} editing={!!selected} activeIds={activeUploads.map(row => row.id)} onAdd={addFiles} onRemove={removeFile} /></div>
+      <div ref={formRoot}><SkillFields form={form} update={update} skillClasses={skillClasses} applications={applications} errors={errors} disabled={!!busy || readonly} editing={!!selected} activeIds={activeUploads.map(row => row.id)} onAdd={addFiles} onRemove={removeFile} /></div>
     </Dialog>}
 
-    {panel === 'debug' && selected && <DebugDialog key={selected.id} item={selected} onClose={closePanel} onEdit={!readonly && selected.status !== '已上线' ? () => openForm(selected) : undefined} onPublish={!readonly && selected.status !== '已上线' ? publish : undefined} onSaveDefinition={!readonly ? markdown => useDeveloperStore.getState().saveDefinition(selected.id, markdown) : undefined} onResult={debug => { if (readonly) setPreview(previous => ({ ...previous, debug })); else patch(selected.id, { debug }) }} />}
+    {panel === 'debug' && selected && <DebugDialog key={selected.id} item={selected} onClose={closePanel} onEdit={!readonly && selected.status !== '已上线' ? () => openForm(selected) : undefined} onPublish={!readonly && selected.status !== '已上线' ? publish : undefined} onResult={saveDebugResult} />}
     {notice && <div className="platform-toast" role="status"><Check size={18} /><span>{notice}</span></div>}
   </>
 }

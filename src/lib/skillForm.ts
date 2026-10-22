@@ -16,7 +16,7 @@ export const knowledgeExtensions = ['.pdf', '.doc', '.docx', '.md', '.txt', '.xl
 export function validateSkillForm(form: ImplementationForm, existing: { id: string; name: string; pendingChanges?: { name: string } }[], id?: string, draft = false) {
   const errors: Record<string, string> = {}
   void draft
-  if (!['SKILL-POINT-005','SKILL-CASE-001','SKILL-BUG-004','SKILL-REPORT-006','SKILL-DATA-002','SKILL-UI-007'].includes(form.classId)) errors.classId = '请选择所属技能大类'
+  if (!form.classId) errors.classId = '请选择所属技能大类'
   if (!form.name.trim()) errors.name = '技能名称不能为空'
   else if (existing.some(item => item.id !== id && (normalizedName(item.name) === normalizedName(form.name) || (item.pendingChanges && normalizedName(item.pendingChanges.name) === normalizedName(form.name))))) errors.name = '该技能名称已存在，请更换'
   if (form.name.trim().length > 128) errors.name = '技能名称最长 128 个字符'
