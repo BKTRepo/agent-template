@@ -1,0 +1,13 @@
+{
+  "name": "core-case-generator",
+  "display_name": "核心系统用例生成",
+  "description": "根据用户需求生成测试用例，适用于功能测试设计。本文件为本地演示。",
+  "instructions": "读取用户提供的需求，生成正向、异常和边界测试用例。关键业务规则缺失时列出待补充信息，不自行编造。",
+  "version": "0.1.0",
+  "skill_class_id": "SKILL-CASE-001",
+  "system": "核心系统",
+  "team": "测试一组",
+  "compatibility": "",
+  "resources": [],
+  "knowledge_base_ids": []
+}

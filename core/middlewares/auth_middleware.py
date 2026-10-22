@@ -84,6 +84,8 @@ async def auth_middleware(request: Request, call_next):
         # static assets
         "* /static/*",
 
+        "POST /case-recommendation/*",
+        "POST /test-case-gen/*",
     ]
 
     if _is_whitelisted(whitelist=whitelist, request_method=request_method, request_path=request_path):

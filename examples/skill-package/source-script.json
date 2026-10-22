@@ -1,0 +1,23 @@
+{
+  "name": "core-case-generator",
+  "display_name": "核心系统用例生成",
+  "description": "结合需求、参考规则和输入检查脚本生成测试用例，适用于支付业务测试设计。本文件为本地演示。",
+  "instructions": "先读取用户需求。需要检查输入 JSON 时使用 scripts/check_input.py，然后参考 references/business-rules.md 中的演示规则生成正向、异常和边界用例。缺失真实业务规则时列出待补充信息，不自行编造。",
+  "version": "0.1.0",
+  "system": "核心系统",
+  "team": "测试一组",
+  "compatibility": "调用演示检查脚本需要 Python 3.11+，只使用标准库，无需网络访问。",
+  "resources": [
+    {
+      "upload_index": 0,
+      "role": "reference",
+      "usage": "生成转账测试用例前读取，作为本演示场景的测试依据。"
+    },
+    {
+      "upload_index": 1,
+      "role": "script",
+      "usage": "需要检查输入 JSON 时，在 Skill 根目录调用：python scripts/check_input.py <输入文件>。输入应为对象且包含非空字符串 requirement；输出 JSON 检查结果。该规则仅用于演示，不代表平台统一输入约定。"
+    }
+  ],
+  "knowledge_base_ids": []
+}

@@ -109,8 +109,11 @@ class UserCrud(ScaffoldCrud[User, UserCreate, UserUpdate]):
         return deleted_ids
 
     async def update_user(self, user_in: UserUpdate) -> User:
-        user_id = user_in.user_id
-        user_if = user_in.model_dump(exclude_unset=True, exclude_none=True, exclude={"user_id"})
+        user_id: int = user_in.id
+        user_if: dict = {
+            key: value for key, value in user_in.items()
+            if value is not None
+        }
         try:
             instance = await self.update(id=user_id, obj_in=user_if)
         except DoesNotExist as e:

@@ -26,7 +26,7 @@ class UserCreate(UserBase):
     alias: str = Field(..., max_length=32, description="用户姓名")
     email: EmailStr = Field(..., max_length=64, description="用户邮箱")
     gender: int = Field(default=0, le=2, description="用户性别: 0未知 1男 2女")
-    avatar: str = Field(default="", max_length=255, description="用户头像")
+    avatar: str = Field(default="/static/avatar/default/20250101010101.png", max_length=255, description="用户头像")
     user_type: int = Field(default=0, le=9, description="用户类型：0xx 1xx 2xx")
     is_active: bool = Field(default=True, description="是否激活")
     is_superuser: bool = Field(default=False, description="是否为超级管理员")

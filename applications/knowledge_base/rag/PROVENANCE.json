@@ -1,0 +1,98 @@
+{
+  "source_directory": "D:/projects/agent-template-release-qoder",
+  "source_branch": "release/qoder-worker-db-20260930",
+  "snapshot_date": "2026-10-19",
+  "source_type": "current working tree including uncommitted files",
+  "adaptations": [
+    "chunker import paths",
+    "CHUNK_OVERLAP_SIZE -> CHUNK_OVERLAP"
+  ],
+  "files": [
+    {
+      "path": "applications/jiayueyang/rag/chunker/__init__.py",
+      "sha256": "2fbed68ee42539a208304107d61b7a8294d04c05d4df645e941d24d8fc7a9fe4",
+      "target": "applications/knowledge_base/rag/__init__.py",
+      "target_sha256": "f4c0c86fd579dff358117fde6c64c4fe9287c643c89ccd23c50484c1d405f9c4",
+      "working_tree_status": " M"
+    },
+    {
+      "path": "applications/jiayueyang/rag/chunker/_common.py",
+      "sha256": "27379ace9607fa8f849dda01f10a45464fbcb76f0da165500ba13ce8f348ff3d",
+      "target": "applications/knowledge_base/rag/_common.py",
+      "target_sha256": "27379ace9607fa8f849dda01f10a45464fbcb76f0da165500ba13ce8f348ff3d",
+      "working_tree_status": "tracked unchanged"
+    },
+    {
+      "path": "applications/jiayueyang/rag/chunker/recursive_character.py",
+      "sha256": "eb52a4c69bc278f095aaccadc6a0dcf4144fdccb096e8e9d419f982eca5546f8",
+      "target": "applications/knowledge_base/rag/recursive_character.py",
+      "target_sha256": "0d2e820627d7e6bf28a6785d331a0bbfc397d66fbbaaa2449932a1ea7c7b9035",
+      "working_tree_status": "tracked unchanged"
+    },
+    {
+      "path": "applications/jiayueyang/rag/section_context.py",
+      "sha256": "c78c8ab76ee2003f87e6405928b0fb9e326e4cc9cde8ba9e181f9c5c32f4e6f7",
+      "target": "applications/knowledge_base/rag/section_context.py",
+      "target_sha256": "c78c8ab76ee2003f87e6405928b0fb9e326e4cc9cde8ba9e181f9c5c32f4e6f7",
+      "working_tree_status": "??"
+    },
+    {
+      "path": "common/docling_native.py",
+      "sha256": "a1a26674b44655e2278e27fa1de207767f27f3ba8b5591d03869ef05d89ba1fb",
+      "target": "common/docling_native.py",
+      "target_sha256": "a1a26674b44655e2278e27fa1de207767f27f3ba8b5591d03869ef05d89ba1fb",
+      "working_tree_status": " M"
+    },
+    {
+      "path": "common/docling_bundle.py",
+      "sha256": "1edb670bbbae22458a8593b7be63c66f2b7d0504dd7adb1e41ffc0b5d4deb37d",
+      "target": "common/docling_bundle.py",
+      "target_sha256": "1edb670bbbae22458a8593b7be63c66f2b7d0504dd7adb1e41ffc0b5d4deb37d",
+      "working_tree_status": "tracked unchanged"
+    }
+  ],
+  "deletion_workflow_port": {
+    "date": "2026-10-21",
+    "source_type": "local working tree including uncommitted fixes",
+    "style": "adapted to platform Document + Chroma; not a verbatim Milvus module copy",
+    "features": [
+      "separate Celery queues/workers",
+      "strict Redis document lease",
+      "cross-process cancellation and child reaping",
+      "scheduled deletion retries and terminal failure",
+      "durable cleanup metadata",
+      "Beat recovery",
+      "verify vectors/files before SQL removal"
+    ],
+    "source_files": [
+      {
+        "path": "applications/jiayueyang/services/rag_service.py",
+        "sha256": "d655c7f5c6c1bc5e98e9cf6ed921cc3fa1c1964df6cf5453c220a0db78bcd257"
+      },
+      {
+        "path": "applications/jiayueyang/services/rag_pipeline.py",
+        "sha256": "366e0e6382b89d8713dc47eeaf35971084ad9eed586596ec699ea5083dad1058"
+      },
+      {
+        "path": "celery_scheduler/tasks/task_rag_pipeline.py",
+        "sha256": "409bf1f99de076ccbe17670daa4dad52007bf809254974f7c80e2305d4b8cb5e"
+      },
+      {
+        "path": "celery_scheduler/tasks/task_rag_maintenance.py",
+        "sha256": "4ff05fa44bed69672084ead2e2907f207cae8aba02fcab47c3c4c7c6a8d9c374"
+      },
+      {
+        "path": "common/docling_native.py",
+        "sha256": "a1a26674b44655e2278e27fa1de207767f27f3ba8b5591d03869ef05d89ba1fb"
+      },
+      {
+        "path": "tests/test_deletion_recovery.py",
+        "sha256": "16756ffb0937ebda940455b3895e5da2af603b757e552000a7783c5ee59e2a8b"
+      },
+      {
+        "path": "deploy/DOCUMENT-DELETION.md",
+        "sha256": "1179c2b96936d82ed30a10fdf7650116df00abfaf2646b3d97d1f7e78e4fc3a0"
+      }
+    ]
+  }
+}

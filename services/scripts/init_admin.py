@@ -1,51 +1,58 @@
 # -*- coding: utf-8 -*-
-"""显式创建管理员；不在应用启动时写入默认账号。"""
-import argparse
-import asyncio
-import getpass
+"""初始化管理员账号（直接运行脚本时使用）"""
 
-if __package__ in (None, ""):
-    import _bootstrap  # noqa: F401
+import asyncio
 
 from tortoise import Tortoise
 
+import _bootstrap  # noqa: F401  将项目根目录加入 sys.path
 from applications.user.models.user_model import User
-from configure.project_config import TORTOISE_ORM
+from configure import PROJECT_CONFIG
 from services import get_password_hash
 
 
-async def init_admin(username: str, password: str, email: str) -> bool:
-    await Tortoise.init(config=TORTOISE_ORM)
-    try:
-        if await User.exists(username=username):
-            print("账号已存在，未修改密码或权限。")
-            return False
+def build_tortoise_config():
+    return {
+        "connections": PROJECT_CONFIG.DATABASE_CONNECTIONS,
+        "apps": {
+            "models": {
+                "models": PROJECT_CONFIG.APPLICATIONS_MODELS,
+                "default_connection": "default"
+            }
+        },
+        "use_tz": False,
+        "timezone": "Asia/Shanghai",
+    }
+
+
+async def init_admin():
+    await Tortoise.init(config=build_tortoise_config())
+
+    existing = await User.get_or_none(username="admin")
+    if existing:
+        print("管理员账号已存在，更新密码...")
+        existing.password = get_password_hash("admin")
+        existing.is_active = True
+        existing.is_superuser = True
+        await existing.save()
+    else:
+        print("创建管理员账号...")
         await User.create(
-            username=username,
-            alias=username,
-            email=email,
-            password=get_password_hash(password),
+            username="admin",
+            alias="系统管理员",
+            email="admin@test.com",
+            phone="18888888888",
+            avatar="/static/avatar/default/20250101010101.png",
+            password=get_password_hash("admin"),
             is_active=True,
             is_superuser=True,
         )
-        print("管理员账号已创建。")
-        return True
-    finally:
-        await Tortoise.close_connections()
 
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--username", default="admin")
-    parser.add_argument("--email", required=True)
-    args = parser.parse_args()
-    password = getpass.getpass("管理员密码（至少 8 位）：")
-    if len(password) < 8:
-        parser.error("密码长度至少为 8 位")
-    if password != getpass.getpass("再次输入密码："):
-        parser.error("两次密码不一致")
-    asyncio.run(init_admin(args.username, password, args.email))
+    await Tortoise.close_connections()
+    print("✅ 管理员账号就绪！")
+    print("   用户名: admin")
+    print("   密码: admin")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(init_admin())

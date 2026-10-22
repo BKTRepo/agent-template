@@ -1,17 +1,23 @@
 # -*- coding: utf-8 -*-
-"""通用后端配置。"""
+"""
+@Author  : yangkai
+@Email   : 807440781@qq.com
+@Project : KeenRobot
+@Module  : project_config.py
+@DateTime: 2025/1/15 16:08
+"""
 import os.path
 import platform
 from functools import lru_cache
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Literal
 from urllib.parse import quote_plus
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing_extensions import Self
 
-from common import FileUtils
+from common import FileUtils, ShellUtils
 
 _BACKEND_PROJECT_ROOT: str = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 _BACKEND_PROJECT_CONF: str = os.path.join(_BACKEND_PROJECT_ROOT, ".env")
@@ -27,11 +33,11 @@ class ProjectConfig(BaseSettings):
 
     # 项目描述
     APP_VERSION: str = "1.0.0"
-    APP_TITLE: str = "FastAPI Template"
-    APP_DESCRIPTION: str = "通用 FastAPI 后端模板"
+    APP_TITLE: str = "企业级RAG问答系统"
+    APP_DESCRIPTION: str = """企业级RAG问答系统"""
     APP_DOCS_URL: str = "/docs"
     APP_REDOC_URL: str = "/redoc"
-    APP_OPENAPI_URL: str = "/openapi.json"
+    APP_OPENAPI_URL: str = "/openapi_url"
     APP_OPENAPI_JS_URL: str = "/static/swagger-ui/swagger-ui-bundle.js"
     APP_OPENAPI_CSS_URL: str = "/static/swagger-ui/swagger-ui.css"
     APP_OPENAPI_FAVICON_URL: str = "/static/swagger-ui/favicon-32x32.png"
@@ -41,13 +47,16 @@ class ProjectConfig(BaseSettings):
 
     # 调试配置
     SERVER_APP: str = "backend_main:app"
+    # SERVER_HOST: str = ShellUtils.acquire_localhost()
     SERVER_HOST: str = "0.0.0.0"
     SERVER_SYSTEM: str = platform.system()
-    SERVER_PORT: int = 8000
+    SERVER_PORT: int = 8519
     SERVER_DEBUG: bool = SERVER_SYSTEM != "Linux"  # Windows | Linux | Darwin
     SERVER_DELAY: int = 5
     SERVER_RELOAD_EXCLUDES: List[str] = [
+        "*/workspace/*",
         "*/output/*",
+        "*/docling_offline/*",
         "*/.venv/*",
         "*/__pycache__/*",
     ]
@@ -69,6 +78,7 @@ class ProjectConfig(BaseSettings):
 
     # 项目路径相关配置
     APPLICATIONS_DIR: str = os.path.abspath(os.path.join(_BACKEND_PROJECT_ROOT, "applications"))
+    CELERY_SCHEDULER_DIR: str = os.path.abspath(os.path.join(_BACKEND_PROJECT_ROOT, "celery_scheduler"))
     COMMON_DIR: str = os.path.abspath(os.path.join(_BACKEND_PROJECT_ROOT, "common"))
     CONFIGURE_DIR: str = os.path.abspath(os.path.join(_BACKEND_PROJECT_ROOT, "configure"))
     CORE_DIR: str = os.path.abspath(os.path.join(_BACKEND_PROJECT_ROOT, "core"))
@@ -79,13 +89,71 @@ class ProjectConfig(BaseSettings):
     OUTPUT_DOWNLOAD_DIR: str = os.path.abspath(os.path.join(OUTPUT_DIR, "download"))
     OUTPUT_MEDIA_DIR: str = os.path.abspath(os.path.join(OUTPUT_DIR, "media"))
     OUTPUT_DATAGRAM_DIR: str = os.path.abspath(os.path.join(OUTPUT_DIR, "datagram"))
+    OUTPUT_JMX_DIR: str = os.path.abspath(os.path.join(OUTPUT_DIR, "jmx"))
+    OUTPUT_XLSX_DIR: str = os.path.abspath(os.path.join(OUTPUT_DIR, "xlsx"))
     OUTPUT_DOCS_DIR: str = os.path.abspath(os.path.join(OUTPUT_DIR, "docs"))
     SERVICES_DIR: str = os.path.abspath(os.path.join(_BACKEND_PROJECT_ROOT, "services"))
     STATIC_DIR: str = os.path.abspath(os.path.join(_BACKEND_PROJECT_ROOT, "static"))
     STATIC_IMG_DIR: str = os.path.abspath(os.path.join(STATIC_DIR, "image"))
     MIGRATION_DIR: str = os.path.abspath(os.path.join(_BACKEND_PROJECT_ROOT, "migrations"))
+    CHROMA_DIR: str = os.path.abspath(os.path.join(_BACKEND_PROJECT_ROOT, "core", "chroma_db"))
+    DOCLING_OFFLINE_DIR: str = os.path.abspath(os.path.join(_BACKEND_PROJECT_ROOT, "docling_offline"))
+    WORKSPACE_DIR: str = os.path.abspath(os.path.join(_BACKEND_PROJECT_ROOT, "workspace"))
+    # 独立构建目录，不把草稿自动安装进共享 Agent 工作区。
+    SKILL_BUILD_DIR: str = os.path.abspath(os.path.join(OUTPUT_DIR, "skill-builds"))
+    # 20261016 定稿：Skill 直接上传单文件/合计均为 50M；与前端统一使用 MiB。
+    SKILL_RESOURCE_MAX_BYTES: int = Field(default=50 * 1024 * 1024, gt=0)
+    SKILL_RESOURCE_TOTAL_MAX_BYTES: int = Field(default=50 * 1024 * 1024, gt=0)
+    PLATFORM_APPLICATIONS: list[str] = ["信用卡系统", "核心系统", "ATPM", "FNP", "BLIM", "测试平台", "平台官方"]
+    KNOWLEDGE_PDF_DOCLING: bool = False
+    KNOWLEDGE_RAG_ENV_FILE: str = ""
+    # 正式默认走持久 Celery；inline 仅用于隔离测试和单机演示。
+    KNOWLEDGE_TASK_MODE: Literal["celery", "inline"] = "celery"
+    KNOWLEDGE_CANCEL_POLL_SECONDS: float = Field(default=1.0, gt=0)
+    KNOWLEDGE_LOCK_TTL_SECONDS: int = Field(default=60, ge=10)
+    KNOWLEDGE_JOB_STALE_SECONDS: int = Field(default=300, ge=30)
+    KNOWLEDGE_DELETE_MAX_RETRIES: int = Field(default=12, ge=0)
+    DOCLING_TABLE_STRUCTURE: bool = True
+    DOCLING_FORMULA_ENRICHMENT: bool = False
+    DOCLING_PICTURE_CLASSIFICATION: bool = False
+    DOCLING_PICTURE_DESCRIPTION: bool = False
+    DOCLING_USE_GPU: bool = False
+    DOCLING_PDF_BACKEND: str = "pypdfium2"
+    RAG_OUTPUT_DIR: str = os.path.abspath(os.path.join(OUTPUT_DIR, "knowledge-parsed"))
 
 
+
+    # RAG / LLM / Embedding
+    CHROMA_COLLECTION: str = "knowledge_base"
+    LLM_API_KEY: str = Field(default="", description="LLM API Key")
+    LLM_BASE_URL: str = Field(default="", description="LLM API Base URL")
+    LLM_MODEL_NAME: str = Field(default="", description="LLM Model Name")
+    EMBEDDING_API_KEY: str = Field(default="", description="Embedding API Key")
+    EMBEDDING_BASE_URL: str = Field(default="", description="Embedding API Base URL")
+    EMBEDDING_MODEL_NAME: str = Field(default="", description="Embedding Model Name")
+
+    # RAG 分块 / 检索全局默认值（.env 可选；不写则用下列 default）
+    # - CHUNK_SIZE / CHUNK_OVERLAP：KnowledgeBase.chunk_* 为空时回退；仅影响新上传/重处理文档
+    # - RETRIEVAL_TOP_K：chroma_store.search(top_k=None) 时兜底；聊天链路以 ModelConfig.top_k 为准
+    CHUNK_SIZE: int = Field(
+        default=500,
+        description="分块大小(字符数)；知识库未配置时回退，建议 200-2000",
+    )
+    CHUNK_OVERLAP: int = Field(
+        default=100,
+        description="分块重叠(字符数)；知识库未配置时回退，应 ≤ CHUNK_SIZE/2",
+    )
+    RETRIEVAL_TOP_K: int = Field(
+        default=5,
+        description="向量检索条数兜底；聊天以 ModelConfig.top_k(1-20) 为准",
+    )
+
+    # 测试用例生成配置
+    TEST_CASE_MODEL_POOL: str = Field(
+        default="sonnet;haiku;opus",
+        description="Claude 模型池（短别名或具体模型名，用分号分隔，按顺序轮询）",
+    )
+    TEST_CASE_MODEL_TIMEOUT: int = Field(default=1200, description="单个模型调用超时秒数")
 
     # # 允许访问的源（域名）列表
     CORS_ORIGINS: List[str] = [
@@ -189,50 +257,80 @@ class ProjectConfig(BaseSettings):
         "Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
     ]
 
-    # 可直接配置 DATABASE_URL，或填写以下 MySQL 连接参数。
+    # 数据库配置（仅支持 MySQL）
+    # DATABASE_AUTO_MIGRATION字段默认关闭，不做数据库模型迁移，如果需要请先检查或询问当前数据库模型是否存在更新，避免迁移记录错乱
     DATABASE_AUTO_MIGRATION: bool = False
     DATABASE_CONNECTIONS: Dict[str, Any] = {}
-    DATABASE_URL: str = ""
-    DATABASE_HOST: str = "localhost"
-    DATABASE_PORT: int = 3306
-    DATABASE_NAME: str = "template"
-    DATABASE_USERNAME: str = ""
-    DATABASE_PASSWORD: str = ""
+    DATABASE_URL: str = Field(default="", description="数据库地址")
+    DATABASE_HOST: str = Field(default="", description="数据库主机")
+    DATABASE_PORT: str = Field(default="", description="数据库端口")
+    DATABASE_NAME: str = Field(default="", description="数据库名称")
+    DATABASE_USERNAME: str = Field(default="", description="数据库用户名")
+    DATABASE_PASSWORD: str = Field(default="", description="数据库密码")
+
+    # Redis 配置
+    REDIS_URL: str = ""
+    REDIS_HOST: str = Field(default="", description="Redis主机")
+    REDIS_PORT: str = Field(default="", description="Redis端口")
+    REDIS_USERNAME: str = Field(default="", description="Redis用户名")
+    REDIS_PASSWORD: str = Field(default="", description="Redis密码")
 
     @model_validator(mode="after")
     def validate_env_and_assemble_urls(self) -> Self:
+        if self.KNOWLEDGE_RAG_ENV_FILE:
+            from dotenv import dotenv_values
+            path = Path(self.KNOWLEDGE_RAG_ENV_FILE)
+            if not path.is_file():
+                raise ValueError("指定的 RAG 向量模型配置文件不存在")
+            source = dotenv_values(path)
+            # 只读取向量模型三项；不继承旧项目数据库、Redis、JWT 或文件目录。
+            for target, legacy in (("EMBEDDING_API_KEY", "EMBEDDING_BINDING_API_KEY"),
+                                   ("EMBEDDING_BASE_URL", "EMBEDDING_BINDING_HOST"),
+                                   ("EMBEDDING_MODEL_NAME", "EMBEDDING_MODEL")):
+                if not getattr(self, target):
+                    setattr(self, target, source.get(target) or source.get(legacy) or "")
         if not self.AUTH_SECRET_KEY or len(self.AUTH_SECRET_KEY) < 64:
             raise ValueError("AUTH_SECRET_KEY 配置为空或长度少于64位，请检查.env文件或环境变量")
 
-        if self.DATABASE_URL:
-            self.DATABASE_CONNECTIONS = {"default": self.DATABASE_URL}
-        else:
-            if not self.DATABASE_USERNAME or not self.DATABASE_NAME or not self.DATABASE_HOST:
-                raise ValueError("请配置 DATABASE_URL 或完整的 MySQL 连接参数")
-            db_user = quote_plus(self.DATABASE_USERNAME)
-            db_password = quote_plus(self.DATABASE_PASSWORD)
-            self.DATABASE_URL = (
-                f"mysql://{db_user}:{db_password}@{self.DATABASE_HOST}:"
-                f"{self.DATABASE_PORT}/{self.DATABASE_NAME}"
-            )
-            self.DATABASE_CONNECTIONS = {
-                "default": {
-                    "engine": "tortoise.backends.mysql",
-                    "credentials": {
-                        "host": self.DATABASE_HOST,
-                        "port": self.DATABASE_PORT,
-                        "user": self.DATABASE_USERNAME,
-                        "password": self.DATABASE_PASSWORD,
-                        "database": self.DATABASE_NAME,
-                        "minsize": 1,
-                        "maxsize": 10,
-                        "charset": "utf8mb4",
-                    },
-                }
-            }
+        for field_name in ("DATABASE_USERNAME", "DATABASE_HOST", "DATABASE_PORT", "DATABASE_NAME"):
+            if not getattr(self, field_name):
+                raise ValueError(f"{field_name} 配置为空，请检查.env文件或环境变量")
 
-        for directory in (self.OUTPUT_LOGS_DIR, self.OUTPUT_UPLOAD_DIR, self.OUTPUT_DATAGRAM_DIR):
-            Path(directory).mkdir(parents=True, exist_ok=True)
+        Path(self.OUTPUT_UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
+        Path(self.OUTPUT_DATAGRAM_DIR).mkdir(parents=True, exist_ok=True)
+        Path(self.CHROMA_DIR).mkdir(parents=True, exist_ok=True)
+
+        return self.assemble_connection_urls()
+
+    def assemble_connection_urls(self) -> Self:
+        db_user = quote_plus(self.DATABASE_USERNAME)
+        db_password = quote_plus(self.DATABASE_PASSWORD)
+        self.DATABASE_URL = (
+            f"mysql://{db_user}:{db_password}@{self.DATABASE_HOST}:"
+            f"{self.DATABASE_PORT}/{self.DATABASE_NAME}"
+            f"?charset=utf8mb4&time_zone=+08:00"
+        )
+        self.DATABASE_CONNECTIONS = {
+            "default": {
+                "engine": "tortoise.backends.mysql",
+                "credentials": {
+                    "host": self.DATABASE_HOST,
+                    "port": self.DATABASE_PORT,
+                    "user": self.DATABASE_USERNAME,
+                    "password": self.DATABASE_PASSWORD,
+                    "database": self.DATABASE_NAME,
+                    "minsize": 10,
+                    "maxsize": 40,
+                    "pool_recycle": 3600,
+                    "charset": "utf8mb4",
+                    "echo": False,
+                    "autocommit": True,
+                },
+            }
+        }
+
+        if self.REDIS_PASSWORD:
+            self.REDIS_URL = self.build_redis_url(db=0)
         return self
 
     @property
@@ -243,6 +341,41 @@ class ProjectConfig(BaseSettings):
     def datagram_path(self) -> Path:
         return Path(self.OUTPUT_DATAGRAM_DIR)
 
+    @property
+    def chroma_path(self) -> Path:
+        return Path(self.CHROMA_DIR)
+
+    @staticmethod
+    def format_redis_url(*, username: str, password: str, host: str, port: str, db: int) -> str:
+        auth = ""
+        if username:
+            auth += quote_plus(username)
+        auth += ":"
+        if password:
+            auth += quote_plus(password)
+        auth += "@"
+        return f"redis://{auth}{host or '127.0.0.1'}:{port or '6379'}/{db}"
+
+    def build_redis_url(self, db: int = 0) -> str:
+        return self.format_redis_url(
+            username=self.REDIS_USERNAME,
+            password=self.REDIS_PASSWORD,
+            host=self.REDIS_HOST,
+            port=self.REDIS_PORT,
+            db=db,
+        )
+
+    # Aerich：是否在应用启动时执行 init_db / migrate / upgrade 指令
+    # - 生产(Linux 且 SERVER_DEBUG=False)：始终执行迁移（不提供关闭选项）
+    # - 开发(SERVER_DEBUG=True)：默认不迁移；需要时由开发者手动把 DATABASE_AUTO_MIGRATION 改为 True
+    @property
+    def aerich_should_run_on_startup(self) -> bool:
+        if (not self.SERVER_DEBUG) and (self.SERVER_SYSTEM == "Linux"):
+            return True
+        if self.SERVER_DEBUG and self.DATABASE_AUTO_MIGRATION:
+            return True
+        return False
+
 
 @lru_cache(maxsize=1)
 def get_project_config() -> ProjectConfig:
@@ -250,16 +383,3 @@ def get_project_config() -> ProjectConfig:
 
 
 PROJECT_CONFIG = get_project_config()
-
-# FastAPI、Aerich 和管理脚本共用同一份 ORM 配置。
-TORTOISE_ORM = {
-    "connections": PROJECT_CONFIG.DATABASE_CONNECTIONS,
-    "apps": {
-        "models": {
-            "models": PROJECT_CONFIG.APPLICATIONS_MODELS,
-            "default_connection": "default",
-        }
-    },
-    "use_tz": False,
-    "timezone": "Asia/Shanghai",
-}
