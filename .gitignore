@@ -1,22 +1,11 @@
-.venv/
-venv/
-.idea/
-.cache/
-.vscode/
-.DS_Store
-.pytest_cache/
-__pycache__/
-*.py[cod]
-*.tmp
-*.bak
-*.log
-*.local
-.env
-.env.*
-!.env.example
-
-output/**
-!output/**/
-!output/**/__init__.py
-*.db
-*.sqlite3
+# 构建产物（可由 npm run build 重新生成）
+dist/
+# 依赖（根 .gitignore 已全局忽略 node_modules/，此处显式声明以便单独克隆本目录时也生效）
+node_modules/
+# TypeScript 增量编译缓存
+*.tsbuildinfo
+.vite/
+# 本地浏览器截图、验收记录及测试构建文件，保留在磁盘但不纳入提交。
+output/
+.env.local
+.env.*.local
