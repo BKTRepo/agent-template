@@ -3,6 +3,7 @@ from typing import Dict, Any
 
 from applications.user.models.user_model import User
 from configure import LOGGER
+from services import get_password_hash
 
 
 async def init_database_user():
@@ -14,7 +15,7 @@ async def init_database_user():
 
     user_data: Dict[str, Any] = {
         "username": "admin",
-        "password": "123456",
+        "password": get_password_hash("123456"),
         "alias": "系统管理员",
         "email": "admin@test.com",
         "phone": "18888888888",

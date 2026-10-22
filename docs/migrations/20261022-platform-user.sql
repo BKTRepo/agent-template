@@ -1,0 +1,33 @@
+-- 开发者中心与平台统一登录复用的用户表。
+-- 默认账号由后端启动初始化，不在迁移脚本中写入明文或固定密码。
+CREATE TABLE IF NOT EXISTS keenrobot_user (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  username VARCHAR(32) NOT NULL,
+  password VARCHAR(255) NOT NULL,
+  alias VARCHAR(64) NOT NULL,
+  email VARCHAR(64) NOT NULL,
+  phone VARCHAR(20) NULL,
+  motto VARCHAR(255) NULL,
+  avatar VARCHAR(255) NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  is_superuser TINYINT(1) NOT NULL DEFAULT 0,
+  last_login DATETIME(6) NULL,
+  token_version INT NOT NULL DEFAULT 0,
+  address VARCHAR(255) NULL,
+  gender SMALLINT NOT NULL DEFAULT 0,
+  user_type SMALLINT NOT NULL DEFAULT 0,
+  emergency_name VARCHAR(32) NULL,
+  emergency_phone VARCHAR(20) NULL,
+  state SMALLINT NOT NULL DEFAULT 0,
+  created_time DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_time DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  created_user VARCHAR(16) NULL,
+  updated_user VARCHAR(16) NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_keenrobot_user_username (username),
+  UNIQUE KEY uq_keenrobot_user_alias_email (alias, email),
+  KEY idx_keenrobot_user_active (is_active),
+  KEY idx_keenrobot_user_superuser (is_superuser),
+  KEY idx_keenrobot_user_last_login (last_login),
+  KEY idx_keenrobot_user_state (state)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

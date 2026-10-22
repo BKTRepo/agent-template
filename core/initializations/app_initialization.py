@@ -5,13 +5,12 @@ import sys
 import traceback
 from typing import Dict, Any
 
-from aerich import Command
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from starlette.exceptions import HTTPException
 from starlette.middleware.cors import CORSMiddleware
 from starlette.staticfiles import StaticFiles
-from tortoise.contrib.fastapi import register_tortoise
+from tortoise import Tortoise
 from tortoise.exceptions import DoesNotExist
 
 from configure import PROJECT_CONFIG, LOGGER
@@ -40,12 +39,17 @@ async def register_database(app: FastAPI) -> None:
         "use_tz": False,
         "timezone": "Asia/Shanghai",
     }
-    register_tortoise(
-        app=app,
-        config=config,
-        generate_schemas=False,
-        add_exception_handlers=PROJECT_CONFIG.SERVER_DEBUG,
-    )
+    # register_tortoise 会把初始化注册到 FastAPI 的生命周期回调；本项目在
+    # lifespan 内调用此函数，后续初始化用户和开发者中心数据时连接尚未就绪。
+    # 这里直接初始化，确保同一生命周期中可以立刻读写数据库。
+    await Tortoise.init(config=config)
+
+    # 云数据库的表结构由显式迁移脚本维护。开发者中心启动不自动扫描、创建其它业务表，
+    # 避免在同事共用数据库中意外改动非本模块表结构。
+    if not PROJECT_CONFIG.aerich_should_run_on_startup:
+        return
+
+    from aerich import Command
 
     # 确保迁移目录存在
     if not os.path.exists(PROJECT_CONFIG.MIGRATION_DIR):
