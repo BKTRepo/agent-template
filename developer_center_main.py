@@ -2,7 +2,14 @@
 
 正式部署继续使用 backend_main.py；本入口避免未启用模块的可选依赖阻塞开发者中心联调。
 """
+import asyncio
+import sys
 from contextlib import asynccontextmanager
+
+# asyncmy 在 Windows 的 ProactorEventLoop 下进行 MySQL TLS 升级会触发
+# WinError 87；SelectorEventLoop 可以正常完成 TLS 握手。
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from fastapi import FastAPI
 from tortoise import Tortoise

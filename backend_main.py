@@ -1,5 +1,12 @@
 # -*- coding: utf-8 -*-
+import asyncio
+import sys
 from contextlib import asynccontextmanager
+
+# 云 MySQL 要求 TLS。asyncmy 在 Windows 的 ProactorEventLoop 下执行 TLS
+# 升级会触发 WinError 87，因此本地启动统一使用 SelectorEventLoop。
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from fastapi import FastAPI
 from fastapi.routing import APIRoute

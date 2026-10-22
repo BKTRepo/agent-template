@@ -4,7 +4,8 @@
 CREATE TABLE IF NOT EXISTS keenrobot_skills (
   id VARCHAR(64) NOT NULL,
   name VARCHAR(128) NOT NULL,
-  name_key CHAR(64) NOT NULL,
+  -- 软删除时置空，释放技能名称唯一键，允许用户重新使用已删除草稿的名称。
+  name_key CHAR(64) NULL,
   description TEXT NULL,
   user_id BIGINT NOT NULL,
   is_enabled TINYINT(1) NOT NULL DEFAULT 0,

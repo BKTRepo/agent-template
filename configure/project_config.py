@@ -267,6 +267,10 @@ class ProjectConfig(BaseSettings):
     DATABASE_NAME: str = Field(default="", description="数据库名称")
     DATABASE_USERNAME: str = Field(default="", description="数据库用户名")
     DATABASE_PASSWORD: str = Field(default="", description="数据库密码")
+    DATABASE_SSL_ENABLED: bool = Field(default=False, description="是否使用 TLS/SSL 连接 MySQL")
+    DATABASE_SSL_CA: str = Field(default="", description="MySQL CA 证书路径；为空时仅加密、不校验证书")
+    DATABASE_SSL_CERT: str = Field(default="", description="MySQL 客户端证书路径（可选）")
+    DATABASE_SSL_KEY: str = Field(default="", description="MySQL 客户端私钥路径（可选）")
 
     # Redis 配置
     REDIS_URL: str = ""
@@ -305,27 +309,42 @@ class ProjectConfig(BaseSettings):
     def assemble_connection_urls(self) -> Self:
         db_user = quote_plus(self.DATABASE_USERNAME)
         db_password = quote_plus(self.DATABASE_PASSWORD)
+        ssl_query = "&ssl=true" if self.DATABASE_SSL_ENABLED else ""
         self.DATABASE_URL = (
             f"mysql://{db_user}:{db_password}@{self.DATABASE_HOST}:"
             f"{self.DATABASE_PORT}/{self.DATABASE_NAME}"
-            f"?charset=utf8mb4&time_zone=+08:00"
+            f"?charset=utf8mb4&time_zone=+08:00{ssl_query}"
         )
+        ssl_options: Dict[str, Any] | None = None
+        if self.DATABASE_SSL_ENABLED:
+            # asyncmy 需要非空 ssl 字典才会发起 TLS 握手。老师提供 CA 时执行证书校验；
+            # 未提供 CA 时仍加密链路，但无法校验服务器身份。
+            ssl_options = {"verify_mode": bool(self.DATABASE_SSL_CA)}
+            if self.DATABASE_SSL_CA:
+                ssl_options.update({"ca": self.DATABASE_SSL_CA, "check_hostname": True})
+            if self.DATABASE_SSL_CERT:
+                ssl_options["cert"] = self.DATABASE_SSL_CERT
+            if self.DATABASE_SSL_KEY:
+                ssl_options["key"] = self.DATABASE_SSL_KEY
+        credentials = {
+            "host": self.DATABASE_HOST,
+            "port": self.DATABASE_PORT,
+            "user": self.DATABASE_USERNAME,
+            "password": self.DATABASE_PASSWORD,
+            "database": self.DATABASE_NAME,
+            "minsize": 10,
+            "maxsize": 40,
+            "pool_recycle": 3600,
+            "charset": "utf8mb4",
+            "echo": False,
+            "autocommit": True,
+        }
+        if ssl_options is not None:
+            credentials["ssl"] = ssl_options
         self.DATABASE_CONNECTIONS = {
             "default": {
                 "engine": "tortoise.backends.mysql",
-                "credentials": {
-                    "host": self.DATABASE_HOST,
-                    "port": self.DATABASE_PORT,
-                    "user": self.DATABASE_USERNAME,
-                    "password": self.DATABASE_PASSWORD,
-                    "database": self.DATABASE_NAME,
-                    "minsize": 10,
-                    "maxsize": 40,
-                    "pool_recycle": 3600,
-                    "charset": "utf8mb4",
-                    "echo": False,
-                    "autocommit": True,
-                },
+                "credentials": credentials,
             }
         }
 
