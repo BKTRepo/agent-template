@@ -64,7 +64,7 @@ test('复用知识库搜索参数，真实空结果不展示示例，401清除�
     assert.equal(result.demo, false)
     assert.deepEqual(result.items, [])
     globalThis.fetch = async () => new Response('{}', { status: 401 })
-    await searchKnowledgeBases('', '测试一组', new AbortController().signal)
+    await assert.rejects(searchKnowledgeBases('', '测试一组', new AbortController().signal), /已失效/)
     assert.equal(useAuthStore.getState().session, null)
   } finally { globalThis.fetch = original }
 })

@@ -8,10 +8,10 @@ import { applicationText, canViewKnowledge } from '@/lib/access'
 import { useAccessStore } from '@/stores/accessStore'
 import { useKnowledgeStore } from '@/stores/knowledgeStore'
 import { skillResourceExtensions, validateResourceFiles, validateSkillForm } from '@/lib/skillForm'
-import { checkSkillName, ensureSkill, readSkillDefinition, SkillApiError } from '@/api/skillClient'
+import { checkSkillName, ensureSkill, readSkillDefinition, saveSkillDefinition, SkillApiError } from '@/api/skillClient'
 import { hasSkillSession, skillAccount, skillBackendEnabled } from '@/api/skillSession'
 import { generateSkill } from '@/api/developer'
-import { createDeveloperSkill, deleteDeveloperSkill, offlineDeveloperSkill, publishDeveloperSkill, recordDeveloperDebugResult, updateDeveloperSkill } from '@/api/developerCenter'
+import { persistSkillResources, createDeveloperSkill, deleteDeveloperSkill, offlineDeveloperSkill, publishDeveloperSkill, updateDeveloperSkill } from '@/api/developerCenter'
 import { useDeveloperStore } from '@/stores/developerStore'
 import { readBlob, saveBlobs } from '@/lib/resourceStorage'
 import type { Implementation, ImplementationForm, SkillUploads } from '@/types/developer'
@@ -77,10 +77,9 @@ export default function DeveloperPage() {
     setPreview({})
     const editable = item?.pendingChanges ?? item
     const sequence = nameCheckSequence.current
-    if (editable?.uploadedResources?.length) void Promise.all(editable.uploadedResources.map(async row => {
-      const blob = await readBlob(`resource:${row.id}`)
-      return blob ? { id: row.id, file: new File([blob], row.name, { lastModified: row.lastModified }), usage: row.category ?? '' } : undefined
-    })).then(rows => { if (sequence === nameCheckSequence.current) { const found = rows.filter((row): row is NonNullable<typeof row> => !!row); setUploads({ references: found.filter(row => row.usage !== '脚本'), scripts: found.filter(row => row.usage === '脚本') }) } }).catch(() => { /* 缺失文件由生成/保存时提示重新选择。 */ })
+    if (editable?.uploadedResources?.length) void restoreSkillUploads(editable).then(found => {
+      if (sequence === nameCheckSequence.current) setUploads(found)
+    }).catch(error => { if (sequence === nameCheckSequence.current) setMessage((error as Error).message) })
     const knowledgeBases = editable?.knowledgeBases ?? []
     setSelectedId(item?.id); setForm(editable ? { ...editable, applicationIds: editable.applicationIds ?? [editable.system], technicalName: editable.technicalName || `skill-${crypto.randomUUID()}`, version: editable.version ?? '', resourceIds: knowledgeBases.map(row => row.id), knowledgeBases, resourceUsage: editable.resourceUsage ?? '', uploadedResources: editable.uploadedResources ?? [] } : blankForm(team)); setErrors({}); setMessage(''); setOfflinePrompt(false); setDraftDeletePrompt(false); setPanel('form')
   }
@@ -107,7 +106,7 @@ export default function DeveloperPage() {
     setErrors(previous => ({ ...previous, name: localError }))
     if (localError || !hasSkillSession() || !skillBackendEnabled) return
     try {
-      const excludeId = selected && selected.backendAccount === skillAccount() ? selected.backendSkillId : undefined
+      const excludeId = selected?.backendSkillId
       const result = await checkSkillName(form.name.trim(), excludeId)
       if (sequence === nameCheckSequence.current) setErrors(previous => ({ ...previous, name: result.available ? '' : '技能名称已存在，请使用其他名称' }))
     } catch (error) {
@@ -121,7 +120,7 @@ export default function DeveloperPage() {
     try {
       const definition = await readSkillDefinition(item)
       if (definition.build.build_id !== item.buildId) throw new Error('后端技能已更新，请重新查询当前构建后再调试。')
-      const details = { build: definition.build, skillMarkdown: definition.markdown, version: definition.version, backendVersion: definition.version }
+      const details = { revision: definition.build.current_revision, skillVersionId: definition.build.skill_version_id, build: definition.build, skillMarkdown: definition.markdown, version: definition.version, backendVersion: definition.version }
       patch(item.id, details); setPanel('debug')
     } catch (error) { setMessage((error as Error).message); setPanel(null) }
     finally { setBusy(null) }
@@ -131,9 +130,9 @@ export default function DeveloperPage() {
     if (showFormErrors(issues)) return
     setBusy('save')
     try {
-      const restored = await restoreSkillUploads(form, uploads)
-      void restored
-      const saved = selectedId ? await updateDeveloperSkill(selectedId, form) : await createDeveloperSkill(form)
+      const ready = await persistSkillResources(form, uploads)
+      setForm(ready)
+      const saved = selectedId ? await updateDeveloperSkill(selectedId, ready) : await createDeveloperSkill(ready)
       replace(saved); setPanel(null); setNotice('草稿已保存到后端数据库。')
     } catch (error) { setMessage((error as Error).message) } finally { setBusy(null) }
   }
@@ -143,7 +142,7 @@ export default function DeveloperPage() {
     if (showFormErrors(issues)) return
     setBusy('save'); setMessage('')
     try {
-      const saved = await updateDeveloperSkill(selected.id, form)
+      const saved = await updateDeveloperSkill(selected.id, await persistSkillResources(form, uploads))
       replace(saved); setPanel(null)
       setNotice('修改已保存为新草稿，需重新调试后再上线。')
     } catch (error) { setMessage((error as Error).message) } finally { setBusy(null) }
@@ -174,8 +173,13 @@ export default function DeveloperPage() {
     if (showFormErrors(issues)) return
     setBusy('build'); setMessage('')
     try {
-      const item = selectedId ? await updateDeveloperSkill(selectedId, form) : await createDeveloperSkill(form)
+      const ready = await persistSkillResources(form, uploads)
+      setForm(ready)
+      const item = selectedId ? await updateDeveloperSkill(selectedId, ready) : await createDeveloperSkill(ready)
       replace(item); setSelectedId(item.id)
+      // 新建后立即进入构建流程时，当前表单仍然是创建前的草稿对象。
+      // 回填后端返回的修订号，后续重试保存/构建才能携带 expected_revision。
+      setForm(previous => ({ ...previous, revision: item.revision, skillVersionId: item.skillVersionId, version: item.version }))
       if (!skillBackendEnabled) throw new SkillApiError('后端生成服务尚未启用，不能使用前端模拟生成。')
       if (!hasSkillSession()) throw new SkillApiError('本地后端尚未配置有效会话，请检查联调服务与认证配置。')
       if (item.knowledgeBases?.some(row => row.source === 'mock')) throw new SkillApiError('真实生成不能使用示例知识库，请重新选择真实知识库或改用资源上传。', { resourceIds: '请使用真实知识库，或取消示例挂载。' })
@@ -199,12 +203,25 @@ export default function DeveloperPage() {
     replace(saved)
     setPanel(null); setNotice('技能已上线。')
   }
-  async function saveDebugResult(debug: Implementation['debug']) {
-    if (!selectedId) return
-    patch(selectedId, { debug })
-    if (!debug?.runId || debug.status === 'running') return
-    const saved = await recordDeveloperDebugResult(selectedId, debug)
-    if (saved) replace({ ...saved, build: selected?.build, buildId: debug.buildId, buildOrigin: 'backend', debug })
+  function saveDebugResult(id: string, debug: Implementation['debug']) {
+    const current = useDeveloperStore.getState().implementations.find(row => row.id === id)
+    if (!current) return
+    // 弹窗切换、关闭或任务执行期间保存新版时，旧任务回调不能覆盖新版本/其他技能。
+    if (debug && (debug.isCurrentVersion === false || debug.buildId !== current.buildId
+      || (debug.skillVersionId && debug.skillVersionId !== current.skillVersionId))) return
+    patch(id, { debug, ...(debug?.versionRegistered && current.status === '草稿' ? { status: '调试中' as const } : {}) })
+  }
+  async function saveDefinition(markdown: string) {
+    if (!selected) return
+    const built = await saveSkillDefinition(selected, markdown)
+    await load()
+    const current = useDeveloperStore.getState().implementations.find(row => row.id === selected.id)
+    if (!current) throw new Error('技能已不存在，请刷新后重试。')
+    const definition = await readSkillDefinition(current)
+    patch(current.id, { build: definition.build, buildId: built.build_id, buildOrigin: 'backend',
+      skillMarkdown: definition.markdown, revision: definition.build.current_revision,
+      skillVersionId: definition.build.skill_version_id, backendVersion: definition.version, version: definition.version })
+    setPreview({})
   }
   const primaryBusy = <><LoaderCircle className="spin" size={16} />处理中…</>
 
@@ -242,7 +259,7 @@ export default function DeveloperPage() {
       <div ref={formRoot}><SkillFields form={form} update={update} skillClasses={skillClasses} applications={applications} errors={errors} disabled={!!busy || readonly} editing={!!selected} activeIds={activeUploads.map(row => row.id)} onAdd={addFiles} onRemove={removeFile} /></div>
     </Dialog>}
 
-    {panel === 'debug' && selected && <DebugDialog key={selected.id} item={selected} onClose={closePanel} onEdit={!readonly && selected.status !== '已上线' ? () => openForm(selected) : undefined} onPublish={!readonly && selected.status !== '已上线' ? publish : undefined} onResult={saveDebugResult} />}
+    {panel === 'debug' && selected && <DebugDialog key={selected.id} item={selected} onClose={closePanel} onEdit={!readonly && selected.status !== '已上线' ? () => openForm(selected) : undefined} onPublish={!readonly && selected.status !== '已上线' ? publish : undefined} onSaveDefinition={!readonly ? saveDefinition : undefined} onResult={debug => saveDebugResult(selected.id, debug)} />}
     {notice && <div className="platform-toast" role="status"><Check size={18} /><span>{notice}</span></div>}
   </>
 }

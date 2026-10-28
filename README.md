@@ -2,6 +2,21 @@
 
 项目分支：znfwdd。使用 React、TypeScript、Vite、Zustand 和 Lucide，保留 HeroUI 通用组件及原工程的 CSS 兼容构建脚本。
 
+## 2026-10-26 开发者中心当前接入
+
+开发者中心记录来自后端数据库，页面不生成示例技能或模拟成功结果。以下早期原型说明保留为历史记录；当前开发者中心行为以本节和接口测试为准。
+
+- 点击运行：`POST /realtime-test-case-gen/runs` 提交原有multipart定义、对话、文档和挂载文件，立即取得任务编号。
+- 取得编号后调用我方 `POST /skills/developer/{skill_id}/debug-runs`，登记实际构建和技能版本；不等待任务完成。
+- 每5秒调用 `GET /realtime-test-case-gen/runs/{run_id}`，识别queued、running、completed、failed；显示实际失败原因。
+- 关闭窗口停止前端查询，不取消后台任务；重新打开调用 `GET /realtime-test-case-gen/skills/{skill_id}/latest-run`，并查询我方任务版本关联。旧版成功结果不能证明当前新版通过。
+- completed后通过 `GET /realtime-test-case-gen/runs/{run_id}/document` 下载Excel。查询或下载失败保留原编号，重试不创建新任务。
+- 版本登记失败时，仅短暂保存原任务/构建/版本及输入文字、文档数量的收据用于重试，后端确认成功后删除；不保存调试输入文档原件，不以该收据填充业务列表。
+- 本机`.env.local`分别配置平台代理与同事调试服务地址/Token，不把代理Token打包到前端。不修改同事的代码或任务表。
+
+`npm test`验证前端状态转换、关闭恢复、版本隔离和错误处理；`npm run build`验证生产构建。
+完整云库后续流程验收由后端 `applications/wrq/tests/live_debug_lifecycle_20261026.py --live` 启动：实际前端API函数通过临时HTTP服务访问真实云库，仅沙箱状态及结果Excel使用mock。浏览器缓存使用Node测试存储，因此不能将该接口测试描述成浏览器UI实测。
+
 界面依据产品 HTML 原型：深蓝左侧导航、白色顶栏、团队选择、浅色内容区，默认进入开发者中心。2026-10-14 按新版 `(1)(3).html` 调整为面向测试经理的“自测通过 → 直接上线”流程，审批环节已取消。
 
 ## 本地启动

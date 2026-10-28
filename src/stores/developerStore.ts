@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { setApplicationCatalog } from '@/lib/access'
 import type { Implementation } from '@/types/developer'
 import { getDeveloperMetadata, listDeveloperSkills, type DeveloperCatalogOption } from '@/api/developerCenter'
 
@@ -23,6 +24,7 @@ export const useDeveloperStore = create<DeveloperState>((set) => ({
     set({ loading: true })
     try {
       const [implementations, metadata] = await Promise.all([listDeveloperSkills(), getDeveloperMetadata()])
+      setApplicationCatalog(metadata.applications)
       set({ implementations, skillClasses: metadata.skill_classes, applications: metadata.applications })
     }
     finally { set({ loading: false }) }

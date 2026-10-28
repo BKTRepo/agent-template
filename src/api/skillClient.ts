@@ -28,10 +28,6 @@ async function request<T>(path: string, options: RequestInit = {}, authenticated
   }
   return result.data
 }
-export async function login(username: string, password: string) {
-  const data = await request<{ access_token: string; username: string; alias: string }>('/base/auth/access_token', { method: 'POST', body: JSON.stringify({ username, password }) }, false)
-  useAuthStore.getState().setSession({ token: data.access_token, username: data.username, alias: data.alias })
-}
 export async function ensureSkill(item: Implementation) {
   const account = skillAccount()
   if (item.backendSkillId && item.backendAccount === account) return item.backendSkillId
@@ -53,7 +49,7 @@ export async function buildSkill(item: Implementation, uploads: SkillUploads): P
     if (!category || !categoryNames[category]) throw new SkillApiError(`请选择 ${upload.file.name} 的资源用途分类。`, { uploadedResources: '每个上传资源都需要选择分类。' })
     return categoryNames[category]
   })
-  const source = { skill_id: item.backendSkillId, skill_name: item.name, skill_class_id: item.classId, application: item.applicationIds?.[0] || null, description: item.description, version: item.version, expected_version: item.backendVersion, instructions: item.instructions, compatibility: item.compatibility ?? '', resource_usage: item.resourceUsage ?? '', knowledge_base_ids: item.resourceIds, resource_categories: resourceCategories }
+  const source = { skill_id: item.backendSkillId, skill_name: item.name, skill_class_id: item.classId, application: item.applicationIds?.[0] || null, description: item.description, version: item.version, expected_version: item.backendVersion || item.version, instructions: item.instructions, compatibility: item.compatibility ?? '', resource_usage: item.resourceUsage ?? '', knowledge_base_ids: item.resourceIds, resource_categories: resourceCategories }
   const form = new FormData()
   form.append('source', JSON.stringify(source))
   all.forEach(file => form.append('files', file.file))

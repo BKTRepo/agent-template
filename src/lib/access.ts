@@ -1,7 +1,8 @@
 import type { Implementation, KnowledgeBase } from '@/types/developer'
 
 // 定稿 MVP 使用个人权限。应用使用全量只读目录，不按团队裁剪。
-export const applications = ['信用卡系统', '核心系统', 'ATPM', 'FNP', 'BLIM', '测试平台', '平台官方'].map(name => ({ id: name, name }))
+export const applications: { id: string; name: string }[] = []
+export function setApplicationCatalog(rows: { id: string; name: string }[]) { applications.splice(0, applications.length, ...rows.filter(row => row.id !== '*')) }
 export const ALL_APPLICATIONS = '*'
 export interface Actor { id: string; name: string }
 export const demoActors: Actor[] = [

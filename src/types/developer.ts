@@ -1,6 +1,16 @@
 export type ImplementationStatus = '草稿' | '已生成' | '调试中' | '已上线' | '已下线'
-export type DebugStatus = 'idle' | 'running' | 'passed' | 'failed' | 'timeout'
+export type DebugStatus = 'idle' | 'queued' | 'running' | 'passed' | 'failed' | 'timeout'
+export interface RealtimeTask {
+  run_id: string
+  skill_id: string
+  status: 'queued' | 'running' | 'completed' | 'failed'
+  started_at: string | null
+  finished_at: string | null
+  error_message: string | null
+}
 export interface ImplementationForm {
+  revision?: number
+  skillVersionId?: number
   classId: string
   name: string
   technicalName: string
@@ -32,7 +42,7 @@ export interface Implementation extends ImplementationForm {
   backendVersion?: string
   buildOrigin?: 'backend' | 'mock'
   build?: SkillBuild
-  debug?: { id: string; buildId: string; input: string | DebugInput; status: DebugStatus; output: string; origin?: 'mock' | 'backend'; runId?: string; documentError?: string; artifact?: { key: string; name: string; count?: number; format?: 'Markdown' | 'Excel' } }
+  debug?: { id: string; buildId: string; skillVersionId?: number; input: string | DebugInput; conversationInput?: string; requestDocumentCount?: number; status: DebugStatus; output: string; origin?: 'mock' | 'backend'; runId?: string; versionRegistered?: boolean; isCurrentVersion?: boolean; registrationError?: string; monitorError?: string; documentError?: string; artifact?: { key: string; name: string; count?: number; format?: 'Markdown' | 'Excel' } }
   publication?: { origin: 'mock' | 'backend'; buildId: string; publishedAt: string; publisher: string }
 }
 export interface PublishReply {
@@ -42,6 +52,7 @@ export interface PublishReply {
   publication: NonNullable<Implementation['publication']>
 }
 export interface SkillBuild {
+  skill_version_id?: number; current_revision?: number
   build_id: string; skill_id: string; name: string; version: string
   files: { path: string; size: number; sha256: string; role: string }[]
   source: { display_name?: string; version?: string; knowledge_base_ids?: string[]; compatibility?: string; description?: string; instructions?: string; resource_usage?: string }
@@ -51,7 +62,7 @@ export interface SkillUploads { references: SkillUpload[]; scripts: SkillUpload[
 export interface KnowledgeSelection { id: string; name: string; source: 'backend' | 'mock' }
 export interface KnowledgeBaseOption extends KnowledgeSelection { description: string; scope: string }
 export type ResourceCategory = '参考资料' | '模板' | '静态资源' | '脚本'
-export interface UploadedResource { id: string; name: string; size: number; lastModified: number; category?: ResourceCategory }
+export interface UploadedResource { sourceId?: number; fileId?: number; sourceVersionId?: number; downloadUrl?: string; savedCategory?: ResourceCategory; id: string; name: string; size: number; lastModified: number; category?: ResourceCategory }
 export interface DebugInput { conversation: string; documentText: string; documents: UploadedResource[] }
 export interface KnowledgeFile extends UploadedResource { sampleContent?: string }
 export interface KnowledgeBase {

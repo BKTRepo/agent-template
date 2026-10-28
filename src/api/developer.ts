@@ -15,7 +15,7 @@ export async function generateSkill(item: Implementation, uploads: SkillUploads)
   // 真实生成后还要向独立调试服务提交原文件；与草稿/示例构建使用同一文件存储。
   await saveBlobs([...uploads.references, ...uploads.scripts].map(row => ({ key: `resource:${row.id}`, blob: row.file })))
   const build = await buildSkill(item, uploads)
-  return { buildId: build.build_id, buildOrigin: 'backend' as const, build, technicalName: build.name, version: build.version, backendVersion: build.version }
+  return { revision: build.current_revision, skillVersionId: build.skill_version_id, buildId: build.build_id, buildOrigin: 'backend' as const, build, technicalName: build.name, version: build.version, backendVersion: build.version }
 }
 export function validateInput(_item: Implementation, input: DebugInput | string) {
   const valid = typeof input === 'string' ? !!input.trim() : !!(input.conversation.trim() || input.documents.length)

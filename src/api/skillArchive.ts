@@ -18,7 +18,12 @@ export async function restoreSkillUploads(item: ImplementationForm, provided: Sk
   const all = [...provided.references, ...provided.scripts]
   for (const row of item.uploadedResources ?? []) {
     const selected = all.find(upload => upload.id === row.id)
-    const blob = selected?.file ?? await readBlob(`resource:${row.id}`)
+    let blob = selected?.file ?? await readBlob(`resource:${row.id}`)
+    if (!blob && row.downloadUrl) {
+      const response = await fetch(row.downloadUrl)
+      if (!response.ok) throw new Error(`资源 ${row.name} 下载失败，请检查平台凭证和原文件。`)
+      blob = await response.blob()
+    }
     if (!blob) throw new Error(`资源 ${row.name} 原文件缺失，请重新选择或移除后再保存。`)
     const file = selected?.file ?? new File([blob], row.name, { lastModified: row.lastModified, type: blob.type })
     next[row.category === '脚本' ? 'scripts' : 'references'].push({ id: row.id, file, usage: row.category ?? '' })
