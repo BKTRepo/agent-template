@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { runRealtimeDebug, restoreRealtimeDebug, resumeRealtimeDebug, downloadRealtimeDocument, mountedDebugFiles, debugPollInterval } from '../src/api/realtimeDebug.ts'
+import { runRealtimeDebug, restoreRealtimeDebug, resumeRealtimeDebug, downloadRealtimeDocument, downloadRealtimeDocuments, mountedDebugFiles, debugPollInterval } from '../src/api/realtimeDebug.ts'
 import { recordDeveloperDebugResult } from '../src/api/developerCenter.ts'
 import { saveBlobs, readBlob } from './fixtures/resourceStorage.mjs'
 import { useAuthStore } from '../src/stores/authStore.ts'
@@ -15,7 +15,9 @@ function fixture(changes={}) {
   const item={id:`async-unit-${++sequence}`,name:'联调技能',creatorId:'1',buildId:'build-1',skillVersionId:1,resourceIds:[],uploadedResources:[]}
   const state={status:'queued',registered:false,current:true,buildId:'build-1',versionId:1,failRegister:0,failPoll:0,failDownload:0,auto:true,...changes}
   const runId='run/'+item.id, calls=[]
-  const task=()=>({run_id:runId,skill_id:item.id,status:state.status,started_at:null,finished_at:null,error_message:state.status==='failed'?'模型429：额度不足':null})
+  const documents=()=>state.status==='completed'?[{filename:'测试.xlsx',format:'xlsx',size_bytes:bytes.length,test_case_count:18,
+    download_url:`/realtime-test-case-gen/runs/${encodeURIComponent(runId)}/document?filename=${encodeURIComponent('测试.xlsx')}`,expires_at:'2026-10-29T10:31:15+08:00'}]:[]
+  const task=()=>({run_id:runId,skill_id:item.id,debugger:'系统管理员',status:state.status,started_at:null,finished_at:null,error_message:state.status==='failed'?'模型429：额度不足':null,documents:documents()})
   const link=()=>({run_id:runId,skill_id:item.id,build_id:state.buildId,skill_version_id:state.versionId,is_current_version:state.current,version:'1.0.0',task:null})
   const row=()=>({id:item.id,name:item.name,class_id:'class',application_ids:['*'],description:'描述',instructions:'指令',
     resource_ids:[],uploaded_resources:[],knowledge_bases:[],version:'1.0.0',current_revision:1,skill_version_id:1,status:'调试中',
@@ -32,7 +34,7 @@ function fixture(changes={}) {
       return success(row())
     }
     if(path.startsWith(`/skills/developer/${item.id}/debug-runs/`)) return state.registered ? success(link()) : json({status:'failure',message:'任务尚未关联'},404)
-    if(path.endsWith('/document')) {
+    if(path.includes('/document')) {
       assert.equal(state.status,'completed','未完成时不得请求结果文档')
       if(state.failDownload-->0) return json({message:'文档暂不可下载'},503)
       return excel()
@@ -61,12 +63,13 @@ test('POST新任务后立即登记冻结版本；queued→running→completed才
     const result=await runRealtimeDebug(f.item,input,'# Skill',[],undefined,{...options,onProgress:r=>progress.push(r.status)})
     assert.equal(f.calls[0].path,'/realtime-test-case-gen/runs')
     const register=f.calls.findIndex(c=>c.method==='POST' && c.path.endsWith('/debug-runs'))
-    const poll=f.calls.findIndex(c=>c.path.startsWith('/realtime-test-case-gen/runs/') && !c.path.endsWith('/document'))
+    const poll=f.calls.findIndex(c=>c.path.startsWith('/realtime-test-case-gen/runs/') && !c.path.includes('/document'))
     assert.ok(register>0 && register<poll)
     assert.deepEqual(JSON.parse(f.calls[register].options.body),{run_id:f.runId,build_id:'build-1',skill_version_id:1,conversation_input:input.conversation,request_document_count:0})
     assert.deepEqual(progress,['queued','running','passed'])
     assert.equal(result.status,'passed');assert.equal(result.versionRegistered,true);assert.equal(result.isCurrentVersion,true)
     assert.equal(result.artifact.name,'测试.xlsx')
+    assert.equal(result.artifacts.length,1);assert.equal(result.artifact.count,18)
     assert.deepEqual(new Uint8Array(await (await readBlob(result.artifact.key)).arrayBuffer()),bytes)
     assert.equal(debugPollInterval,5000)
     assert.ok(!f.calls.some(c=>c.path.endsWith('/generate')))
@@ -91,7 +94,7 @@ test('真实failed任务显示error_message，不转成通过且不请求下载'
   await use(f,async()=>{
     const result=await runRealtimeDebug(f.item,input,'# Skill',[],undefined,options)
     assert.equal(result.status,'failed');assert.match(result.output,/429/)
-    assert.ok(!f.calls.some(c=>c.path.endsWith('/document')))
+    assert.ok(!f.calls.some(c=>c.path.includes('/document')))
   })
 })
 
@@ -199,7 +202,22 @@ test('下载失败保留任务编号，重试下载不创建或重新登记任�
     assert.equal(result.runId,f.runId);assert.equal(result.artifact,undefined);assert.match(result.documentError,/暂不可下载/)
     await downloadRealtimeDocument(result.runId,f.item.name)
     assert.equal(f.calls.filter(c=>c.path==='/realtime-test-case-gen/runs').length,1)
-    assert.equal(f.calls.filter(c=>c.path.endsWith('/document')).length,2)
+    assert.equal(f.calls.filter(c=>c.path.includes('/document')).length,2)
+  })
+})
+
+test('完成响应包含多个documents时，按每项download_url下载并保存',async()=>{
+  const f=fixture({status:'completed'})
+  const docs=[
+    {filename:'登录功能.xlsx',download_url:`/realtime-test-case-gen/runs/${encodeURIComponent(f.runId)}/document?filename=${encodeURIComponent('登录功能.xlsx')}`,test_case_count:8},
+    {filename:'权限功能.xlsx',download_url:`/realtime-test-case-gen/runs/${encodeURIComponent(f.runId)}/document?filename=${encodeURIComponent('权限功能.xlsx')}`,test_case_count:10},
+  ]
+  await use(f,async()=>{
+    const artifacts=await downloadRealtimeDocuments(f.runId,f.item.name,docs)
+    assert.deepEqual(artifacts.map(row=>row.name),['登录功能.xlsx','权限功能.xlsx'])
+    assert.deepEqual(artifacts.map(row=>row.count),[8,10])
+    assert.equal(f.calls.filter(c=>c.path.includes('/document?filename=')).length,2)
+    assert.notEqual(artifacts[0].key,artifacts[1].key)
   })
 })
 

@@ -4,7 +4,7 @@ import Dialog from './Dialog'
 import ResourceUpload from './ResourceUpload'
 import DebugResult from './DebugResult'
 import { validateInput } from '@/api/developer'
-import { debugDocumentLimit, downloadRealtimeDocument, realtimeDebugEnabled, restoreRealtimeDebug, resumeRealtimeDebug, runRealtimeDebug } from '@/api/realtimeDebug'
+import { debugDocumentLimit, downloadRealtimeDocuments, realtimeDebugEnabled, restoreRealtimeDebug, resumeRealtimeDebug, runRealtimeDebug } from '@/api/realtimeDebug'
 import type { DebugMonitorOptions } from '@/api/realtimeDebug'
 import { debugDocumentLimits, documentExtensions, validateResourceFiles } from '@/lib/skillForm'
 import { renderSkillMarkdown } from '@/api/skillArchive'
@@ -67,10 +67,12 @@ export default function DebugDialog({ item, onClose, onEdit, onPublish, onSaveDe
     setError(result.errors.join('；'))
   }
   async function download(debug = result) {
-    if (!debug?.artifact) return
-    const blob = await readBlob(debug.artifact.key)
-    if (!blob) throw new Error('调试结果文件已丢失，请重新运行调试。')
-    downloadBlob(blob, debug.artifact.name)
+    const artifacts = debug?.artifacts?.length ? debug.artifacts : debug?.artifact ? [debug.artifact] : []
+    for (const artifact of artifacts) {
+      const blob = await readBlob(artifact.key)
+      if (!blob) throw new Error(`调试结果文件“${artifact.name}”已丢失，请重试下载。`)
+      downloadBlob(blob, artifact.name)
+    }
   }
   async function executeDebug(work: (signal: AbortSignal, options: DebugMonitorOptions) => Promise<Implementation['debug']>, autoDownload = false) {
     requestRef.current?.abort()
@@ -105,9 +107,9 @@ export default function DebugDialog({ item, onClose, onEdit, onPublish, onSaveDe
     requestRef.current = controller
     const timer = window.setTimeout(() => controller.abort(), 60_000)
     try {
-      const artifact = await downloadRealtimeDocument(result.runId, item.name, controller.signal)
+      const artifacts = await downloadRealtimeDocuments(result.runId, item.name, result.documents ?? [], controller.signal)
       if (controller.signal.aborted) return
-      const debug = { ...result, artifact, documentError: undefined }
+      const debug = { ...result, artifacts, artifact: artifacts[0], documentError: undefined }
       setResult(debug); await onResult(debug)
       await download(debug)
     } catch (error) { setError(controller.signal.aborted ? '下载请求超时，请重试下载。' : (error as Error).message) }
@@ -127,7 +129,7 @@ export default function DebugDialog({ item, onClose, onEdit, onPublish, onSaveDe
   const locked = !!busy || running
   return <><Dialog wide closeWhileBusy title={<>在线调试 · {item.name}<span className="status-tag orange">沙箱</span></>} busy={!!busy} onClose={onClose} footer={<>
     <button className="button" onClick={onClose}>关闭</button>
-    {onPublish && <button className="button" disabled={locked || !definition || !['调试中', '已生成', '已下线'].includes(item.status) || result?.status !== 'passed' || result.buildId !== item.buildId || !result.versionRegistered || !result.isCurrentVersion || !!result.registrationError || !!result.monitorError || (realtimeDebugEnabled && (result.origin !== 'backend' || !result.artifact))} onClick={publish}>{busy === 'publish' ? '上线中…' : '上线'}</button>}
+    {onPublish && <button className="button" disabled={locked || !definition || !['调试中', '调试成功', '已生成'].includes(item.status) || result?.status !== 'passed' || result.buildId !== item.buildId || !result.versionRegistered || !result.isCurrentVersion || !!result.registrationError || !!result.monitorError || (realtimeDebugEnabled && (result.origin !== 'backend' || !result.artifact))} onClick={publish}>{busy === 'publish' ? '上线中…' : '上线'}</button>}
     {onEdit && <button className="button" disabled={locked} onClick={onEdit}>修改</button>}
     <button className="button primary" disabled={locked || !definition} onClick={run}>{running || busy === 'run' || busy === 'restore' ? <><LoaderCircle size={16} className="spin" />{busy === 'restore' ? '查询中…' : result?.status === 'queued' ? '排队中…' : '运行中…'}</> : '运行调试'}</button>
   </>}>

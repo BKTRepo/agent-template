@@ -1,14 +1,18 @@
 import { create } from 'zustand'
 import { setApplicationCatalog } from '@/lib/access'
 import type { Implementation } from '@/types/developer'
-import { getDeveloperMetadata, listDeveloperSkills, type DeveloperCatalogOption } from '@/api/developerCenter'
+import { getDeveloperMetadata, listDeveloperSkillsPage, type DeveloperCatalogOption } from '@/api/developerCenter'
 
 interface DeveloperState {
   implementations: Implementation[]
   skillClasses: DeveloperCatalogOption[]
   applications: DeveloperCatalogOption[]
   loading: boolean
-  load: () => Promise<void>
+  page: number
+  pageSize: number
+  total: number
+  pages: number
+  load: (page?: number) => Promise<void>
   replace: (item: Implementation) => void
   patch: (id: string, changes: Partial<Implementation>) => void
   remove: (id: string) => void
@@ -20,12 +24,19 @@ export const useDeveloperStore = create<DeveloperState>((set) => ({
   skillClasses: [],
   applications: [],
   loading: false,
-  load: async () => {
+  page: 1,
+  pageSize: 10,
+  total: 0,
+  pages: 1,
+  load: async (requestedPage = 1) => {
     set({ loading: true })
     try {
-      const [implementations, metadata] = await Promise.all([listDeveloperSkills(), getDeveloperMetadata()])
+      const state = useDeveloperStore.getState()
+      const page = Math.max(1, Math.min(requestedPage, Math.max(1, state.pages)))
+      const [result, metadata] = await Promise.all([listDeveloperSkillsPage(page, state.pageSize), getDeveloperMetadata()])
       setApplicationCatalog(metadata.applications)
-      set({ implementations, skillClasses: metadata.skill_classes, applications: metadata.applications })
+      set({ implementations: result.items, skillClasses: metadata.skill_classes, applications: metadata.applications,
+        page: result.page, pageSize: result.pageSize, total: result.total, pages: Math.max(1, result.pages) })
     }
     finally { set({ loading: false }) }
   },

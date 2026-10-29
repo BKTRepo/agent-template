@@ -3,7 +3,7 @@ import { useKnowledgeStore } from '@/stores/knowledgeStore'
 import { readBlob, saveBlobs } from '@/lib/resourceStorage'
 import { debugDocumentLimits, documentExtensions, validateResourceFiles } from '@/lib/skillForm'
 import { DeveloperCenterError, getDeveloperDebugLink, recordDeveloperDebugResult } from './developerCenter'
-import type { DebugInput, Implementation, RealtimeTask } from '@/types/developer'
+import type { DebugArtifact, DebugInput, Implementation, RealtimeDocument, RealtimeTask } from '@/types/developer'
 
 const base = '/realtime-test-case-gen'
 export const realtimeDebugEnabled = import.meta.env?.VITE_REALTIME_DEBUG_ENABLED === 'true'
@@ -109,8 +109,20 @@ export async function mountedDebugFiles(item: Implementation): Promise<File[]> {
   return files
 }
 
-export async function downloadRealtimeDocument(runId: string, skillName: string, signal?: AbortSignal) {
-  const response = await fetch(`${base}/runs/${encodeURIComponent(runId)}/document`, { headers: authHeaders(), signal, cache: 'no-store' })
+function resultDocumentUrl(runId: string, document: RealtimeDocument) {
+  const expectedPath = `${base}/runs/${encodeURIComponent(runId)}/document`
+  const separator = document.download_url.indexOf('?')
+  const path = separator < 0 ? document.download_url : document.download_url.slice(0, separator)
+  const query = separator < 0 ? '' : document.download_url.slice(separator + 1)
+  if (path !== expectedPath) throw new Error(`结果文档“${document.filename}”的下载地址不属于当前任务。`)
+  const filename = new URLSearchParams(query).get('filename')
+  if (!filename || filename !== document.filename) throw new Error(`结果文档“${document.filename}”的下载地址缺少匹配的 filename。`)
+  return document.download_url
+}
+
+export async function downloadRealtimeDocument(runId: string, skillName: string, signal?: AbortSignal, document?: RealtimeDocument) {
+  const path = document ? resultDocumentUrl(runId, document) : `${base}/runs/${encodeURIComponent(runId)}/document`
+  const response = await fetch(path, { headers: authHeaders(), signal, cache: 'no-store' })
   if (!response.ok) throw new Error(await errorMessage(response, '调试结果文档下载失败，请重试下载。'))
   const type = response.headers.get('content-type') ?? ''
   if (type.includes('json')) throw new Error(await errorMessage(response, '接口尚未返回结果文档，请稍后重试下载。'))
@@ -119,10 +131,29 @@ export async function downloadRealtimeDocument(runId: string, skillName: string,
   if (!blob.size) throw new Error('调试结果文档为空，请重新运行调试。')
   const signature = new Uint8Array(await blob.slice(0, 4).arrayBuffer())
   if (signature[0] !== 0x50 || signature[1] !== 0x4b) throw new Error('下载接口没有返回有效的 Excel 文件，请联系后端检查生成结果。')
-  const name = documentName(response.headers.get('content-disposition'), `${skillName}-调试结果.xlsx`)
-  const artifact = { key: `debug:realtime:${runId}`, name, format: 'Excel' as const }
+  const name = document ? documentName(null, document.filename)
+    : documentName(response.headers.get('content-disposition'), `${skillName}-调试结果.xlsx`)
+  const suffix = document ? `:${hashDocumentKey(document.filename)}` : ''
+  const artifact: DebugArtifact = { key: `debug:realtime:${runId}${suffix}`, name, format: 'Excel',
+    count: document?.test_case_count, size: document?.size_bytes }
   await saveBlobs([{ key: artifact.key, blob }])
   return artifact
+}
+
+function hashDocumentKey(value: string) {
+  let hash = 0
+  for (const character of value) hash = Math.imul(31, hash) + character.charCodeAt(0) | 0
+  return Math.abs(hash).toString(36)
+}
+
+export async function downloadRealtimeDocuments(runId: string, skillName: string, documents: RealtimeDocument[], signal?: AbortSignal) {
+  if (!documents.length) throw new Error('调试已完成，但接口没有返回 documents。')
+  const artifacts: DebugArtifact[] = []
+  for (const document of documents) {
+    aborted(signal)
+    artifacts.push(await downloadRealtimeDocument(runId, skillName, signal, document))
+  }
+  return artifacts
 }
 
 async function taskResponse(response: Response, skillId: string): Promise<RealtimeTask> {
@@ -133,9 +164,19 @@ async function taskResponse(response: Response, skillId: string): Promise<Realti
   const value = payload?.data ?? payload
   if (typeof value?.run_id !== 'string' || !value.run_id.trim()) throw new Error('调试接口未返回有效的 run_id。')
   if (value.skill_id !== skillId) throw new Error('调试接口返回的任务不属于当前技能，已停止处理。')
-  if (!['queued', 'running', 'completed', 'failed'].includes(value.status)) throw new Error('调试接口返回了无法识别的任务状态。')
-  return { run_id: value.run_id, skill_id: value.skill_id, status: value.status,
-    started_at: value.started_at ?? null, finished_at: value.finished_at ?? null, error_message: value.error_message ?? null }
+  const status = String(value.status || '').toLowerCase()
+  if (!['queued', 'running', 'completed', 'failed'].includes(status)) throw new Error('调试接口返回了无法识别的任务状态。')
+  const documents: RealtimeDocument[] = []
+  if (value.documents !== undefined && !Array.isArray(value.documents)) throw new Error('调试接口返回的 documents 不是数组。')
+  for (const row of value.documents ?? []) {
+    if (!row || typeof row.filename !== 'string' || !row.filename.trim() || typeof row.download_url !== 'string' || !row.download_url.trim()) {
+      throw new Error('调试接口返回了无效的结果文档。')
+    }
+    documents.push({ filename: row.filename, format: row.format, size_bytes: row.size_bytes,
+      test_case_count: row.test_case_count, download_url: row.download_url, expires_at: row.expires_at ?? null })
+  }
+  return { run_id: value.run_id, skill_id: value.skill_id, debugger: value.debugger, status: status as RealtimeTask['status'],
+    started_at: value.started_at ?? null, finished_at: value.finished_at ?? null, error_message: value.error_message ?? null, documents }
 }
 
 export async function getRealtimeRun(skillId: string, runId: string, signal?: AbortSignal) {
@@ -152,6 +193,7 @@ export async function getLatestRealtimeRun(skillId: string, signal?: AbortSignal
 
 function withTask(debug: DebugRun, task: RealtimeTask): DebugRun {
   return { ...debug, id: task.run_id, runId: task.run_id, status: task.status === 'completed' ? 'passed' : task.status,
+    documents: task.documents,
     output: task.status === 'failed' ? task.error_message || '沙箱执行失败，请检查输入后重试。'
       : task.status === 'queued' ? '任务已创建，等待执行。' : task.status === 'running' ? '沙箱正在运行。' : '调试已完成，可下载结果文档。' }
 }
@@ -185,8 +227,11 @@ async function monitor(item: Implementation, first: RealtimeTask, initial: Debug
         try { debug = await verifyLink(item, debug) }
         catch (error) { debug = { ...debug, monitorError: `暂时无法核对任务版本：${(error as Error).message}` } }
       }
-      if (task.status === 'completed' && !debug.artifact) {
-        try { debug = { ...debug, artifact: await downloadRealtimeDocument(task.run_id, item.name, signal), documentError: undefined } }
+      if (task.status === 'completed' && !debug.artifacts?.length) {
+        try {
+          const artifacts = await downloadRealtimeDocuments(task.run_id, item.name, task.documents, signal)
+          debug = { ...debug, artifacts, artifact: artifacts[0], documentError: undefined }
+        }
         catch (error) { aborted(signal); debug = { ...debug, documentError: (error as Error).message } }
       }
       aborted(signal)

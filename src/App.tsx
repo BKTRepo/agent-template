@@ -48,7 +48,7 @@ export default function App() {
         {group.items.map(item => <button key={item.id} className={`nav-link ${page === item.id ? 'active' : ''}`} aria-current={page === item.id ? 'page' : undefined} onClick={() => { setPage(item.id); setMobileMenu(false) }}><item.icon size={17} strokeWidth={1.6} /><span>{item.label}</span>{item.id === 'developer' && pending > 0 && <span className="nav-badge">{pending}</span>}</button>)}
       </div>)}</nav>
     </aside>
-    <main className="platform-main"><header className="platform-topbar"><div className="topbar-title"><button className="mobile-menu icon-button" aria-label="打开导航" onClick={() => setMobileMenu(true)}><Menu size={20} /></button>{label}</div><div className="topbar-actions"><PlatformAccount /></div></header>
+    <main className="platform-main"><header className="platform-topbar"><div className="topbar-title"><button className="mobile-menu icon-button" aria-label="打开导航" onClick={() => setMobileMenu(true)}><Menu size={20} /></button><span>{label}</span>{page === 'developer' && <span className="topbar-subtitle">技能新建、调试、上线全链路管理</span>}</div><div className="topbar-actions"><PlatformAccount /></div></header>
       <div className="platform-content" key={actor.id || "platform"}>{page === 'developer' ? <DeveloperPage /> : page === 'knowledge' ? <KnowledgePage /> : page === 'skills' ? <SkillsPage /> : <section className="module-placeholder"><h1>{label}</h1><div className="surface placeholder-body"><Layers3 size={36} /><h2>该模块暂未开放</h2><p>当前可使用开发者中心创建和调试 Skill。</p><button className="button primary" onClick={() => setPage('developer')}>进入开发者中心</button></div></section>}</div>
     </main>
     <KnowledgeProcessingWorker /><FloatingAssistant key={actor.id || "platform"} />

@@ -48,7 +48,8 @@ export default defineConfig(({ mode }) => {
     proxyTimeout: 660_000,
     configure(proxy) {
       proxy.on('proxyReq', request => {
-        if (env.REALTIME_DEBUG_TOKEN) request.setHeader('token', env.REALTIME_DEBUG_TOKEN)
+        const token = env.REALTIME_DEBUG_USE_SKILL_TOKEN === 'true' ? env.SKILL_API_TOKEN : env.REALTIME_DEBUG_TOKEN
+        if (token) request.setHeader('token', token)
       })
     },
   }

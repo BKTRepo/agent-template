@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowRight, Check, LoaderCircle, Plus } from 'lucide-react'
+import { ArrowRight, Check, ChevronLeft, ChevronRight, LoaderCircle, Plus, RefreshCw } from 'lucide-react'
 import Dialog from '@/components/developer/Dialog'
 import DebugDialog from '@/components/developer/DebugDialog'
 import SkillFields from '@/components/developer/SkillFields'
@@ -19,11 +19,11 @@ import type { Implementation, ImplementationForm, SkillUploads } from '@/types/d
 const steps = ['新建技能', '自测调试', '上线']
 const blankForm = (team: string): ImplementationForm => ({ classId: '', name: '', technicalName: `skill-${crypto.randomUUID()}`, system: '核心系统', team, version: '1.0.0', modelTier: 'standard', description: '', instructions: '', compatibility: '', resourceIds: [], applicationIds: [], resourceUsage: '', knowledgeBases: [], uploadedResources: [] })
 const dateText = (value: string) => new Date(value).toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
-const statusClass = (status: string) => ['已上线', '调试通过'].includes(status) ? 'green' : ['调试失败', '执行超时'].includes(status) ? 'red' : ['草稿', '已下线'].includes(status) ? 'neutral' : 'orange'
+const statusClass = (status: string) => ['已上线', '调试成功'].includes(status) ? 'green' : ['调试失败', '执行超时'].includes(status) ? 'red' : ['草稿', '已下线'].includes(status) ? 'neutral' : 'orange'
 function Status({ status }: { status: string }) { return <span className={`status-tag ${statusClass(status)}`}>{status}</span> }
 
 export default function DeveloperPage() {
-  const { implementations, skillClasses, applications, load, replace, patch, remove } = useDeveloperStore()
+  const { implementations, skillClasses, applications, load, replace, patch, remove, loading, page, pages, total } = useDeveloperStore()
   const actor = useAccessStore(state => state.actor)
   const team = ''
   const [preview, setPreview] = useState<Partial<Implementation>>({})
@@ -38,6 +38,8 @@ export default function DeveloperPage() {
   const nameCheckSequence = useRef(0)
   const formRoot = useRef<HTMLDivElement>(null)
   const [offlinePrompt, setOfflinePrompt] = useState(false)
+  const [offlineReasonCode, setOfflineReasonCode] = useState('')
+  const [offlineReasonText, setOfflineReasonText] = useState('')
   const [draftDeletePrompt, setDraftDeletePrompt] = useState(false)
   const record = implementations.find(item => item.id === selectedId)
   const selected = record ? { ...record, ...preview } : undefined
@@ -45,7 +47,6 @@ export default function DeveloperPage() {
   const readonly = false
   const online = selected?.status === '已上线'
   const mine = implementations
-  const pending = mine.filter(item => ['草稿', '已生成', '调试中'].includes(item.status)).length
   const activeUploads = [...uploads.references, ...uploads.scripts]
   const validationErrors = Object.entries(errors).filter(([, value]) => !!value)
 
@@ -151,7 +152,7 @@ export default function DeveloperPage() {
     if (!selected || busy) return
     setBusy('offline'); setMessage('')
     try {
-      const saved = await offlineDeveloperSkill(selected.id)
+      const saved = await offlineDeveloperSkill(selected.id, offlineReasonCode, offlineReasonCode === 'OTHER' ? offlineReasonText : undefined)
       replace(saved); setPanel(null); setOfflinePrompt(false)
       setNotice('技能已下线。')
     } catch (error) { setMessage((error as Error).message) } finally { setBusy(null) }
@@ -209,7 +210,11 @@ export default function DeveloperPage() {
     // 弹窗切换、关闭或任务执行期间保存新版时，旧任务回调不能覆盖新版本/其他技能。
     if (debug && (debug.isCurrentVersion === false || debug.buildId !== current.buildId
       || (debug.skillVersionId && debug.skillVersionId !== current.skillVersionId))) return
-    patch(id, { debug, ...(debug?.versionRegistered && current.status === '草稿' ? { status: '调试中' as const } : {}) })
+    const terminalStatus = debug?.status === 'passed' ? '调试成功'
+      : debug?.status === 'failed' || debug?.status === 'timeout' ? '调试失败'
+        : debug?.status === 'queued' || debug?.status === 'running' ? '调试中' : undefined
+    const status = terminalStatus && !['已上线', '已下线'].includes(current.status) ? terminalStatus : undefined
+    patch(id, { debug, ...(status ? { status: status as Implementation['status'] } : {}) })
   }
   async function saveDefinition(markdown: string) {
     if (!selected) return
@@ -223,17 +228,29 @@ export default function DeveloperPage() {
       skillVersionId: definition.build.skill_version_id, backendVersion: definition.version, version: definition.version })
     setPreview({})
   }
+  async function refreshList() {
+    if (loading || busy) return
+    setMessage('')
+    try { await load(page); setNotice('技能列表已刷新。') }
+    catch (error) { setMessage((error as Error).message) }
+  }
+  function goToPage(nextPage: number) {
+    if (loading || nextPage < 1 || nextPage > pages || nextPage === page) return
+    setMessage('')
+    void load(nextPage).catch(error => setMessage((error as Error).message))
+  }
+  const pageNumbers = Array.from({ length: pages }, (_, index) => index + 1)
   const primaryBusy = <><LoaderCircle className="spin" size={16} />处理中…</>
 
   return <>
-    <div className="page-heading"><div><h1>开发者中心</h1></div><button className="button primary" onClick={() => openForm()}><Plus size={17} />新建技能类</button></div>
-    <div className="developer-flow" aria-label="技能开发流程">{steps.map((step, index) => <div className="flow-step" key={step}><span className={`flow-node ${index === 0 ? 'done' : index === 1 ? 'current' : ''}`}><span>{['①', '②', '③'][index]}</span> {step}</span>{index < steps.length - 1 && <ArrowRight size={20} aria-hidden="true" />}</div>)}</div>
+    <div className="developer-flow surface" aria-label="技能开发流程">{steps.map((step, index) => <div className="flow-step" key={step}><span className={`flow-node ${index === 0 ? 'done' : index === 1 ? 'current' : ''}`}><span>{['①', '②', '③'][index]}</span> {step}</span>{index < steps.length - 1 && <ArrowRight size={20} aria-hidden="true" />}</div>)}</div>
     <section className="surface implementation-section" aria-labelledby="implementation-title">
-      <div className="section-heading"><h2 id="implementation-title">我创建的技能</h2><span className="status-tag orange">{pending} 个待处理</span></div>
+      <div className="section-heading"><h2 id="implementation-title">我创建的技能</h2><div className="section-actions"><button className="button" disabled={loading || !!busy} onClick={() => void refreshList()}><RefreshCw size={14} className={loading ? 'spin' : undefined} />刷新</button><button className="button primary" disabled={loading || !!busy} onClick={() => openForm()}><Plus size={16} />新建技能</button></div></div>
       <div className="implementation-table-wrap"><table className="implementation-table"><thead><tr>{['实现名称', '技能类', '所属应用', '版本', '状态', '更新时间', '操作'].map(label => <th key={label} scope="col">{label}</th>)}</tr></thead><tbody>
-        {mine.map(item => <tr key={item.id}><td className="implementation-name">{item.name}{item.pendingChanges && <span className="status-tag orange">有编辑稿</span>}</td><td>{skillClasses.find(row => row.id === item.classId)?.name}</td><td>{applicationText(item)}</td><td>{item.version}</td><td><Status status={item.status} /></td><td>{dateText(item.updatedAt)}</td><td><button className="button small" disabled={!!busy} onClick={() => { if (item.status === '调试中') openDebug(item); else openForm(item) }}>{item.status === '调试中' ? '调试' : '详情'}</button></td></tr>)}
-        {!mine.length && <tr><td colSpan={7} className="empty-table">暂无实现类，点击“新建技能类”开始创建。</td></tr>}
+        {mine.map(item => <tr key={item.id}><td className="implementation-name">{item.name}{item.pendingChanges && <span className="status-tag orange">有编辑稿</span>}</td><td>{skillClasses.find(row => row.id === item.classId)?.name}</td><td>{applicationText(item)}</td><td>{item.version}</td><td><Status status={item.status} /></td><td>{dateText(item.updatedAt)}</td><td><button className="button small" disabled={!!busy || loading} onClick={() => { if (['调试中', '调试成功', '调试失败'].includes(item.status)) openDebug(item); else openForm(item) }}>{['调试中', '调试成功', '调试失败'].includes(item.status) ? '调试' : '详情'}</button></td></tr>)}
+        {!mine.length && <tr><td colSpan={7} className="empty-table">暂无实现类，点击“新建技能”开始创建。</td></tr>}
       </tbody></table></div>
+      <div className="developer-pagination" aria-label="技能列表分页"><span className="pagination-total">共 {total} 条</span><button className="button small" disabled={loading || page <= 1} onClick={() => goToPage(page - 1)}><ChevronLeft size={14} />上一页</button><div className="pagination-pages">{pageNumbers.map(number => <button key={number} className={`button small ${number === page ? 'primary' : ''}`} aria-current={number === page ? 'page' : undefined} disabled={loading} onClick={() => goToPage(number)}>{number}</button>)}</div><button className="button small" disabled={loading || page >= pages} onClick={() => goToPage(page + 1)}>下一页<ChevronRight size={14} /></button></div>
     </section>
     <p className="demo-note">运行调试完成后可下载 Excel 测试结果。</p>
     {!panel && message && <p className="error-banner" role="alert">{message}</p>}
@@ -241,15 +258,14 @@ export default function DeveloperPage() {
     {panel === 'form' && <Dialog key="form" wide title={selected ? <>{readonly ? '实现类详情' : '编辑实现类'} · {selected.name}</> : '新建技能类'} onClose={closePanel} busy={!!busy} footer={<>
       {!!validationErrors.length && <div className="form-validation-summary" role="alert"><b>还有 {validationErrors.length} 项需要补充或修正：</b>{validationErrors.map(([key, value]) => <button key={key} type="button" onClick={() => focusField(key)}>{value}</button>)}</div>}
       {message && <p className="form-submit-error" role="alert">{message}</p>}
-      {draftDeletePrompt ? <><span className="delete-confirm" role="alert">确认删除草稿“{selected?.name}”？删除后不可恢复。</span><button className="button" disabled={!!busy} onClick={() => setDraftDeletePrompt(false)}>取消删除</button><button className="button danger" disabled={!!busy} onClick={removeDraft}>{busy === 'delete' ? primaryBusy : '确认删除'}</button></> : offlinePrompt ? <><span className="delete-confirm" role="alert">确认下线“{selected?.name}”？未保存的编辑内容不会提交。</span><button className="button" disabled={!!busy} onClick={() => setOfflinePrompt(false)}>取消下线</button><button className="button danger" disabled={!!busy} onClick={offline}>{busy === 'offline' ? primaryBusy : '确认下线'}</button></> : <>
+        {draftDeletePrompt ? <><span className="delete-confirm" role="alert">确认删除草稿“{selected?.name}”？删除后不可恢复。</span><button className="button" disabled={!!busy} onClick={() => setDraftDeletePrompt(false)}>取消删除</button><button className="button danger" disabled={!!busy} onClick={removeDraft}>{busy === 'delete' ? primaryBusy : '确认删除'}</button></> : <>
         <button className="button" disabled={!!busy} onClick={closePanel}>取消</button>
         {readonly ? <button className="button primary" disabled={!!busy || !selected?.buildId} onClick={() => selected && openDebug(selected)}>在线调试</button> : online ? <>
-          <button className="button" disabled={!!busy} onClick={savePublished}>{busy === 'save' ? primaryBusy : '保存修改'}</button>
-          <button className="button danger" disabled={!!busy} onClick={() => { setMessage(''); setOfflinePrompt(true) }}>下线</button>
-          <button className="button primary" disabled={!!busy} onClick={() => selected && openDebug(selected)}>在线调试</button>
+          <button className="button primary" disabled={!!busy} onClick={savePublished}>{busy === 'save' ? primaryBusy : '保存修改'}</button>
+          <button className="button danger" disabled={!!busy} onClick={() => { setMessage(''); setOfflineReasonCode(''); setOfflineReasonText(''); setOfflinePrompt(true) }}>下线</button>
         </> : <>
           {selected?.status === '草稿' && <button className="button danger" disabled={!!busy} onClick={() => { setMessage(''); setDraftDeletePrompt(true) }}>删除草稿</button>}
-          <button className="button" disabled={!!busy} onClick={saveDraft}>{selected ? '保存修改' : '保存草稿'}</button><button className="button primary" disabled={!!busy} onClick={build}>{busy === 'build' ? primaryBusy : selected?.status === '已下线' ? '重新上线' : selected ? '在线调试' : '调试'}</button>
+          <button className={selected ? 'button primary' : 'button'} disabled={!!busy} onClick={saveDraft}>{selected ? '保存修改' : '保存草稿'}</button>{selected?.status !== '已下线' && <button className="button primary" disabled={!!busy} onClick={build}>{busy === 'build' ? primaryBusy : selected ? '在线调试' : '调试'}</button>}
         </>}
       </>}
     </>}>
@@ -259,7 +275,13 @@ export default function DeveloperPage() {
       <div ref={formRoot}><SkillFields form={form} update={update} skillClasses={skillClasses} applications={applications} errors={errors} disabled={!!busy || readonly} editing={!!selected} activeIds={activeUploads.map(row => row.id)} onAdd={addFiles} onRemove={removeFile} /></div>
     </Dialog>}
 
-    {panel === 'debug' && selected && <DebugDialog key={selected.id} item={selected} onClose={closePanel} onEdit={!readonly && selected.status !== '已上线' ? () => openForm(selected) : undefined} onPublish={!readonly && selected.status !== '已上线' ? publish : undefined} onSaveDefinition={!readonly ? saveDefinition : undefined} onResult={debug => saveDebugResult(selected.id, debug)} />}
+    {offlinePrompt && selected && <Dialog title={<>确认下线 · {selected.name}</>} onClose={() => setOfflinePrompt(false)} busy={!!busy} footer={<><button className="button" disabled={!!busy} onClick={() => setOfflinePrompt(false)}>取消下线</button><button className="button danger" disabled={!!busy || !offlineReasonCode || (offlineReasonCode === 'OTHER' && !offlineReasonText.trim())} onClick={offline}>{busy === 'offline' ? primaryBusy : '确认下线'}</button></>}>
+      <p className="delete-confirm" role="alert">下线技能立即从技能中心移除，对话台已加载入口变为不可用；影响历史调用与产出记录保留，重新验证通过后可再次上线。</p>
+      <label className="form-field"><span>下线原因 <em>*</em></span><select aria-label="下线原因" value={offlineReasonCode} onChange={event => setOfflineReasonCode(event.target.value)}><option value="">请选择下线原因</option><option value="ABILITY_DEFECT">能力缺陷</option><option value="COMPLIANCE_RISK">合规风险</option><option value="STOP_MAINTENANCE">停止维护</option><option value="OTHER">其他</option></select></label>
+      {offlineReasonCode === 'OTHER' && <input value={offlineReasonText} onChange={event => setOfflineReasonText(event.target.value)} placeholder="请输入下线原因" />}
+    </Dialog>}
+
+    {panel === 'debug' && selected && <DebugDialog key={selected.id} item={selected} onClose={closePanel} onEdit={!readonly && !['已上线', '已下线'].includes(selected.status) ? () => openForm(selected) : undefined} onPublish={!readonly && !['已上线', '已下线'].includes(selected.status) ? publish : undefined} onSaveDefinition={!readonly ? saveDefinition : undefined} onResult={debug => saveDebugResult(selected.id, debug)} />}
     {notice && <div className="platform-toast" role="status"><Check size={18} /><span>{notice}</span></div>}
   </>
 }

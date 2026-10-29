@@ -1,13 +1,24 @@
-export type ImplementationStatus = '草稿' | '已生成' | '调试中' | '已上线' | '已下线'
+export type ImplementationStatus = '草稿' | '已生成' | '调试中' | '调试成功' | '调试失败' | '已上线' | '已下线'
 export type DebugStatus = 'idle' | 'queued' | 'running' | 'passed' | 'failed' | 'timeout'
+export interface RealtimeDocument {
+  filename: string
+  format?: string
+  size_bytes?: number
+  test_case_count?: number
+  download_url: string
+  expires_at?: string | null
+}
 export interface RealtimeTask {
   run_id: string
   skill_id: string
+  debugger?: string
   status: 'queued' | 'running' | 'completed' | 'failed'
   started_at: string | null
   finished_at: string | null
   error_message: string | null
+  documents: RealtimeDocument[]
 }
+export interface DebugArtifact { key: string; name: string; count?: number; size?: number; format?: 'Markdown' | 'Excel' }
 export interface ImplementationForm {
   revision?: number
   skillVersionId?: number
@@ -42,7 +53,7 @@ export interface Implementation extends ImplementationForm {
   backendVersion?: string
   buildOrigin?: 'backend' | 'mock'
   build?: SkillBuild
-  debug?: { id: string; buildId: string; skillVersionId?: number; input: string | DebugInput; conversationInput?: string; requestDocumentCount?: number; status: DebugStatus; output: string; origin?: 'mock' | 'backend'; runId?: string; versionRegistered?: boolean; isCurrentVersion?: boolean; registrationError?: string; monitorError?: string; documentError?: string; artifact?: { key: string; name: string; count?: number; format?: 'Markdown' | 'Excel' } }
+  debug?: { id: string; buildId: string; skillVersionId?: number; input: string | DebugInput; conversationInput?: string; requestDocumentCount?: number; status: DebugStatus; output: string; origin?: 'mock' | 'backend'; runId?: string; versionRegistered?: boolean; isCurrentVersion?: boolean; registrationError?: string; monitorError?: string; documentError?: string; documents?: RealtimeDocument[]; artifact?: DebugArtifact; artifacts?: DebugArtifact[] }
   publication?: { origin: 'mock' | 'backend'; buildId: string; publishedAt: string; publisher: string }
 }
 export interface PublishReply {
