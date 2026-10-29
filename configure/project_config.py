@@ -51,6 +51,7 @@ class ProjectConfig(BaseSettings):
     SERVER_HOST: str = "0.0.0.0"
     SERVER_SYSTEM: str = platform.system()
     SERVER_PORT: int = 8519
+    WRQ_SANDBOX_MOCK: bool = False
     SERVER_DEBUG: bool = SERVER_SYSTEM != "Linux"  # Windows | Linux | Darwin
     SERVER_DELAY: int = 5
     SERVER_RELOAD_EXCLUDES: List[str] = [
@@ -339,6 +340,9 @@ class ProjectConfig(BaseSettings):
             "echo": False,
             "autocommit": True,
         }
+        # WRQ云库wait_timeout=300，避免复用已断开的TLS空闲连接。
+        from applications.wrq.database import mysql_connection_options
+        credentials.update(mysql_connection_options())
         if ssl_options is not None:
             credentials["ssl"] = ssl_options
         self.DATABASE_CONNECTIONS = {
@@ -384,16 +388,11 @@ class ProjectConfig(BaseSettings):
             db=db,
         )
 
-    # Aerich：是否在应用启动时执行 init_db / migrate / upgrade 指令
-    # - 生产(Linux 且 SERVER_DEBUG=False)：始终执行迁移（不提供关闭选项）
-    # - 开发(SERVER_DEBUG=True)：默认不迁移；需要时由开发者手动把 DATABASE_AUTO_MIGRATION 改为 True
+    # 所有环境默认关闭启动迁移，Linux 生产环境同样遵守此开关。
+    # 表结构变更应通过审核后的显式迁移执行，不能依赖启动服务自动改表。
     @property
     def aerich_should_run_on_startup(self) -> bool:
-        if (not self.SERVER_DEBUG) and (self.SERVER_SYSTEM == "Linux"):
-            return True
-        if self.SERVER_DEBUG and self.DATABASE_AUTO_MIGRATION:
-            return True
-        return False
+        return self.DATABASE_AUTO_MIGRATION
 
 
 @lru_cache(maxsize=1)

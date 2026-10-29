@@ -1,9 +1,2 @@
-# -*- coding: utf-8 -*-
-def __getattr__(name):
-    # 新版 API 不应在导入时启动 Chroma 或要求旧 LangChain 分块器。
-    if name in {"DocumentChunkCrud", "DocumentCrud", "KnowledgeBaseCrud"}:
-        from . import knowledge_base_crud
-        return getattr(knowledge_base_crud, name)
-    raise AttributeError(name)
-
-__all__ = ["KnowledgeBaseCrud", "DocumentCrud", "DocumentChunkCrud"]
+"""兼容导入；业务实现已迁至 applications.wrq.knowledge_base.services。"""
+from applications.wrq.knowledge_base.services import *  # noqa: F401,F403

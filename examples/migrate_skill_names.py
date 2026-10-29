@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from tortoise import Tortoise
-from applications.agent.services.skill_name_migration import migrate_skill_names
+from applications.wrq.agent.services.skill_name_migration import migrate_skill_names
 
 
 async def run(args):

@@ -2,7 +2,7 @@
 import pytest
 from pydantic import ValidationError
 
-from applications.agent.schemas.skill_package_schema import (
+from applications.wrq.agent.schemas.skill_package_schema import (
     SkillPackageSource, SkillResourceBinding,
 )
 

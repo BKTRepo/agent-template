@@ -12,9 +12,9 @@ import pytest
 import pytest_asyncio
 import yaml
 
-from applications.agent.models.agent_model import Skill
-from applications.agent.views import skills_router
-from applications.knowledge_base.models.knowledge_base_model import Document, KnowledgeBase
+from applications.wrq.agent.models.agent_model import Skill
+from applications.wrq.agent.views import skills_router
+from applications.wrq.knowledge_base.models.knowledge_base_model import Document, KnowledgeBase
 from applications.user.models.user_model import User
 from configure import PROJECT_CONFIG
 

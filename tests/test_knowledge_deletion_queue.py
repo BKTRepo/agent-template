@@ -9,9 +9,9 @@ import time
 
 import pytest
 
-from applications.knowledge_base.models.knowledge_base_model import Document
-from applications.knowledge_base.services.document_jobs import DocumentJobRunner, dispatch_jobs, sweep_jobs, DELETE_TASK, PROCESS_TASK
-from applications.knowledge_base.services.job_control import DocumentLease, ProcessingControl, DocumentCancelled, RetryableDeletionError, NonRetryableDeletionError
+from applications.wrq.knowledge_base.models.knowledge_base_model import Document
+from applications.wrq.knowledge_base.services.document_jobs import DocumentJobRunner, dispatch_jobs, sweep_jobs, DELETE_TASK, PROCESS_TASK
+from applications.wrq.knowledge_base.services.job_control import DocumentLease, ProcessingControl, DocumentCancelled, RetryableDeletionError, NonRetryableDeletionError
 from configure import PROJECT_CONFIG
 from enums import DocumentStatus
 from test_platform_knowledge import kb_setup, FORM, save
@@ -43,7 +43,7 @@ def test_routes_keep_delete_and_sweep_separate_from_parsing():
 
 @pytest.mark.asyncio
 async def test_dispatch_uses_only_document_id_generation_and_no_web_fallback(kb_setup, monkeypatch):
-    from applications.knowledge_base.views.platform_view import schedule
+    from applications.wrq.knowledge_base.views.platform_view import schedule
     _, _, target = await pending_delete(kb_setup)
     calls = []
     def publish(name, args, **kwargs): calls.append((name, args, kwargs))
@@ -52,7 +52,7 @@ async def test_dispatch_uses_only_document_id_generation_and_no_web_fallback(kb_
     await target.refresh_from_db()
     assert target.task_id == calls[0][2]["task_id"] and target.task_dispatched_at
     monkeypatch.setattr(PROJECT_CONFIG, "KNOWLEDGE_TASK_MODE", "celery")
-    monkeypatch.setattr("applications.knowledge_base.services.document_jobs.dispatch_jobs", AsyncMock())
+    monkeypatch.setattr("applications.wrq.knowledge_base.services.document_jobs.dispatch_jobs", AsyncMock())
     background = SimpleNamespace(add_task=Mock())
     await schedule(background, kb_setup[3], [target.id])
     background.add_task.assert_not_called()
@@ -212,7 +212,7 @@ async def test_native_pdf_cancel_reaps_owned_process_before_return(monkeypatch, 
 @pytest.mark.asyncio
 async def test_normal_document_parser_can_be_cancelled_without_killing_worker(tmp_path):
     import psutil
-    from applications.knowledge_base.services.cancellable_parser import parse_in_process
+    from applications.wrq.knowledge_base.services.cancellable_parser import parse_in_process
     from pdf_worker_probe import blocking_loader
     marker = tmp_path / "parser.pid"
     stop = threading.Event()

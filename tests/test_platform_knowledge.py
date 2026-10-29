@@ -9,13 +9,13 @@ from httpx import ASGITransport, AsyncClient
 import pytest
 import pytest_asyncio
 
-from applications.agent.views import skills_router
-from applications.knowledge_base.views import knowledge_router
-from applications.knowledge_base.models.knowledge_base_model import Document, DocumentChunk, KnowledgeBase
-from applications.knowledge_base.schemas.platform_schema import KnowledgeForm
-from applications.knowledge_base.services.platform_service import KnowledgeService, get_knowledge_service, KnowledgeError
-from applications.knowledge_base.services.document_pipeline import DocumentPipeline
-from applications.knowledge_base.services.document_loader import load_document_pages
+from applications.wrq.agent.views import skills_router
+from applications.wrq.knowledge_base.views import knowledge_router
+from applications.wrq.knowledge_base.models.knowledge_base_model import Document, DocumentChunk, KnowledgeBase
+from applications.wrq.knowledge_base.schemas.platform_schema import KnowledgeForm
+from applications.wrq.knowledge_base.services.platform_service import KnowledgeService, get_knowledge_service, KnowledgeError
+from applications.wrq.knowledge_base.services.document_pipeline import DocumentPipeline
+from applications.wrq.knowledge_base.services.document_loader import load_document_pages
 from applications.user.models.user_model import User
 from configure import PROJECT_CONFIG
 from enums import DocumentStatus
@@ -226,7 +226,7 @@ async def test_crashed_job_recovery_and_failed_index_cleanup_are_durable(kb_setu
 
 @pytest.mark.asyncio
 async def test_name_backfill_audits_collisions_before_writing(kb_setup):
-    from applications.knowledge_base.services.name_migration import migrate_knowledge_names
+    from applications.wrq.knowledge_base.services.name_migration import migrate_knowledge_names
     _, owner, _, _, _ = kb_setup
     one = await KnowledgeBase.create(user_id=owner.id, knowledge_name="ＡＢＣ")
     two = await KnowledgeBase.create(user_id=owner.id, knowledge_name="abc")

@@ -6,8 +6,8 @@ import zipfile
 import pytest
 import yaml
 
-from applications.agent.schemas.skill_package_schema import SkillPackageSource, SkillResourceBinding
-from applications.agent.services.skill_package_builder import (
+from applications.wrq.agent.schemas.skill_package_schema import SkillPackageSource, SkillResourceBinding
+from applications.wrq.agent.services.skill_package_builder import (
     ResolvedSkillResource, SkillPackageBuilder, SkillPackageError, safe_relative_path, validate_source,
 )
 

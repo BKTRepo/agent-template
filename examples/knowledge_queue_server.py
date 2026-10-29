@@ -3,8 +3,8 @@ from examples.knowledge_queue_environment import ROOT, DB, MODELS
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from tortoise import Tortoise
-from applications.agent.views import skills_router
-from applications.knowledge_base.views import knowledge_router
+from applications.wrq.agent.views import skills_router
+from applications.wrq.knowledge_base.views import knowledge_router
 from applications.base.views.auth_view import auth_public
 from applications.user.models.user_model import User
 from services import get_password_hash

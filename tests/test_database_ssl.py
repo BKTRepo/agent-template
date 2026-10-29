@@ -16,6 +16,9 @@ def test_mysql_ssl_config_enables_encrypted_connection_without_ca():
         "verify_mode": False,
     }
     assert "ssl=true" in config.DATABASE_URL
+    credentials=config.DATABASE_CONNECTIONS["default"]["credentials"]
+    assert credentials['pool_recycle'] < 300
+    assert credentials['read_timeout'] == 15
 
 
 def test_mysql_ssl_config_uses_ca_for_server_verification():

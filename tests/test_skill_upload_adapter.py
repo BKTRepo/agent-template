@@ -1,9 +1,9 @@
 import pytest
 from pydantic import ValidationError
 
-from applications.agent.schemas.skill_package_schema import SkillEntryUploadSource
-from applications.agent.services.skill_package_builder import SkillPackageError
-from applications.agent.services.skill_upload_adapter import source_from_upload_entries
+from applications.wrq.agent.schemas.skill_package_schema import SkillEntryUploadSource
+from applications.wrq.agent.services.skill_package_builder import SkillPackageError
+from applications.wrq.agent.services.skill_upload_adapter import source_from_upload_entries
 
 
 FORM = {"name": "case-generator", "display_name": "用例生成", "description": "按需求生成用例，用于功能测试设计。",

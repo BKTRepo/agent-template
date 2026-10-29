@@ -1,10 +1,2 @@
-# -*- coding: utf-8 -*-
-from applications.agent.services.agent_crud import McpServerCrud, SkillCrud
-
-
-async def get_skill_crud() -> SkillCrud:
-    return SkillCrud()
-
-
-async def get_mcp_server_crud() -> McpServerCrud:
-    return McpServerCrud()
+"""兼容导入；业务实现已迁至 applications.wrq.agent.dependencies。"""
+from applications.wrq.agent.dependencies import *  # noqa: F401,F403

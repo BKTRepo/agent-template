@@ -2,9 +2,9 @@ import unittest
 
 from tortoise import Tortoise
 
-from applications.agent.models.agent_model import DeveloperApplication, DeveloperSkillClass, Skill
-from applications.agent.schemas.agent_schema import DeveloperDebugResult, DeveloperSkillForm
-from applications.agent.services.developer_skill_crud import DeveloperSkillCrud
+from applications.wrq.agent.models.agent_model import DeveloperApplication, DeveloperSkillClass, Skill
+from applications.wrq.agent.schemas.agent_schema import DeveloperDebugResult, DeveloperSkillForm
+from applications.wrq.agent.services.developer_skill_crud import DeveloperSkillCrud
 from applications.user.models.user_model import User
 
 
@@ -14,7 +14,7 @@ class DeveloperCenterCrudTest(unittest.IsolatedAsyncioTestCase):
             db_url="sqlite://:memory:",
             modules={"models": [
                 "applications.user.models.user_model",
-                "applications.agent.models.agent_model",
+                "applications.wrq.agent.models.agent_model",
             ]},
         )
         await Tortoise.generate_schemas()

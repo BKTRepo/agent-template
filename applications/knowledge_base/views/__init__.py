@@ -1,7 +1,2 @@
-# -*- coding: utf-8 -*-
-from fastapi import APIRouter
-
-from .platform_view import knowledge
-
-knowledge_router = APIRouter()
-knowledge_router.include_router(knowledge)
+"""兼容导入；业务实现已迁至 applications.wrq.knowledge_base.views。"""
+from applications.wrq.knowledge_base.views import *  # noqa: F401,F403

@@ -1,69 +1,70 @@
 import asyncio
-
 import pytest
 from tortoise import Tortoise
 from tortoise.exceptions import IntegrityError
-
-from applications.agent.models.agent_model import Skill
-from applications.agent.skill_names import skill_name_key
-from applications.agent.services.skill_name_migration import migrate_skill_names
-from test_skill_package_api import setup, token
-from test_skill_developer_form import form, submit
+from applications.wrq.agent.models.agent_model import Skill, SkillVersion
+from applications.wrq.agent.skill_names import skill_name_key
+from applications.wrq.agent.services.skill_name_migration import migrate_skill_names
+from developer_contract_helpers import developer_setup, payload, create_saved, update_saved
+from test_skill_package_api import token
 
 
 @pytest.mark.asyncio
-async def test_names_global_normalized_edit_and_delete(setup):
-    client, owner, other, skill = setup
-    created = (await client.post('/skills/', headers=token(owner), json={'name': ' Skill ABC ', 'is_enabled': False})).json()
-    assert created['status'] == 'success'
-    skill_id = created['data']['id']
-    assert created['data']['name'] == 'Skill ABC'
-    duplicate = (await client.post('/skills/', headers=token(other), json={'name': 'ＳＫＩＬＬ ａｂｃ'})).json()
-    assert duplicate['status'] == 'failure' and duplicate['data']['errors'][0]['field'] == 'skill_name'
+async def test_names_global_normalized_edit_and_delete(developer_setup):
+    client, owner, other = developer_setup
+    row = await create_saved(client, owner, name=' Skill ABC ')
+    assert row['name'] == 'Skill ABC'
+    duplicate = await client.post('/skills/developer/', headers=token(other), json=payload(name='ＳＫＩＬＬ ａｂｃ'))
+    assert duplicate.status_code == 409 and duplicate.json()['data']['errors'][0]['field'] == 'name'
     check = '/skills/name-availability'
     assert not (await client.get(check, headers=token(other), params={'name': 'skill abc'})).json()['data']['available']
-    assert (await client.get(check, headers=token(owner), params={'name': 'skill abc', 'exclude_id': skill_id})).json()['data']['available']
-    denied = (await client.get(check, headers=token(other), params={'name': 'skill abc', 'exclude_id': skill_id})).json()
-    assert denied['status'] == 'failure' and denied['message'] == '技能不存在'
-    edit = (await client.put(f'/skills/{skill_id}', headers=token(owner), json={'name': 'skill abc'})).json()
-    assert edit['status'] == 'success'
-    for name in [None, '   ', skill.name]:
-        bad = (await client.put(f'/skills/{skill_id}', headers=token(owner), json={'name': name})).json()
-        assert bad['status'] == 'failure' and bad['data']['errors'][0]['field'] == 'skill_name'
-    assert (await client.delete(f'/skills/{skill_id}', headers=token(owner))).json()['status'] == 'success'
-    replacement = await Skill.create(name='Skill ABC', user_id=other.id)
-    deleted = await Skill.get(id=skill_id)
-    assert deleted.name_key is None
-    deleted.state = 0
+    assert (await client.get(check, headers=token(owner), params={'name': 'skill abc', 'exclude_id': row['id']})).json()['data']['available']
+    denied = await client.get(check, headers=token(other), params={'name': 'skill abc', 'exclude_id': row['id']})
+    assert denied.status_code == 404 and denied.json()['status'] == 'failure'
+    edited = await update_saved(client, owner, row, name='skill abc')
+    assert edited.status_code == 200, edited.text
+    row = edited.json()['data']
+    existing = await create_saved(client, other, name='别人的名称')
+    for value, status in [(None, 422), ('   ', 400), (existing['name'], 409)]:
+        bad = await update_saved(client, owner, row, name=value)
+        assert bad.status_code == status, bad.text
+        assert bad.json()['data']['errors'][0]['field'] == 'name'
+    deleted = await client.delete(f"/skills/developer/{row['id']}", headers=token(owner))
+    assert deleted.status_code == 200
+    replacement = await create_saved(client, other, name='Skill ABC')
+    old = await Skill.get(id=row['id'])
+    assert old.state == 1 and replacement['id'] != old.id
+    assert await Skill.filter(state=0, name__iexact='skill abc').count() == 1
+    # 恢复已删除行会撞上新记录，数据库级约束仍应拦截。
     with pytest.raises(IntegrityError):
-        await deleted.save()
-    assert replacement.name_key == skill_name_key('skill abc')
+        await Skill.filter(id=old.id).update(state=0)
 
 
 @pytest.mark.asyncio
-async def test_concurrent_creation_and_database_constraint(setup):
-    client, owner, _, skill = setup
-    replies = await asyncio.gather(*[
-        client.post('/skills/', headers=token(owner), json={'name': name})
-        for name in ['Parallel Skill', 'ＰＡＲＡＬＬＥＬ ＳＫＩＬＬ']
-    ])
-    assert sorted(response.json()['status'] for response in replies) == ['failure', 'success']
-    assert await Skill.filter(name_key=skill_name_key('parallel skill')).count() == 1
-    # 绕过 API 预查询，模型写入仍受到数据库唯一约束保护。
+async def test_concurrent_creation_and_database_constraint(developer_setup):
+    client, owner, _ = developer_setup
+    responses = await asyncio.gather(*[client.post('/skills/developer/', headers=token(owner), json=payload(name=name))
+        for name in ['Parallel Skill', 'ＰＡＲＡＬＬＥＬ ＳＫＩＬＬ']])
+    assert sorted(v.status_code for v in responses) == [200, 409], [v.text for v in responses]
+    assert await Skill.filter(state=0).count() == 1
+    assert await SkillVersion.all().count() == 1
+    # 不经过API预检查，直接写入同名也必须失败；未删除记录lower(trim)索引。
+    winner = next(v.json()['data'] for v in responses if v.status_code == 200)
     with pytest.raises(IntegrityError):
-        await Skill.create(name=' PARALLEL SKILL ', user_id=owner.id)
+        await Skill.create(name=' ' + winner['name'].lower() + ' ', user_id=str(owner.id))
 
 
 @pytest.mark.asyncio
-async def test_form_duplicate_does_not_publish_or_rename(setup):
-    client, owner, other, skill = setup
-    await Skill.create(name='别人的技能', user_id=other.id)
-    original = skill.name
-    result = await submit(client, owner, form(skill, skill_name='别人的技能'))
-    assert result['status'] == 'failure' and result['data']['errors'][0]['field'] == 'skill_name'
-    await skill.refresh_from_db()
-    assert skill.name == original
-    history = (await client.get(f'/skills/{skill.id}/builds', headers=token(owner))).json()['data']
+async def test_form_duplicate_does_not_publish_or_rename(developer_setup):
+    client, owner, other = developer_setup
+    await create_saved(client, other, name='别人的技能')
+    row = await create_saved(client, owner)
+    response = await update_saved(client, owner, row, name='别人的技能')
+    assert response.status_code == 409 and response.json()['data']['errors'][0]['field'] == 'name'
+    skill = await Skill.get(id=row['id'])
+    assert skill.name == row['name'] and skill.current_revision == 1 and skill.display_status == 'DRAFT'
+    assert await SkillVersion.filter(skill_id=row['id']).count() == 1
+    history = (await client.get(f"/skills/{row['id']}/builds", headers=token(owner))).json()['data']
     assert history['total'] == 0
 
 

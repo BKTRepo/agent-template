@@ -20,8 +20,8 @@ for key, value in {
 }.items(): os.environ[key] = value
 
 from configure import PROJECT_CONFIG
-MODELS = ["applications.user.models.user_model", "applications.agent.models.agent_model",
-          "applications.knowledge_base.models.knowledge_base_model", "applications.base.models.audit_model"]
+MODELS = ["applications.user.models.user_model", "applications.wrq.agent.models.agent_model",
+          "applications.wrq.knowledge_base.models.knowledge_base_model", "applications.base.models.audit_model"]
 DB = ROOT / "platform.sqlite3"
 PROJECT_CONFIG.DATABASE_CONNECTIONS = {"default": f"sqlite://{DB.as_posix()}"}
 

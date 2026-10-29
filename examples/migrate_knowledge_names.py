@@ -4,7 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 from tortoise import Tortoise
-from applications.knowledge_base.services.name_migration import migrate_knowledge_names
+from applications.wrq.knowledge_base.services.name_migration import migrate_knowledge_names
 
 
 async def run(args):

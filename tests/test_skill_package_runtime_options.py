@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from applications.agent.schemas.skill_package_schema import SkillPackageSource
-from applications.agent.services.skill_package_builder import SkillPackageBuilder
+from applications.wrq.agent.schemas.skill_package_schema import SkillPackageSource
+from applications.wrq.agent.services.skill_package_builder import SkillPackageBuilder
 from configure import PROJECT_CONFIG
 from services.claude_agent_service import build_base_options
 

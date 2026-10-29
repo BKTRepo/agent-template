@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from applications.knowledge_base.models.knowledge_base_model import Document, DocumentChunk
-from applications.knowledge_base.schemas.platform_schema import KnowledgeForm
-from applications.knowledge_base.services.document_pipeline import DocumentPipeline
-from applications.knowledge_base.services.platform_service import KnowledgeError
+from applications.wrq.knowledge_base.models.knowledge_base_model import Document, DocumentChunk
+from applications.wrq.knowledge_base.schemas.platform_schema import KnowledgeForm
+from applications.wrq.knowledge_base.services.document_pipeline import DocumentPipeline
+from applications.wrq.knowledge_base.services.platform_service import KnowledgeError
 from configure import PROJECT_CONFIG
 from enums import DocumentStatus
 from test_platform_knowledge import FORM, kb_setup, save
@@ -251,7 +251,7 @@ async def test_stale_generation_editor_does_not_replace_newer_original(kb_setup)
 async def test_chroma_delete_checks_for_residual_vectors(monkeypatch, remaining):
     import sys
     from types import SimpleNamespace
-    from applications.knowledge_base.services.document_pipeline import ChromaIndex
+    from applications.wrq.knowledge_base.services.document_pipeline import ChromaIndex
     class Collection:
         def delete(self, *, ids):
             assert ids == ["vector-still-present"]
@@ -284,7 +284,7 @@ async def test_repeated_delete_callbacks_only_clean_once(kb_setup, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_waiting_for_one_document_does_not_lock_another(kb_setup):
-    from applications.knowledge_base.services.document_lock import document_lock
+    from applications.wrq.knowledge_base.services.document_lock import document_lock
     client, owner, _, service, _ = kb_setup
     kb, keep, target = await two_documents(client, owner)
     _, jobs = await service.save(owner, KnowledgeForm(**{**FORM, "change_summary": "删除",
@@ -310,7 +310,7 @@ async def test_replacing_processing_file_returns_conflict_and_preserves_original
 @pytest.mark.asyncio
 @pytest.mark.parametrize("vectors", [[], [[0.1]], [[0.1], [0.1, 0.2]]])
 async def test_embedding_count_and_dimension_mismatch_keep_parsed_preview(kb_setup, monkeypatch, vectors):
-    from applications.knowledge_base.services import document_pipeline
+    from applications.wrq.knowledge_base.services import document_pipeline
     client, owner, _, _, index = kb_setup
     monkeypatch.setattr(document_pipeline, "chunk_document", lambda *args, **kwargs: [
         {"content": "first"}, {"content": "second"}])

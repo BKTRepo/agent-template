@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from applications.agent.models.agent_model import Skill
-from applications.knowledge_base.models.knowledge_base_model import Document, DocumentChunk, KnowledgeBase
+from applications.wrq.agent.models.agent_model import Skill
+from applications.wrq.knowledge_base.models.knowledge_base_model import Document, DocumentChunk, KnowledgeBase
 from configure import PROJECT_CONFIG
 from enums import DocumentStatus
 from test_platform_knowledge import FORM as KB_FORM, kb_setup, save

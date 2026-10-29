@@ -6,7 +6,7 @@ import zipfile
 
 import pytest
 
-from applications.knowledge_base.models.knowledge_base_model import KnowledgeBase
+from applications.wrq.knowledge_base.models.knowledge_base_model import KnowledgeBase
 from configure import PROJECT_CONFIG
 from test_skill_package_api import setup, token, document
 from test_skill_developer_form import form, submit

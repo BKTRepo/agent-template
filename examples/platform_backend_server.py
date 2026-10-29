@@ -23,8 +23,8 @@ for key, value in {
 
 from fastapi import FastAPI
 from tortoise import Tortoise
-from applications.agent.views import skills_router
-from applications.knowledge_base.views import knowledge_router
+from applications.wrq.agent.views import skills_router
+from applications.wrq.knowledge_base.views import knowledge_router
 from applications.base.views.auth_view import auth_public
 from applications.user.models.user_model import User
 from services import get_password_hash
@@ -36,8 +36,8 @@ async def lifespan(app):
     from examples.local_knowledge_migration import migrate_local_jobs
     migrate_local_jobs(ROOT / "platform.sqlite3")
     await Tortoise.init(db_url=f"sqlite://{(ROOT / 'platform.sqlite3').as_posix()}", modules={"models": [
-        "applications.user.models.user_model", "applications.agent.models.agent_model",
-        "applications.knowledge_base.models.knowledge_base_model", "applications.base.models.audit_model",
+        "applications.user.models.user_model", "applications.wrq.agent.models.agent_model",
+        "applications.wrq.knowledge_base.models.knowledge_base_model", "applications.base.models.audit_model",
     ]})
     try:
         await Tortoise.generate_schemas(safe=True)

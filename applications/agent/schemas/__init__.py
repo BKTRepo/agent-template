@@ -1,18 +1,2 @@
-# -*- coding: utf-8 -*-
-from .agent_schema import (
-    McpServerCreate,
-    McpServerOut,
-    McpServerUpdate,
-    SkillCreate,
-    SkillOut,
-    SkillUpdate,
-)
-
-__all__ = [
-    "SkillCreate",
-    "SkillUpdate",
-    "SkillOut",
-    "McpServerCreate",
-    "McpServerUpdate",
-    "McpServerOut",
-]
+"""兼容导入；业务实现已迁至 applications.wrq.agent.schemas。"""
+from applications.wrq.agent.schemas import *  # noqa: F401,F403

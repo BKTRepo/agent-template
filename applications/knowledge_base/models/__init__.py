@@ -1,8 +1,2 @@
-# -*- coding: utf-8 -*-
-from applications.knowledge_base.models.knowledge_base_model import (
-    KnowledgeBase,
-    Document,
-    DocumentChunk,
-)
-
-__all__ = ["KnowledgeBase", "Document", "DocumentChunk"]
+"""兼容导入；业务实现已迁至 applications.wrq.knowledge_base.models。"""
+from applications.wrq.knowledge_base.models import *  # noqa: F401,F403

@@ -3,11 +3,11 @@ import argparse
 import json
 from pathlib import Path
 
-from applications.agent.schemas.skill_package_schema import SkillEntryUploadSource, SkillPackageSource
-from applications.agent.services.skill_package_builder import (
+from applications.wrq.agent.schemas.skill_package_schema import SkillEntryUploadSource, SkillPackageSource
+from applications.wrq.agent.services.skill_package_builder import (
     ResolvedSkillResource, SkillPackageBuilder, SkillPackageError,
 )
-from applications.agent.services.skill_upload_adapter import source_from_upload_entries
+from applications.wrq.agent.services.skill_upload_adapter import source_from_upload_entries
 
 
 FIXTURES = Path(__file__).resolve().parent / "skill-package"

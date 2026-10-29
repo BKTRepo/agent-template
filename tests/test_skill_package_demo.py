@@ -38,8 +38,8 @@ def test_demo_runs_without_backend_settings(tmp_path, scenario, expected):
 
 
 def test_existing_model_exports_still_work():
-    from applications.agent import McpServer, Skill
-    from applications.agent.models.agent_model import McpServer as ModelMcpServer, Skill as ModelSkill
+    from applications.wrq.agent import McpServer, Skill
+    from applications.wrq.agent.models.agent_model import McpServer as ModelMcpServer, Skill as ModelSkill
 
     assert Skill is ModelSkill
     assert McpServer is ModelMcpServer

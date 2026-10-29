@@ -30,8 +30,8 @@ Path(os.environ["OUTPUT_LOGS_DIR"]).mkdir(parents=True, exist_ok=True)
 async def database():
     await Tortoise.init(db_url="sqlite://:memory:", modules={"models": [
         "applications.user.models.user_model",
-        "applications.agent.models.agent_model",
-        "applications.knowledge_base.models.knowledge_base_model",
+        "applications.wrq.agent.models.agent_model",
+        "applications.wrq.knowledge_base.models.knowledge_base_model",
     ]})
     await Tortoise.generate_schemas()
     yield
