@@ -9,3 +9,5 @@ node_modules/
 output/
 .env.local
 .env.*.local
+.env
+*.log
