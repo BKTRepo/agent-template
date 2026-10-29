@@ -21,6 +21,9 @@ from core.initializations import (
     init_database_table,
 )
 from core.responses import SuccessResponse
+from applications.zhaoyunlong.services.online_debug_cleanup_scheduler import (
+    create_online_debug_cleanup_scheduler,
+)
 
 try:
     from configure import PROJECT_CONFIG, ROUTER_SUMMARY, ROUTER_TAGS
@@ -32,20 +35,24 @@ except ImportError:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    online_debug_scheduler = None
     try:
         await register_database(app)
     except DBConnectionError as e:
         raise RuntimeError(f"数据库连接失败, 请检查主机地址是否可达: {e}")
     await init_database_table(app)
 
-    for route in app.routes:
-        if isinstance(route, APIRoute):
-            ROUTER_SUMMARY[route.path] = route.summary
-            ROUTER_TAGS[route.path] = route.tags
-
-    yield
-
-    await Tortoise.close_connections()
+        for route in app.routes:
+            if isinstance(route, APIRoute):
+                ROUTER_SUMMARY[route.path] = route.summary
+                ROUTER_TAGS[route.path] = route.tags
+        online_debug_scheduler = create_online_debug_cleanup_scheduler()
+        online_debug_scheduler.start()
+        yield
+    finally:
+        if online_debug_scheduler is not None:
+            online_debug_scheduler.shutdown(wait=False)
+        await Tortoise.close_connections()
 
 
 app = FastAPI(

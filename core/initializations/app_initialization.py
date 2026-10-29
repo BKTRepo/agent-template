@@ -168,6 +168,7 @@ def register_routers(app: FastAPI) -> None:
     from applications.example.views import example_category_router, example_product_router
     from applications.weixianzhe.views import test_case_gen_router
     from applications.zhoushengjie.views import case_recommendation_router
+    from applications.zhaoyunlong.views import realtime_test_case_router
 
     # 挂在路由蓝图
     app.include_router(router=base_public, prefix="/base", tags=["基础服务"])
@@ -176,6 +177,8 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(router=router_secure, prefix="/base", tags=["基础服务-路由模块"], dependencies=[DependAuth])
     app.include_router(router=user_public_router, prefix="/user", tags=["用户服务"])
     app.include_router(router=user_secure_router, prefix="/user", tags=["用户服务"], dependencies=[DependAuth])
+    # 开发者中心在线调试：同步运行 Docker 沙箱并生成 Excel 测试用例文档。
+    app.include_router( router=realtime_test_case_router, prefix="/realtime-test-case-gen", tags=["开发者中心-在线调试"],)
     app.include_router(router=example_category_router, prefix="/example", tags=["示例服务-商品分类"], dependencies=[DependAuth])
     app.include_router(router=example_product_router, prefix="/example", tags=["示例服务-商品模型"], dependencies=[DependAuth])
     app.include_router(router=case_recommendation_router, prefix="/case-recommendation", tags=["用例推荐"])

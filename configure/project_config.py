@@ -1,13 +1,8 @@
 # -*- coding: utf-8 -*-
-"""
-@Author  : yangkai
-@Email   : 807440781@qq.com
-@Project : KeenRobot
-@Module  : project_config.py
-@DateTime: 2025/1/15 16:08
-"""
+"""通用后端配置。"""
 import os.path
 import platform
+import ssl
 from functools import lru_cache
 from pathlib import Path
 from typing import List, Dict, Any, Literal
@@ -33,8 +28,8 @@ class ProjectConfig(BaseSettings):
 
     # 项目描述
     APP_VERSION: str = "1.0.0"
-    APP_TITLE: str = "企业级RAG问答系统"
-    APP_DESCRIPTION: str = """企业级RAG问答系统"""
+    APP_TITLE: str = "FastAPI Template"
+    APP_DESCRIPTION: str = "通用 FastAPI 后端模板"
     APP_DOCS_URL: str = "/docs"
     APP_REDOC_URL: str = "/redoc"
     APP_OPENAPI_URL: str = "/openapi_url"
@@ -272,6 +267,7 @@ class ProjectConfig(BaseSettings):
     DATABASE_SSL_CA: str = Field(default="", description="MySQL CA 证书路径；为空时仅加密、不校验证书")
     DATABASE_SSL_CERT: str = Field(default="", description="MySQL 客户端证书路径（可选）")
     DATABASE_SSL_KEY: str = Field(default="", description="MySQL 客户端私钥路径（可选）")
+    DATABASE_CONNECT_TIMEOUT: int = 15
 
     # Redis 配置
     REDIS_URL: str = ""
@@ -352,6 +348,8 @@ class ProjectConfig(BaseSettings):
             }
         }
 
+        for directory in (self.OUTPUT_LOGS_DIR, self.OUTPUT_UPLOAD_DIR, self.OUTPUT_DATAGRAM_DIR):
+            Path(directory).mkdir(parents=True, exist_ok=True)
         if self.REDIS_PASSWORD:
             self.REDIS_URL = self.build_redis_url(db=0)
         return self
