@@ -37,10 +37,11 @@ except ImportError:
 async def lifespan(app: FastAPI):
     online_debug_scheduler = None
     try:
-        await register_database(app)
-    except DBConnectionError as e:
-        raise RuntimeError(f"数据库连接失败, 请检查主机地址是否可达: {e}")
-    await init_database_table(app)
+        try:
+            await register_database(app)
+        except DBConnectionError as exc:
+            raise RuntimeError(f"数据库连接失败，请检查连接配置: {exc}") from exc
+        await init_database_table(app)
 
         for route in app.routes:
             if isinstance(route, APIRoute):

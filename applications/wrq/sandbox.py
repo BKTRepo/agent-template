@@ -4,7 +4,7 @@ from tortoise import connections
 class SandboxResults:
     async def get(self, run_id, skill_id):
         rows = await connections.get('default').execute_query_dict(
-            'SELECT run_id,skill_id,status,result_file_path,result_file_name,error_message,expires_at,started_at,finished_at '
+            'SELECT run_id,skill_id,status,result_file_path,error_message,expires_at,started_at,finished_at '
             'FROM keenrobot_online_debug_runs WHERE run_id=%s', [run_id])
         if not rows or str(rows[0]['skill_id']) != str(skill_id):
             return None

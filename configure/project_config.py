@@ -46,7 +46,6 @@ class ProjectConfig(BaseSettings):
     SERVER_HOST: str = "0.0.0.0"
     SERVER_SYSTEM: str = platform.system()
     SERVER_PORT: int = 8519
-    WRQ_SANDBOX_MOCK: bool = False
     SERVER_DEBUG: bool = SERVER_SYSTEM != "Linux"  # Windows | Linux | Darwin
     SERVER_DELAY: int = 5
     SERVER_RELOAD_EXCLUDES: List[str] = [

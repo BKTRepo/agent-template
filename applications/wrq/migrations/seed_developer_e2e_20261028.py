@@ -205,11 +205,10 @@ async def seed(cur, journal):
              manifest_hash, "E2E_EXPECTED_FAILURE" if status == "FAILED" else None, OWNER, now, now],
         )
         await cur.execute(
-            "INSERT INTO keenrobot_online_debug_runs (skill_id,run_id,status,result_file_path,result_file_name,error_message,started_at,finished_at,expires_at,debugger) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "INSERT INTO keenrobot_online_debug_runs (skill_id,run_id,status,result_file_path,error_message,started_at,finished_at,expires_at,debugger) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             [sid, run_id, status,
-             f"/e2e/{run_id}.xlsx" if status == "PASSED" else None,
-             f"{run_id}.xlsx" if status == "PASSED" else None,
+             f"/e2e/{run_id}" if status == "PASSED" else None,
              error, now if status != "QUEUED" else None,
              now if status in ("PASSED", "FAILED") else None,
              now + timedelta(days=30) if status == "PASSED" else None, OWNER],

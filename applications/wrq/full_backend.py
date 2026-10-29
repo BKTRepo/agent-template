@@ -12,6 +12,9 @@ if sys.platform == "win32":
 
 from configure import LOGGER, PROJECT_CONFIG, ROUTER_SUMMARY, ROUTER_TAGS
 from applications.wrq.database import wrq_connections
+from applications.zhaoyunlong.services.online_debug_cleanup_scheduler import (
+    create_online_debug_cleanup_scheduler,
+)
 from tortoise import Tortoise, connections
 
 
@@ -19,6 +22,7 @@ from tortoise import Tortoise, connections
 async def lifespan(app):
     if PROJECT_CONFIG.aerich_should_run_on_startup:
         raise RuntimeError("完整项目本地启动要求关闭 DATABASE_AUTO_MIGRATION")
+    online_debug_scheduler = None
     try:
         await Tortoise.init(config={
             "connections": wrq_connections(PROJECT_CONFIG.DATABASE_CONNECTIONS),
@@ -46,9 +50,15 @@ async def lifespan(app):
             ROUTER_SUMMARY[route.path] = route.summary
             ROUTER_TAGS[route.path] = route.tags
         LOGGER.info("完整项目已加载 {} 条业务路由；启动不改表、不造用户", len(routes))
+        online_debug_scheduler = create_online_debug_cleanup_scheduler()
+        online_debug_scheduler.start()
         yield
     finally:
-        await Tortoise.close_connections()
+        try:
+            if online_debug_scheduler is not None:
+                online_debug_scheduler.shutdown(wait=False)
+        finally:
+            await Tortoise.close_connections()
 
 
 def create_app():

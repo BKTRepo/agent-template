@@ -24,9 +24,6 @@ async def lifespan(app):
 app=FastAPI(title='WRQ 开发者中心',lifespan=lifespan)
 app.include_router(skills_router,prefix='/skills')
 app.include_router(knowledge_router,prefix='/knowledge-bases')
-if PROJECT_CONFIG.WRQ_SANDBOX_MOCK:
-    from applications.wrq.mock_sandbox import router as mock_sandbox_router
-    app.include_router(mock_sandbox_router)
 
 @app.get('/health')
 async def health():
