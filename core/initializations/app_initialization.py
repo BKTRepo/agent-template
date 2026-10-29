@@ -116,6 +116,7 @@ def register_routers(app: FastAPI) -> None:
     # 导入路由蓝图
     from applications.base.views import base_public, base_secure, router_secure, audit_secure
     from applications.user.views import user_public_router, user_secure_router
+    from applications.zhaoyunlong.views import realtime_test_case_router
 
     # 挂在路由蓝图
     app.include_router(router=base_public, prefix="/base", tags=["基础服务"])
@@ -124,3 +125,5 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(router=router_secure, prefix="/base", tags=["基础服务-路由模块"], dependencies=[DependAuth])
     app.include_router(router=user_public_router, prefix="/user", tags=["用户服务"])
     app.include_router(router=user_secure_router, prefix="/user", tags=["用户服务"], dependencies=[DependAuth])
+    # 开发者中心在线调试：同步运行 Docker 沙箱并生成 Excel 测试用例文档。
+    app.include_router( router=realtime_test_case_router, prefix="/realtime-test-case-gen", tags=["开发者中心-在线调试"],)

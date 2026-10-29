@@ -13,6 +13,9 @@ from core.initializations import (
     register_routers,
 )
 from core.responses import SuccessResponse
+from applications.zhaoyunlong.services.online_debug_cleanup_scheduler import (
+    create_online_debug_cleanup_scheduler,
+)
 
 try:
     from configure import PROJECT_CONFIG, ROUTER_SUMMARY, ROUTER_TAGS
@@ -24,6 +27,7 @@ except ImportError:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    online_debug_scheduler = None
     try:
         try:
             await register_database(app)
@@ -34,8 +38,12 @@ async def lifespan(app: FastAPI):
             if isinstance(route, APIRoute):
                 ROUTER_SUMMARY[route.path] = route.summary
                 ROUTER_TAGS[route.path] = route.tags
+        online_debug_scheduler = create_online_debug_cleanup_scheduler()
+        online_debug_scheduler.start()
         yield
     finally:
+        if online_debug_scheduler is not None:
+            online_debug_scheduler.shutdown(wait=False)
         await Tortoise.close_connections()
 
 

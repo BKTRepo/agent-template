@@ -2,6 +2,7 @@
 """通用后端配置。"""
 import os.path
 import platform
+import ssl
 from functools import lru_cache
 from pathlib import Path
 from typing import List, Dict, Any
@@ -198,6 +199,10 @@ class ProjectConfig(BaseSettings):
     DATABASE_NAME: str = "template"
     DATABASE_USERNAME: str = ""
     DATABASE_PASSWORD: str = ""
+    # 是否要求 MySQL 连接使用 TLS/SSL 加密；仅加密、不校验证书时可设为 True。
+    DATABASE_SSL_ENABLED: bool = False
+    # 建立 MySQL 网络连接最长等待秒数，避免数据库不可用时接口长期无响应。
+    DATABASE_CONNECT_TIMEOUT: int = 15
 
     @model_validator(mode="after")
     def validate_env_and_assemble_urls(self) -> Self:
@@ -209,6 +214,14 @@ class ProjectConfig(BaseSettings):
         else:
             if not self.DATABASE_USERNAME or not self.DATABASE_NAME or not self.DATABASE_HOST:
                 raise ValueError("请配置 DATABASE_URL 或完整的 MySQL 连接参数")
+            # 与 DBeaver 中“需要 SSL、关闭验证服务器证书”的配置保持一致。
+            # 后续拿到数据库 CA 证书后，应改为校验证书的安全配置。
+            mysql_ssl: bool | ssl.SSLContext = False
+            if self.DATABASE_SSL_ENABLED:
+                ssl_context = ssl.create_default_context()
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+                mysql_ssl = ssl_context
             db_user = quote_plus(self.DATABASE_USERNAME)
             db_password = quote_plus(self.DATABASE_PASSWORD)
             self.DATABASE_URL = (
@@ -227,6 +240,8 @@ class ProjectConfig(BaseSettings):
                         "minsize": 1,
                         "maxsize": 10,
                         "charset": "utf8mb4",
+                        "connect_timeout": self.DATABASE_CONNECT_TIMEOUT,
+                        "ssl": mysql_ssl,
                     },
                 }
             }
