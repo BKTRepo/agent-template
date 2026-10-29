@@ -252,7 +252,7 @@ export default function DeveloperPage() {
       </tbody></table></div>
       <div className="developer-pagination" aria-label="技能列表分页"><span className="pagination-total">共 {total} 条</span><button className="button small" disabled={loading || page <= 1} onClick={() => goToPage(page - 1)}><ChevronLeft size={14} />上一页</button><div className="pagination-pages">{pageNumbers.map(number => <button key={number} className={`button small ${number === page ? 'primary' : ''}`} aria-current={number === page ? 'page' : undefined} disabled={loading} onClick={() => goToPage(number)}>{number}</button>)}</div><button className="button small" disabled={loading || page >= pages} onClick={() => goToPage(page + 1)}>下一页<ChevronRight size={14} /></button></div>
     </section>
-    <p className="demo-note">运行调试完成后可下载 Excel 测试结果。</p>
+    <p className="demo-note">运行调试完成后可下载结果文档。</p>
     {!panel && message && <p className="error-banner" role="alert">{message}</p>}
 
     {panel === 'form' && <Dialog key="form" wide title={selected ? <>{readonly ? '实现类详情' : '编辑实现类'} · {selected.name}</> : '新建技能类'} onClose={closePanel} busy={!!busy} footer={<>

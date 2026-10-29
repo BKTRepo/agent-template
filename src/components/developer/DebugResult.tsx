@@ -33,7 +33,7 @@ export default function DebugResult({ result, running, downloading = false, onRe
         const current = files[artifact.key]
         return <div className="debug-download" key={artifact.key}>
           <FileText className="debug-document-icon" size={28} aria-hidden="true" />
-          <div className="debug-document-info"><b>调试结果文档</b><p>{artifact.name}</p><p>{`生成成功 · ${artifact.format || 'Excel'}${(current?.size ?? artifact.size) !== undefined ? ` · ${Math.max(0.1, (current?.size ?? artifact.size)! / 1024).toFixed(1)} KB` : ''}${artifact.count !== undefined ? ` · ${artifact.count} 条结果` : ''} · ${result.origin === 'backend' ? '真实调试结果' : '前端模拟结果'}`}</p>
+          <div className="debug-document-info"><b>调试结果文档</b><p>{artifact.name}</p><p>{`生成成功 · ${artifact.format || '文件'}${(current?.size ?? artifact.size) !== undefined ? ` · ${Math.max(0.1, (current?.size ?? artifact.size)! / 1024).toFixed(1)} KB` : ''}${artifact.count !== undefined ? ` · ${artifact.count} 条结果` : ''} · ${result.origin === 'backend' ? '真实调试结果' : '前端模拟结果'}`}</p>
             {current?.error && <p className="debug-document-error" role="alert">{current.error}</p>}
           </div>
           {current?.url ? <a className="button primary small" href={current.url} download={artifact.name}><Download size={14} />下载文档</a>

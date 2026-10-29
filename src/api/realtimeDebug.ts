@@ -125,16 +125,20 @@ export async function downloadRealtimeDocument(runId: string, skillName: string,
   const response = await fetch(path, { headers: authHeaders(), signal, cache: 'no-store' })
   if (!response.ok) throw new Error(await errorMessage(response, '调试结果文档下载失败，请重试下载。'))
   const type = response.headers.get('content-type') ?? ''
-  if (type.includes('json')) throw new Error(await errorMessage(response, '接口尚未返回结果文档，请稍后重试下载。'))
-  if (type.includes('text/html')) throw new Error('下载接口返回了网页，请检查调试接口代理配置。')
-  const blob = await response.blob()
-  if (!blob.size) throw new Error('调试结果文档为空，请重新运行调试。')
-  const signature = new Uint8Array(await blob.slice(0, 4).arrayBuffer())
-  if (signature[0] !== 0x50 || signature[1] !== 0x4b) throw new Error('下载接口没有返回有效的 Excel 文件，请联系后端检查生成结果。')
   const name = document ? documentName(null, document.filename)
     : documentName(response.headers.get('content-disposition'), `${skillName}-调试结果.xlsx`)
+  const extension = name.split('.').pop()?.toLowerCase() ?? ''
+  const formats = { xlsx: 'Excel', docx: 'Word', pdf: 'PDF', md: 'Markdown', txt: 'TXT', json: 'JSON', csv: 'CSV' } as const
+  if (!Object.hasOwn(formats, extension)) throw new Error(`不支持的结果文档格式：${name}`)
+  if (type.includes('text/html')) throw new Error('下载接口返回了网页，请检查调试接口代理配置。')
+  if (type.includes('json') && extension !== 'json') throw new Error(await errorMessage(response, '接口尚未返回结果文档，请稍后重试下载。'))
+  const blob = await response.blob()
+  if (!blob.size) throw new Error('调试结果文档为空，请重新运行调试。')
+  const signature = new Uint8Array(await blob.slice(0, 5).arrayBuffer())
+  if ((extension === 'xlsx' || extension === 'docx') && (signature[0] !== 0x50 || signature[1] !== 0x4b)) throw new Error(`下载接口没有返回有效的 ${formats[extension]} 文件，请联系后端检查生成结果。`)
+  if (extension === 'pdf' && String.fromCharCode(...signature) !== '%PDF-') throw new Error('下载接口没有返回有效的 PDF 文件，请联系后端检查生成结果。')
   const suffix = document ? `:${hashDocumentKey(document.filename)}` : ''
-  const artifact: DebugArtifact = { key: `debug:realtime:${runId}${suffix}`, name, format: 'Excel',
+  const artifact: DebugArtifact = { key: `debug:realtime:${runId}${suffix}`, name, format: formats[extension as keyof typeof formats],
     count: document?.test_case_count, size: document?.size_bytes }
   await saveBlobs([{ key: artifact.key, blob }])
   return artifact

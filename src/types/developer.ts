@@ -18,7 +18,7 @@ export interface RealtimeTask {
   error_message: string | null
   documents: RealtimeDocument[]
 }
-export interface DebugArtifact { key: string; name: string; count?: number; size?: number; format?: 'Markdown' | 'Excel' }
+export interface DebugArtifact { key: string; name: string; count?: number; size?: number; format?: 'Markdown' | 'Excel' | 'Word' | 'PDF' | 'TXT' | 'JSON' | 'CSV' }
 export interface ImplementationForm {
   revision?: number
   skillVersionId?: number
