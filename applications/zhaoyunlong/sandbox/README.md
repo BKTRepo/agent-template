@@ -2,17 +2,19 @@
 
 在线调试不使用 Celery：接口先在 MySQL 创建任务记录并返回 `run_id`，同一后端进程中的后台任务再同步执行 Docker 沙箱和模型。前端关闭弹窗不会取消任务；再次打开时可按 `skill_id` 查询最近一条任务。
 
-生成成功后的 Excel 保存在：
+生成成功后的结果文件保存在：
 
 ```text
 applications/zhaoyunlong/sandbox_results/
 └── runs/
     └── {run_id}/
-        ├── 调试结果文档.xlsx
-        └── 或多个按 Skill 结果命名的 .xlsx 文件
+        ├── metadata.json
+        ├── Skill 自主命名的结果文件.xlsx
+        ├── Skill 自主命名的结果文件.docx
+        └── ...
 ```
 
-容器、上传内容和 Markdown 中间产物会清理，仅短期保留最终 Excel。默认保留 24 小时，可用 `ZHAOYUNLONG_DEBUG_RESULT_RETENTION_SECONDS` 配置为 1 小时至 7 天。后端启动后会使用 APScheduler 在每天北京时间凌晨 3 点删除过期结果目录及对应的 `keenrobot_online_debug_runs` 表记录；创建任务和下载文档时也会继续执行一次兜底的文件清理。
+结果内容、数量、文件名和格式均由接口传入的 Skill 决定，后端不再把结果硬编码为测试用例 Excel。当前支持 `.txt`、`.md`、`.json`、`.csv`、`.xlsx`、`.docx`、`.pdf`，最多 20 个文件。容器、上传内容和中间产物会清理，仅短期保留 `run_id` 目录内的最终文件及 `metadata.json`。默认保留 24 小时，可用 `ZHAOYUNLONG_DEBUG_RESULT_RETENTION_SECONDS` 配置为 1 小时至 7 天。后端启动后会使用 APScheduler 在每天北京时间凌晨 3 点按 `run_id` 删除整个结果目录及对应的 `keenrobot_online_debug_runs` 表记录；创建任务和下载文档时也会继续执行一次兜底清理。
 
 模型执行默认不设时长上限，容器会等待模型自然结束。若生产运维需要兜底保护，可设置 `ZHAOYUNLONG_SANDBOX_TIMEOUT_SECONDS` 为正数秒数；设置为 `0` 或不设置时表示无限等待。
 
@@ -57,11 +59,11 @@ applications/zhaoyunlong/sandbox_results/
 
 调试弹窗重新打开时调用。后端按 `skill_id` 返回最新创建的任务，包括仍在运行中的任务。
 
-### 4. 下载调试结果文档
+### 4. 下载调试结果文件
 
 `GET /realtime-test-case-gen/runs/{run_id}/document`
 
-仅 `completed` 状态可下载，返回首个 Excel 文件。任务未完成、结果过期、文件不存在或无权访问时不会返回文件。
+仅 `completed` 状态可下载。未传 `filename` 时返回结果数组中的第一个文件；任务未完成、结果过期、文件不存在或无权访问时不会返回文件。
 
 当 Skill 生成多个结果时，前端遍历 `documents` 数组，并使用每条记录的 `download_url` 下载对应文件。例如：
 
@@ -71,11 +73,11 @@ GET /realtime-test-case-gen/runs/{run_id}/document?filename=登录功能.xlsx
 
 ## 本地联调
 
-1. 启动 MySQL：
+1. 在 `.env` 中配置可访问的 MySQL 和模型参数。使用一个全新的空数据库时，先初始化全部模型对应的基础表：
 
    ```bash
    cd /Users/superxiaozhao/PythonProject/agent-template
-   docker compose up -d mysql
+   PYTHONPATH=. /Users/superxiaozhao/miniconda3/envs/py3.12/bin/python -m aerich init-db
    ```
 
 2. 构建一次沙箱镜像：
@@ -84,11 +86,10 @@ GET /realtime-test-case-gen/runs/{run_id}/document?filename=登录功能.xlsx
    docker build -f applications/zhaoyunlong/sandbox/Dockerfile -t test-case-sandbox:local .
    ```
 
-3. 安装新增依赖并执行数据库迁移：
+3. 安装依赖：
 
    ```bash
-   /Users/superxiaozhao/miniconda3/envs/py3.12/bin/python -m pip install -e .
-   PYTHONPATH=. /Users/superxiaozhao/miniconda3/envs/py3.12/bin/python -m aerich upgrade
+   /Users/superxiaozhao/miniconda3/envs/py3.12/bin/python -m pip install -r requirements.txt
    ```
 
 4. 启动后端：
@@ -97,7 +98,7 @@ GET /realtime-test-case-gen/runs/{run_id}/document?filename=登录功能.xlsx
    /Users/superxiaozhao/miniconda3/envs/py3.12/bin/python backend_main.py
    ```
 
-5. 使用示例脚本创建任务、等待完成并下载全部 Excel：
+5. 使用示例脚本创建任务、等待完成并下载全部 Skill 结果文件：
 
    ```bash
    /Users/superxiaozhao/miniconda3/envs/py3.12/bin/python \

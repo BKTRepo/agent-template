@@ -18,9 +18,8 @@ class OnlineDebugRun(ScaffoldModel):
     # 创建任务时记录当前登录人的姓名；历史任务和无法识别姓名的情况保留为空字符串。
     debugger = fields.CharField(max_length=64, default="", index=True, description="调试人")
 
-    # 仅在任务成功时写入结果文件信息；文件实际保存在 sandbox_results/runs 目录。
-    result_file_path = fields.CharField(max_length=1024, null=True, description="结果 Excel 文件的服务端路径")
-    result_file_name = fields.CharField(max_length=255, null=True, description="结果 Excel 文件名")
+    # 仅在任务成功时写入本次运行目录；目录内可包含 Skill 自主生成的一个或多个不同格式文件。
+    result_file_path = fields.CharField(max_length=1024, null=True, description="结果文件所在 run_id 目录的服务端路径")
 
     # 失败信息限定长度，避免把容器日志或模型返回内容无限写入数据库。
     error_message = fields.TextField(null=True, description="任务失败原因")

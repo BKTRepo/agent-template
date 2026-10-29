@@ -1,4 +1,4 @@
-"""开发者中心在线调试接口：创建任务、查询状态和下载 Excel 结果。"""
+"""开发者中心在线调试接口：创建任务、查询状态和下载 Skill 生成的结果文件。"""
 
 from __future__ import annotations
 
@@ -90,17 +90,17 @@ async def get_latest_online_debug_run(
 
 @realtime_test_case_router.get(
     "/runs/{run_id}/document",
-    summary="下载在线调试结果 Excel 文档",
-    description="仅当调试任务 completed 时下载结果 Excel；多个结果时传 filename 下载指定文件。",
+    summary="下载在线调试结果文件",
+    description="仅当调试任务 completed 时下载结果文件；多个结果时传 filename 下载指定文件。",
 )
 async def download_online_debug_document(
     run_id: str,
     filename: str | None = Query(default=None, description="多个结果文件时指定要下载的文件名"),
     current_user: User = DependAuth,
 ) -> FileResponse:
-    """【下载调试结果文档接口】单文件直接下载；多文件按 filename 下载指定 Excel。"""
+    """【下载调试结果文件接口】单文件直接下载；多文件按 filename 下载指定文件。"""
     try:
-        file_path, filename = await OnlineDebugRunService.get_document_path(
+        file_path, filename, media_type = await OnlineDebugRunService.get_document_path(
             run_id,
             int(current_user.id),
             bool(current_user.is_superuser),
@@ -109,7 +109,7 @@ async def download_online_debug_document(
         return FileResponse(
             path=str(file_path),
             filename=filename,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            media_type=media_type,
         )
     except OnlineDebugRunNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

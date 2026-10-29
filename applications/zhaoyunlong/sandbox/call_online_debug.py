@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import argparse
-import io
 import json
 import mimetypes
 import os
 import sys
 import time
 import uuid
-import zipfile
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -20,24 +18,24 @@ from urllib.request import Request, urlopen
 DEFAULT_SKILL_DEFINITION = """# 登录功能测试用例生成
 
 ## 目标
-根据输入的需求、文档和挂载资源生成可执行的 Excel 功能测试用例。
+根据输入的需求、文档和挂载资源生成完整的登录功能测试用例文档。
 
 ## 覆盖范围
 覆盖正常、异常、边界、权限与安全场景；每条用例应包含前置条件、步骤、预期结果和优先级。
 """
 
-MULTI_RESULT_SKILL_DEFINITION = """# 登录与权限测试用例生成
+MULTI_RESULT_SKILL_DEFINITION = """# 登录与权限测试结果生成
 
 ## 目标
-根据本次调试诉求，生成两份彼此独立、可导入 ATPM 的功能测试用例。
+根据本次调试诉求，生成两份彼此独立的交付结果。
 
 ## 固定输出要求
-必须生成以下两份 Markdown 结果文件，不能合并为同一个文件：
+必须生成以下两份结果文件，不能合并为同一个文件：
 
-1. `/output/登录功能.md`：覆盖登录成功、错误密码、空值、账号状态和输入边界等场景。
-2. `/output/权限功能.md`：覆盖角色权限、无权限访问、越权访问、权限变更和会话失效等场景。
+1. `/output/登录功能.xlsx`：覆盖登录成功、错误密码、空值、账号状态和输入边界等场景。
+2. `/output/权限功能.docx`：覆盖角色权限、无权限访问、越权访问、权限变更和会话失效等场景。
 
-每份文件均使用 ATPM 测试用例表格格式，包含正向、反向和边界用例。
+每份文件的具体内容和格式由本 Skill 定义决定，包含正向、反向和边界用例。
 """
 
 
@@ -72,7 +70,7 @@ def main() -> int:
         if completed_run is None:
             return 1
 
-        # 第四个在线调试接口：使用同一个下载地址按文件名下载全部 Excel 结果文档。
+        # 第四个在线调试接口：使用同一个下载地址按文件名下载全部结果文件。
         output_paths = _download_documents(
             base_url=base_url,
             token=token,
@@ -80,7 +78,7 @@ def main() -> int:
             completed_run=completed_run,
             output_dir=Path(args.output_dir),
         )
-        print(f"\n[4/4] 下载调试结果文档成功，共 {len(output_paths)} 个文件")
+        print(f"\n[4/4] 下载调试结果文件成功，共 {len(output_paths)} 个文件")
         for output_path in output_paths:
             print(f"文件位置：{output_path}")
         return 0
@@ -95,7 +93,7 @@ def main() -> int:
 
 def _parse_args() -> argparse.Namespace:
     """读取脚本参数；敏感的登录信息也可从环境变量读取。"""
-    parser = argparse.ArgumentParser(description="完整调用在线调试四个接口并下载 Excel 测试用例")
+    parser = argparse.ArgumentParser(description="完整调用在线调试四个接口并下载 Skill 生成的全部结果文件")
     parser.add_argument("--base-url", default="http://127.0.0.1:8000", help="后端服务地址")
     parser.add_argument("--token", default=os.getenv("ONLINE_DEBUG_TOKEN", ""), help="已有登录令牌；也可使用 ONLINE_DEBUG_TOKEN")
     parser.add_argument("--username", default=os.getenv("ONLINE_DEBUG_USERNAME", ""), help="登录账号；未传 token 时必填")
@@ -105,12 +103,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--multi-result-example",
         action="store_true",
-        help="使用内置多结果示例，要求模型生成登录功能和权限功能两份 Excel",
+        help="使用内置多结果示例，要求模型生成登录 Excel 和权限 Word 两份文件",
     )
     parser.add_argument("--conversation", default="请为登录功能生成完整功能测试用例。", help="本次调试诉求")
     parser.add_argument("--document", action="append", default=[], help="需求文档路径；可重复指定，最多 10 个")
     parser.add_argument("--resource", action="append", default=[], help="挂载资源路径；可重复指定，最多 20 个")
-    parser.add_argument("--output-dir", default="./downloads", help="Excel 调试结果保存目录")
+    parser.add_argument("--output-dir", default="./downloads", help="调试结果文件保存目录")
     parser.add_argument("--wait-seconds", type=int, default=0, help="等待任务完成的最长秒数；0 表示无限等待")
     parser.add_argument("--poll-interval", type=float, default=2, help="查询任务状态的间隔秒数")
     args = parser.parse_args()
@@ -217,7 +215,7 @@ def _wait_for_completion(
 def _download_documents(
     *, base_url: str, token: str, run_id: str, completed_run: dict[str, Any], output_dir: Path,
 ) -> list[Path]:
-    """逐个调用结果下载地址，并将所有 Excel 保存到本地。"""
+    """逐个调用结果下载地址，并将所有 Skill 生成的文件保存到本地。"""
     documents = completed_run.get("documents")
     if not isinstance(documents, list) or not documents:
         raise ValueError("任务完成响应缺少 documents")
@@ -228,19 +226,16 @@ def _download_documents(
             raise ValueError("任务完成响应中的 documents 格式不正确")
         download_url = _require_string(document, "download_url", "任务完成响应")
         filename = document.get("filename")
-        safe_filename = Path(filename).name if isinstance(filename, str) and filename else "调试结果文档.xlsx"
+        safe_filename = Path(filename).name if isinstance(filename, str) and filename else "调试结果文件"
         request = Request(url=f"{base_url}{download_url}", headers={"token": token}, method="GET")
         with urlopen(request, timeout=30) as response:
             content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
             content = response.read()
 
-        # 部分项目异常响应使用 HTTP 200，不能只凭状态码判断下载成功。
-        expected_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        if content_type != expected_type:
+        # 部分项目异常响应使用 HTTP 200，下载错误时仍会返回 JSON 文本，不能只凭状态码判断。
+        if content_type == "application/json":
             detail = content.decode("utf-8", errors="replace")
-            raise ValueError(f"下载接口未返回 Excel（Content-Type: {content_type}）：{detail}")
-        if not zipfile.is_zipfile(io.BytesIO(content)):
-            raise ValueError("下载接口返回的内容不是有效的 Excel 文件，未保存下载副本")
+            raise ValueError(f"下载接口未返回结果文件（Content-Type: {content_type}）：{detail}")
 
         target = output_dir.expanduser().resolve() / f"{run_id}_{safe_filename}"
         target.parent.mkdir(parents=True, exist_ok=True)

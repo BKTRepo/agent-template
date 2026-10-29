@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 import os
 import re
 import shutil
@@ -18,15 +19,24 @@ from configure import PROJECT_CONFIG
 from dotenv import dotenv_values
 
 from .docker_sandbox import DockerSandboxRunner, SandboxConfig, SandboxResult
-from .test_case_excel import TestCaseExcelError, build_test_case_workbook
 
 
 _RESULT_PREFIX = "SKILL_SANDBOX_RESULT="
 _RESULT_RETENTION_SECONDS = 24 * 60 * 60
 _RUN_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
-_MARKDOWN_RESULT_NAME = "功能测试用例.md"
-_EXCEL_RESULT_NAME = "调试结果文档.xlsx"
 _MAX_RESULT_DOCUMENTS = 20
+_MAX_RESULT_FILE_BYTES = 20 * 1024 * 1024
+_MAX_RESULT_TOTAL_BYTES = 100 * 1024 * 1024
+_RESULT_FILE_SUFFIXES = frozenset({".txt", ".md", ".json", ".csv", ".xlsx", ".docx", ".pdf"})
+_RESULT_MEDIA_TYPES = {
+    ".txt": "text/plain; charset=utf-8",
+    ".md": "text/markdown; charset=utf-8",
+    ".json": "application/json",
+    ".csv": "text/csv; charset=utf-8",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".pdf": "application/pdf",
+}
 _REQUIRED_MODEL_ENV_NAMES = (
     "ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL",
     "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
@@ -48,6 +58,7 @@ class OnlineDebugRun:
     """运行接口成功后返回给前端的安全元数据。"""
 
     run_id: str
+    result_dir: Path
     duration_ms: int
     expires_at: str
     documents: tuple["OnlineDebugDocument", ...]
@@ -64,28 +75,28 @@ class OnlineDebugRun:
 
 @dataclass(frozen=True)
 class OnlineDebugDocument:
-    """下载接口所需的已授权结果文档信息。"""
+    """下载接口所需的已授权结果文件信息。"""
 
     file_path: Path
     filename: str
     size_bytes: int
-    test_case_count: int
+    media_type: str
 
     def as_response(self, run_id: str, expires_at: str) -> dict[str, Any]:
         """转换为前端下载文件列表中的单个文件信息。"""
         suffix = f"/document?filename={quote(self.filename)}"
         return {
             "filename": self.filename,
-            "format": "xlsx",
+            "format": Path(self.filename).suffix.removeprefix(".").lower(),
             "size_bytes": self.size_bytes,
-            "test_case_count": self.test_case_count,
+            "media_type": self.media_type,
             "download_url": f"/realtime-test-case-gen/runs/{run_id}{suffix}",
             "expires_at": expires_at,
         }
 
 
 class OnlineDebugService:
-    """执行动态 Skill 定义，并在宿主机保存短期可下载的 Excel 结果。"""
+    """执行动态 Skill 定义，并在宿主机保存短期可下载的结果文件。"""
 
     def __init__(self, runner: DockerSandboxRunner | None = None) -> None:
         self.runner = runner or DockerSandboxRunner()
@@ -100,7 +111,7 @@ class OnlineDebugService:
         self.runs_dir.mkdir(parents=True, exist_ok=True)
 
     def run(self, payload: dict[str, Any], owner_id: int, run_id: str | None = None) -> OnlineDebugRun:
-        """同步运行容器，转换 Markdown 用例并持久化 Excel 下载文件。"""
+        """同步运行容器，并保留 Skill 在本次运行目录中生成的最终文件。"""
         self._validate_payload(payload)
         self.cleanup_expired_runs()
         model_environment = self._model_environment()
@@ -113,9 +124,12 @@ class OnlineDebugService:
         run_dir = self.runs_dir / run_id
         if run_dir.exists():
             raise OnlineDebugError("调试任务编号已存在")
-        input_dir, output_dir = run_dir / "input", run_dir / "output"
+        # Docker 执行器要求 Skill、输入和输出挂载目录彼此独立。容器工作目录
+        # 只在本次执行期间存在；通过校验后的最终文件才会搬入 runs/{run_id}。
+        work_dir = self.data_dir / ".work" / run_id
+        input_dir, output_dir = work_dir / "input", work_dir / "output"
         run_dir.mkdir(mode=0o700)
-        input_dir.mkdir(mode=0o700)
+        input_dir.mkdir(mode=0o700, parents=True)
         output_dir.mkdir(mode=0o700)
         try:
             self._write_input(input_dir, payload)
@@ -129,22 +143,23 @@ class OnlineDebugService:
                 timeout_seconds=self.execution_timeout_seconds,
             ))
             _, skill_result = self._extract_skill_result(result.stdout)
-            markdown_paths = self._validate_sandbox_result(result, skill_result, output_dir)
-            documents = self._build_result_documents(markdown_paths, run_dir)
+            documents = self._validate_sandbox_result(result, skill_result, output_dir)
+            documents = self._persist_result_files(documents, run_dir)
             expires_at = time.time() + self.retention_seconds
             self._write_metadata(run_dir, run_id, owner_id, result, documents, expires_at)
-            # 模型请求、上传文档和 Markdown 中间产物都无需长期保存。
-            shutil.rmtree(input_dir, ignore_errors=True)
-            shutil.rmtree(output_dir, ignore_errors=True)
+            # 上传内容和容器输出工作目录都是临时文件；最终文件已位于 run_id 目录。
+            shutil.rmtree(work_dir, ignore_errors=True)
             return OnlineDebugRun(
-                run_id=run_id, duration_ms=result.duration_ms,
+                run_id=run_id, result_dir=run_dir, duration_ms=result.duration_ms,
                 expires_at=self._format_timestamp(expires_at), documents=documents,
             )
         except OnlineDebugError:
             shutil.rmtree(run_dir, ignore_errors=True)
+            shutil.rmtree(work_dir, ignore_errors=True)
             raise
         except Exception as exc:
             shutil.rmtree(run_dir, ignore_errors=True)
+            shutil.rmtree(work_dir, ignore_errors=True)
             raise OnlineDebugError(f"在线调试沙箱启动失败：{exc}") from exc
 
     def get_document(
@@ -160,7 +175,7 @@ class OnlineDebugService:
         raise OnlineDebugError("指定的调试结果文档不存在")
 
     def get_documents(self, run_id: str, owner_id: int, is_superuser: bool) -> tuple[OnlineDebugDocument, ...]:
-        """校验归属和有效期后，返回该次调试生成的全部 Excel 文件。"""
+        """校验归属和有效期后，返回该次调试生成的全部结果文件。"""
         self.cleanup_expired_runs()
         if not _RUN_ID_PATTERN.fullmatch(run_id):
             raise OnlineDebugError("调试结果编号格式不正确")
@@ -177,58 +192,44 @@ class OnlineDebugService:
     @staticmethod
     def _validate_sandbox_result(
         result: SandboxResult, skill_result: dict[str, Any] | None, output_dir: Path,
-    ) -> tuple[Path, ...]:
-        """校验容器状态并读取一个或多个 Markdown 测试用例产物。"""
+    ) -> tuple[OnlineDebugDocument, ...]:
+        """校验容器状态并读取 Skill 自主生成的一个或多个最终文件。"""
         if result.status == "timed_out":
             raise OnlineDebugError("在线调试沙箱执行超时")
         if result.status != "succeeded":
             raise OnlineDebugError(OnlineDebugService._result_error("沙箱执行失败", result))
-        model_output = skill_result.get("model_output", "") if isinstance(skill_result, dict) else ""
-        if not isinstance(model_output, str) or not model_output.strip():
-            raise OnlineDebugError("容器未按在线调试协议返回模型文本")
+        if skill_result is None:
+            raise OnlineDebugError("容器未按在线调试协议返回执行结果")
         result_files = tuple(sorted(
-            (path for path in output_dir.glob("*.md") if path.is_file() and path.stat().st_size > 0),
-            key=lambda path: (path.name != _MARKDOWN_RESULT_NAME, path.name),
+            (
+                path for path in output_dir.iterdir()
+                if path.is_file()
+                and path.name != "metadata.json"
+                and not path.name.startswith(".")
+                and path.suffix.lower() in _RESULT_FILE_SUFFIXES
+                and path.stat().st_size > 0
+            ),
+            key=lambda path: path.name,
         ))
         if not result_files:
-            raise OnlineDebugError("模型执行结束但未生成 Markdown 测试用例文件")
+            allowed_suffixes = "、".join(sorted(_RESULT_FILE_SUFFIXES))
+            raise OnlineDebugError(f"Skill 执行结束但未生成最终文件；支持格式：{allowed_suffixes}")
         if len(result_files) > _MAX_RESULT_DOCUMENTS:
             raise OnlineDebugError(f"模型生成的结果文件超过 {_MAX_RESULT_DOCUMENTS} 个")
-        return result_files
-
-    def _build_result_documents(
-        self, markdown_paths: tuple[Path, ...], run_dir: Path,
-    ) -> tuple[OnlineDebugDocument, ...]:
-        """将每个 Markdown 用例文件转换为独立 Excel，并生成安全的下载元数据。"""
+        total_size = sum(path.stat().st_size for path in result_files)
+        if total_size > _MAX_RESULT_TOTAL_BYTES:
+            raise OnlineDebugError("Skill 生成的结果文件总大小超过 100 MB")
         documents: list[OnlineDebugDocument] = []
-        used_filenames: set[str] = set()
-        multiple = len(markdown_paths) > 1
-        for markdown_path in markdown_paths:
-            filename = self._excel_filename(markdown_path.stem, multiple, used_filenames)
-            excel_path = run_dir / filename
-            try:
-                test_case_count = build_test_case_workbook(markdown_path, excel_path)
-            except TestCaseExcelError as exc:
-                raise OnlineDebugError(f"无法生成 Excel 调试结果文档（{markdown_path.name}）：{exc}") from exc
+        for file_path in result_files:
+            if file_path.stat().st_size > _MAX_RESULT_FILE_BYTES:
+                raise OnlineDebugError(f"Skill 生成的结果文件超过 20 MB：{file_path.name}")
             documents.append(OnlineDebugDocument(
-                file_path=excel_path,
-                filename=filename,
-                size_bytes=excel_path.stat().st_size,
-                test_case_count=test_case_count,
+                file_path=file_path,
+                filename=file_path.name,
+                size_bytes=file_path.stat().st_size,
+                media_type=OnlineDebugService._media_type(file_path),
             ))
         return tuple(documents)
-
-    @staticmethod
-    def _excel_filename(source_stem: str, multiple: bool, used_filenames: set[str]) -> str:
-        """生成位于本次运行目录内、可安全下载且不重名的 Excel 文件名。"""
-        base_name = "调试结果文档" if not multiple else re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", source_stem).strip(" .")
-        base_name = (base_name or "调试结果")[:120]
-        filename, sequence = f"{base_name}.xlsx", 2
-        while filename in used_filenames:
-            filename = f"{base_name}_{sequence}.xlsx"
-            sequence += 1
-        used_filenames.add(filename)
-        return filename
 
     def _write_metadata(
         self, run_dir: Path, run_id: str, owner_id: int, result: SandboxResult,
@@ -242,7 +243,7 @@ class OnlineDebugService:
                 {
                     "filename": document.filename,
                     "size_bytes": document.size_bytes,
-                    "test_case_count": document.test_case_count,
+                    "media_type": document.media_type,
                 }
                 for document in documents
             ],
@@ -250,6 +251,24 @@ class OnlineDebugService:
         (run_dir / "metadata.json").write_text(
             json.dumps(metadata, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
         )
+
+    @staticmethod
+    def _persist_result_files(
+        documents: tuple[OnlineDebugDocument, ...], run_dir: Path,
+    ) -> tuple[OnlineDebugDocument, ...]:
+        """将已校验的容器输出搬入最终 run_id 目录，并返回最终路径信息。"""
+        persisted: list[OnlineDebugDocument] = []
+        for document in documents:
+            target = run_dir / document.filename
+            # 文件名在校验阶段已限定为普通文件名，且 run_dir 为本次新建目录。
+            shutil.move(str(document.file_path), str(target))
+            persisted.append(OnlineDebugDocument(
+                file_path=target,
+                filename=document.filename,
+                size_bytes=document.size_bytes,
+                media_type=document.media_type,
+            ))
+        return tuple(persisted)
 
     def _read_metadata(self, run_dir: Path) -> dict[str, Any]:
         """读取并校验运行目录内的元数据，避免使用任何外部路径。"""
@@ -295,31 +314,43 @@ class OnlineDebugService:
 
     @staticmethod
     def _documents_from_metadata(run_dir: Path, metadata: dict[str, Any]) -> tuple[OnlineDebugDocument, ...]:
-        """从元数据还原并校验结果文件，兼容升级前的单文件元数据。"""
+        """从元数据还原并校验 Skill 生成的结果文件。"""
         values = metadata.get("documents")
         if not isinstance(values, list):
-            values = [{"filename": metadata.get("filename", _EXCEL_RESULT_NAME)}]
+            raise OnlineDebugError("调试结果元数据格式不正确")
         documents: list[OnlineDebugDocument] = []
         for value in values:
             if not isinstance(value, dict):
                 raise OnlineDebugError("调试结果元数据格式不正确")
             filename = value.get("filename")
-            if not isinstance(filename, str) or PurePath(filename).name != filename or Path(filename).suffix.lower() != ".xlsx":
+            if (
+                not isinstance(filename, str)
+                or PurePath(filename).name != filename
+                or Path(filename).suffix.lower() not in _RESULT_FILE_SUFFIXES
+            ):
                 raise OnlineDebugError("调试结果文件名不合法")
             document = run_dir / filename
             if not document.is_file() or document.stat().st_size == 0:
                 raise OnlineDebugError("调试结果文档不存在或已损坏")
             size_bytes = value.get("size_bytes")
-            test_case_count = value.get("test_case_count")
+            media_type = value.get("media_type")
             documents.append(OnlineDebugDocument(
                 file_path=document,
                 filename=filename,
                 size_bytes=size_bytes if isinstance(size_bytes, int) and size_bytes >= 0 else document.stat().st_size,
-                test_case_count=test_case_count if isinstance(test_case_count, int) and test_case_count >= 0 else 0,
+                media_type=media_type if isinstance(media_type, str) and media_type else OnlineDebugService._media_type(document),
             ))
         if not documents:
             raise OnlineDebugError("调试结果文档不存在或已损坏")
         return tuple(documents)
+
+    @staticmethod
+    def _media_type(file_path: Path) -> str:
+        """返回下载响应使用的安全媒体类型，未知格式退回通用二进制下载。"""
+        return _RESULT_MEDIA_TYPES.get(
+            file_path.suffix.lower(),
+            mimetypes.guess_type(file_path.name)[0] or "application/octet-stream",
+        )
 
     @staticmethod
     def _read_execution_timeout_seconds() -> float | None:

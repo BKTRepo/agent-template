@@ -69,9 +69,8 @@ class OnlineDebugRunService:
             expires_at = finished_at + timedelta(seconds=sandbox.retention_seconds)
             await OnlineDebugRunModel.filter(id=record_id).update(
                 status="completed",
-                # 任务表保留首个文件用于兼容旧结构；所有文件清单保存于运行目录元数据。
-                result_file_path=str(result.documents[0].file_path),
-                result_file_name=result.documents[0].filename,
+                # 任务表只记录本次 run_id 目录；目录内的完整文件清单由 metadata.json 管理。
+                result_file_path=str(result.result_dir),
                 finished_at=finished_at,
                 expires_at=expires_at,
                 error_message=None,
@@ -117,18 +116,18 @@ class OnlineDebugRunService:
         owner_id: int,
         is_superuser: bool,
         filename: str | None = None,
-    ) -> tuple[Path, str]:
-        """校验任务状态、权限和有效期后返回 Excel 文件路径。"""
+    ) -> tuple[Path, str, str]:
+        """校验任务状态、权限和有效期后返回指定结果文件路径。"""
         record = await cls.get_run(run_id)
         if record.status != "completed":
             raise OnlineDebugError("调试任务尚未完成，暂不能下载结果文档")
         # 使用与数据库过期时间一致的时区，兼容带时区及不带时区的时间。
         if record.expires_at is not None and record.expires_at <= datetime.now(record.expires_at.tzinfo):
             raise OnlineDebugError("调试结果文档已过期，请重新运行调试")
-        if not record.result_file_path or not record.result_file_name:
-            raise OnlineDebugError("调试任务未保存结果文档信息")
+        if not record.result_file_path:
+            raise OnlineDebugError("调试任务未保存结果目录信息")
 
-        # 任务表只存结果路径；真正下载时仍使用元数据校验文件归属。
+        # 任务表只存运行目录；真正下载时仍使用元数据校验文件归属和文件名。
         document = await asyncio.to_thread(
             OnlineDebugService().get_document,
             run_id,
@@ -136,7 +135,7 @@ class OnlineDebugRunService:
             is_superuser,
             filename,
         )
-        return document.file_path, document.filename
+        return document.file_path, document.filename, document.media_type
 
     @classmethod
     async def as_response(cls, record: OnlineDebugRunModel) -> dict[str, Any]:
