@@ -3,7 +3,7 @@ from applications.wrq.agent.services.developer_skill_crud import DeveloperError
 from applications.wrq.http import WrqRoute
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from pydantic import ValidationError
-from starlette.responses import FileResponse
+from starlette.responses import FileResponse, Response
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from applications.wrq.agent.schemas.skill_package_schema import (
@@ -158,8 +158,8 @@ async def list_skill_packages(skill_id: str, limit: int = Query(default=20, ge=1
 async def download_skill_package(skill_id: str, build_id: str, current_user: User = DependAuth,
                                 service: SkillPackageService = Depends(get_skill_package_service)):
     try:
-        path = await service.download(skill_id, build_id, current_user)
-        return FileResponse(path, media_type="application/zip", filename=f"skill-{build_id}.zip")
+        content = await service.download(skill_id, build_id, current_user)
+        return Response(content, media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="skill-{build_id}.zip"'})
     except SkillPackageError as exc:
         return ParameterResponse(message="构建包内容校验失败", data=exc.report.model_dump())
     except SkillBuildNotFound as exc:

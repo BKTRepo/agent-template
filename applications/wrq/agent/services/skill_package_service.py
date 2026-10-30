@@ -2,6 +2,8 @@
 import asyncio
 import hashlib
 import json
+import io
+import zipfile
 from pathlib import Path
 import tempfile
 from contextlib import ExitStack
@@ -22,6 +24,7 @@ from applications.wrq.agent.services.skill_package_builder import (
     ResolvedSkillResource, SkillPackageBuilder, SkillPackageError, validate_source, markdown_body,
 )
 from applications.wrq.agent.services.skill_upload_adapter import source_from_developer_form
+from applications.wrq.agent.services.published_skill_version import display_skill_version
 from applications.wrq.agent.services.skill_resource_rules import resource_role
 from applications.wrq.agent.services.agent_crud import SkillCrud
 from applications.wrq.agent.skill_names import SkillNameError
@@ -222,10 +225,9 @@ class SkillPackageService(LegacySkillPackageService):
                 categories = {r.id: r.code for r in await ResourceCategory.all().using_db(db)}
                 normalized = form.model_copy(update={'resource_categories': [categories[f.category_id] for f in files],
                                                     'skill_markdown': read_markdown(content.skill_markdown_path) or None})
-                # 新建草稿尚未登记公开版本时，页面合同约定首次构建使用 1.0.0。
-                # 数据库中的 version 仍可为 NULL，但不能把 NULL 传给构建器。
+                # 未上线的草稿没有对外版本；构建内容以短横杠表示，数据库仍保留 NULL。
                 source = source_from_developer_form(normalized, [f.file_name for f in files], technical_name=content.technical_name,
-                    version=saved.version or "1.0.0", validate_catalog=False)
+                    version=saved.version or "-", validate_catalog=False)
                 source, resolved, report = await self.resolve(source, user)
                 if not report.valid:
                     raise SkillPackageError(report)
@@ -278,7 +280,13 @@ class SkillPackageService(LegacySkillPackageService):
                 raise SkillBuildNotFound('构建记录不存在') from exc
             if Path(built['workspace_dir']).resolve() != package.parent:
                 raise SkillBuildNotFound('构建目录与已保存版本不一致')
-            return {**built, 'skill_version_id':version.id, 'current_revision':version.revision}
+            archive, download_files = await asyncio.to_thread(self._published_archive, built, version.version)
+            return {**built, 'original_build_version': built['version'],
+                    'download_package_sha256': hashlib.sha256(archive).hexdigest(),
+                    'download_package_size': len(archive), 'download_files': download_files,
+                    'version': version.version or '-',
+                    'source': {**built.get('source', {}), 'version': version.version or '-'},
+                    'skill_version_id':version.id, 'current_revision':version.revision}
         return await super().get(skill_id, build_id, user, verify=verify)
 
     async def list_builds(self, skill_id, user, *, limit=20, offset=0):
@@ -294,7 +302,29 @@ class SkillPackageService(LegacySkillPackageService):
 
     async def download(self, skill_id, build_id, user):
         built = await self.get(skill_id, build_id, user, verify=True)
-        return Path(built['workspace_dir'])/'package.zip'
+        from applications.wrq.agent.models.agent_model import SkillVersion
+        version = await SkillVersion.get_or_none(skill_id=skill_id, build_id=build_id)
+        if not version:
+            raise SkillBuildNotFound('构建版本不存在')
+        return (await asyncio.to_thread(self._published_archive, built, version.version))[0]
+
+    @staticmethod
+    def _published_archive(built, version):
+        # files/package_sha256 仍对应原始构建；download_* 对应发布下载副本。
+        result = io.BytesIO()
+        download_files = []
+        with zipfile.ZipFile(Path(built['workspace_dir'])/'package.zip') as original, zipfile.ZipFile(result, 'w') as copy:
+            skill_path = f"{built['name']}/SKILL.md"
+            if skill_path not in original.namelist():
+                raise ValueError('构建包缺少 Skill 定义')
+            for entry in original.infolist():
+                data = original.read(entry)
+                if entry.filename == skill_path:
+                    data = display_skill_version(data.decode('utf-8'), version).encode('utf-8')
+                copy.writestr(entry, data)
+                download_files.append({'path': entry.filename.removeprefix(built['name'] + '/'),
+                                       'size': len(data), 'sha256': hashlib.sha256(data).hexdigest()})
+        return result.getvalue(), download_files
 
     async def definition(self, skill_id, user):
         from applications.wrq.agent.services.version_service import version_and_form
@@ -303,7 +333,7 @@ class SkillPackageService(LegacySkillPackageService):
         if not version or not content or not version.build_id:
             raise SkillBuildNotFound("请先生成当前版本的Skill定义")
         built = await self.get(skill_id, version.build_id, user, verify=True)
-        return {'build': built, 'markdown': read_markdown(content.skill_markdown_path), 'version': version.version}
+        return {'build': built, 'markdown': display_skill_version(read_markdown(content.skill_markdown_path), version.version), 'version': version.version}
 
     async def rebuild_saved(self, skill_id, user, *, markdown=None, expected_version=None, knowledge_base_id=None, resource_usage=None):
         async with in_transaction():
