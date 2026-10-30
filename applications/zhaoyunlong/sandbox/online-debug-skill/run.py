@@ -49,12 +49,17 @@ def load_config() -> dict[str, object]:
     model = os.environ.get("ANTHROPIC_MODEL", "").strip()
     if not api_key or not base_url or not model:
         raise DebugExecutionError("缺少 ANTHROPIC_BASE_URL、ANTHROPIC_API_KEY 或 ANTHROPIC_MODEL")
-    try:
-        max_turns = int(os.environ.get("CLAUDE_MAX_TURNS", "6"))
-    except ValueError as exc:
-        raise DebugExecutionError("CLAUDE_MAX_TURNS 必须是整数") from exc
-    if not 1 <= max_turns <= 20:
-        raise DebugExecutionError("CLAUDE_MAX_TURNS 必须介于 1 到 20")
+    # 空值表示不向 Agent SDK 传入轮次限制（max_turns=None）。仍受容器、
+    # 模型服务及系统超时约束；配置了正整数时才启用显式轮次上限。
+    turns_raw = os.environ.get("CLAUDE_MAX_TURNS", "").strip()
+    max_turns: int | None = None
+    if turns_raw:
+        try:
+            max_turns = int(turns_raw)
+        except ValueError as exc:
+            raise DebugExecutionError("CLAUDE_MAX_TURNS 必须是整数") from exc
+        if max_turns < 1:
+            raise DebugExecutionError("CLAUDE_MAX_TURNS 必须是正整数")
     budget_raw = os.environ.get("CLAUDE_MAX_BUDGET_USD", "").strip()
     if not budget_raw:
         return {"model": model, "max_turns": max_turns, "max_budget_usd": None}
@@ -116,7 +121,7 @@ async def call_agent(prompt: str, config: dict[str, object]) -> tuple[str, dict[
         ),
         tools=["Read", "Glob", "Grep", "Write", "Edit", "Bash"],
         allowed_tools=["Read", "Glob", "Grep", "Write", "Edit", "Bash"],
-        setting_sources=[], model=config["model"], max_turns=int(config["max_turns"]),
+        setting_sources=[], model=config["model"], max_turns=config["max_turns"],
         max_budget_usd=config["max_budget_usd"],
     )
     final_message: Any = None
