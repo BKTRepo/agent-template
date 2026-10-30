@@ -11,7 +11,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path, PurePath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Iterable
 from urllib.parse import quote
 
@@ -325,7 +325,7 @@ class OnlineDebugService:
             filename = value.get("filename")
             if (
                 not isinstance(filename, str)
-                or PurePath(filename).name != filename
+                or not OnlineDebugService._is_plain_filename(filename)
                 or Path(filename).suffix.lower() not in _RESULT_FILE_SUFFIXES
             ):
                 raise OnlineDebugError("调试结果文件名不合法")
@@ -350,6 +350,14 @@ class OnlineDebugService:
         return _RESULT_MEDIA_TYPES.get(
             file_path.suffix.lower(),
             mimetypes.guess_type(file_path.name)[0] or "application/octet-stream",
+        )
+
+    @staticmethod
+    def _is_plain_filename(value: str) -> bool:
+        """同时按 Windows 和 POSIX 路径规则判断值是否为普通文件名。"""
+        return bool(value) and (
+            PurePosixPath(value).name == value
+            and PureWindowsPath(value).name == value
         )
 
     @staticmethod
@@ -403,8 +411,14 @@ class OnlineDebugService:
 
     def _write_input(self, input_dir: Path, payload: dict[str, Any]) -> None:
         """将前端文本安全写为容器可读取、不可修改的输入文件。"""
-        document_paths = self._write_text_files(input_dir / "documents", payload["documents"], "文档")
-        resource_paths = self._write_text_files(input_dir / "resources", payload["mounted_resources"], "挂载资源")
+        # 本次文档输入已在接口层按允许格式解析，保留格式检查作为服务层兜底。
+        document_paths = self._write_text_files(
+            input_dir / "documents", payload["documents"], "文档", validate_text_suffix=True,
+        )
+        # 已挂载资源由资源系统负责格式管理；在线调试只安全落盘其已解析文本。
+        resource_paths = self._write_text_files(
+            input_dir / "resources", payload["mounted_resources"], "挂载资源", validate_text_suffix=False,
+        )
         (input_dir / "online-debug-request.json").write_text(json.dumps({
             "skill_definition": payload["skill_definition"],
             "conversation_input": str(payload.get("conversation_input", "")).strip(),
@@ -412,7 +426,13 @@ class OnlineDebugService:
         }, ensure_ascii=False, indent=2), encoding="utf-8")
 
     @staticmethod
-    def _write_text_files(directory: Path, items: list[Any], label: str) -> list[str]:
+    def _write_text_files(
+        directory: Path,
+        items: list[Any],
+        label: str,
+        *,
+        validate_text_suffix: bool,
+    ) -> list[str]:
         """写入已解析文本资源，禁止路径穿越和同名覆盖。"""
         paths: list[str] = []
         total_size = 0
@@ -420,8 +440,10 @@ class OnlineDebugService:
             if not isinstance(item, dict):
                 raise OnlineDebugError(f"{label}中的每项必须是对象")
             raw_name, content = str(item.get("filename", "")), str(item.get("content", ""))
-            filename = PurePath(raw_name).name
-            if not filename or filename != raw_name or Path(filename).suffix.lower() not in {".md", ".txt", ".json"}:
+            filename = raw_name
+            if not OnlineDebugService._is_plain_filename(filename):
+                raise OnlineDebugError(f"{label}文件名不合法")
+            if validate_text_suffix and Path(filename).suffix.lower() not in {".md", ".txt", ".json"}:
                 raise OnlineDebugError(f"{label}必须是已解析的 Markdown、TXT 或 JSON 文本")
             if len(content) > 500_000:
                 raise OnlineDebugError(f"{label}文件过大：{filename}")
@@ -433,7 +455,8 @@ class OnlineDebugService:
             if target.exists():
                 raise OnlineDebugError(f"{label}文件名重复：{filename}")
             target.write_text(content, encoding="utf-8")
-            paths.append(str(target.relative_to(directory.parent)))
+            # 宿主机在 Windows 时 Path 字符串会生成反斜杠；容器内始终按 POSIX 路径读取。
+            paths.append(target.relative_to(directory.parent).as_posix())
         return paths
 
     @staticmethod
