@@ -56,6 +56,7 @@ h1,h2,h3,p { margin:0; }
 .implementation-table { width:100%; border-collapse:collapse; font-size:13px; }
 .implementation-table th { background:#f7faff; color:#68778e; font-weight:500; padding:12px; text-align:left; border-bottom:1px solid var(--platform-line); white-space:nowrap; }
 .implementation-table td { padding:13px 12px; border-bottom:1px solid #edf1f6; white-space:nowrap; height:57px; }
+.implementation-version { display:inline-block; min-width:5ch; text-align:center; }
 .implementation-table tr:hover td { background:#fbfdff; }
 .implementation-name { font-weight:600; }
 .status-tag { display:inline-flex; align-items:center; padding:3px 8px; border-radius:12px; font-size:11px; white-space:nowrap; line-height:1.5; }

@@ -41,6 +41,8 @@ export default function DeveloperPage() {
   const [offlineReasonCode, setOfflineReasonCode] = useState('')
   const [offlineReasonText, setOfflineReasonText] = useState('')
   const [draftDeletePrompt, setDraftDeletePrompt] = useState(false)
+  const [debugSavePrompt, setDebugSavePrompt] = useState(false)
+  const formDirty = useRef(false)
   const record = implementations.find(item => item.id === selectedId)
   const selected = record ? { ...record, ...preview } : undefined
   // 列表接口已按当前登录人过滤，服务端负责最终的本人编辑权限校验。
@@ -69,10 +71,13 @@ export default function DeveloperPage() {
   useEffect(() => { if (!notice) return; const timer = window.setTimeout(() => setNotice(''), 4000); return () => window.clearTimeout(timer) }, [notice])
   useEffect(() => { void load().catch(error => setMessage((error as Error).message)) }, [load])
   function update<K extends keyof ImplementationForm>(key: K, value: ImplementationForm[K]) {
+    formDirty.current = true
     setForm(previous => ({ ...previous, [key]: value }))
     setErrors(previous => ({ ...previous, [key]: '', ...(key === 'resourceIds' || key === 'uploadedResources' ? { resourceUsage: '' } : {}) })); setMessage('')
   }
   function openForm(item?: Implementation) {
+    formDirty.current = false
+    setDebugSavePrompt(false)
     nameCheckSequence.current++
     setUploads({ references: [], scripts: [] })
     setPreview({})
@@ -167,7 +172,7 @@ export default function DeveloperPage() {
       setNotice('草稿已删除。')
     } catch (error) { setMessage((error as Error).message) } finally { setBusy(null) }
   }
-  async function build() {
+  async function build(saveChanges = false) {
     const issues = validateSkillForm(form, implementations, selectedId)
     if (form.resourceIds.some(id => { const kb = useKnowledgeStore.getState().knowledgeBases.find(row => row.id === id); return kb && !canViewKnowledge(kb, actor) })) issues.resourceIds = '所选知识库已不在当前用户的可见范围，请重新选择。'
 
@@ -176,7 +181,8 @@ export default function DeveloperPage() {
     try {
       const ready = await persistSkillResources(form, uploads)
       setForm(ready)
-      const item = selectedId ? await updateDeveloperSkill(selectedId, ready) : await createDeveloperSkill(ready)
+      const item = selectedId && selected && !saveChanges ? selected : selectedId ? await updateDeveloperSkill(selectedId, ready) : await createDeveloperSkill(ready)
+      formDirty.current = false
       replace(item); setSelectedId(item.id)
       // 新建后立即进入构建流程时，当前表单仍然是创建前的草稿对象。
       // 回填后端返回的修订号，后续重试保存/构建才能携带 expected_revision。
@@ -192,6 +198,10 @@ export default function DeveloperPage() {
       const next = patchForDebug(item, { ...result, backendSkillId, backendAccount })
       setNotice('技能定义已生成，可以运行调试。'); await openDebug(next)
     } catch (error) { if (error instanceof SkillApiError) showFormErrors(error.fields); setMessage((error as Error).message) } finally { setBusy(null) }
+  }
+  function requestBuild() {
+    if (selectedId && formDirty.current) { setDebugSavePrompt(true); return }
+    void build()
   }
   function patchForDebug(item: Implementation, changes: Partial<Implementation>) {
     const next: Implementation = { ...item, ...changes, status: '调试中', debug: undefined, publication: undefined }
@@ -247,7 +257,7 @@ export default function DeveloperPage() {
     <section className="surface implementation-section" aria-labelledby="implementation-title">
       <div className="section-heading"><h2 id="implementation-title">我创建的技能</h2><div className="section-actions"><button className="button" disabled={loading || !!busy} onClick={() => void refreshList()}><RefreshCw size={14} className={loading ? 'spin' : undefined} />刷新</button><button className="button primary" disabled={loading || !!busy} onClick={() => openForm()}><Plus size={16} />新建技能</button></div></div>
       <div className="implementation-table-wrap"><table className="implementation-table"><thead><tr>{['实现名称', '技能类', '所属应用', '版本', '状态', '更新时间', '操作'].map(label => <th key={label} scope="col">{label}</th>)}</tr></thead><tbody>
-        {mine.map(item => <tr key={item.id}><td className="implementation-name">{item.name}{item.pendingChanges && <span className="status-tag orange">有编辑稿</span>}</td><td>{skillClasses.find(row => row.id === item.classId)?.name}</td><td>{applicationText(item)}</td><td>{item.version}</td><td><Status status={item.status} /></td><td>{dateText(item.updatedAt)}</td><td><button className="button small" disabled={!!busy || loading} onClick={() => { if (['调试中', '调试成功', '调试失败'].includes(item.status)) openDebug(item); else openForm(item) }}>{['调试中', '调试成功', '调试失败'].includes(item.status) ? '调试' : '详情'}</button></td></tr>)}
+        {mine.map(item => <tr key={item.id}><td className="implementation-name">{item.name}{item.pendingChanges && <span className="status-tag orange">有编辑稿</span>}</td><td>{skillClasses.find(row => row.id === item.classId)?.name}</td><td>{applicationText(item)}</td><td><span className="implementation-version">{item.version || '-'}</span></td><td><Status status={item.status} /></td><td>{dateText(item.updatedAt)}</td><td><button className="button small" disabled={!!busy || loading} onClick={() => { if (['调试中', '调试成功', '调试失败'].includes(item.status)) openDebug(item); else openForm(item) }}>{['调试中', '调试成功', '调试失败'].includes(item.status) ? '调试' : '详情'}</button></td></tr>)}
         {!mine.length && <tr><td colSpan={7} className="empty-table">暂无实现类，点击“新建技能”开始创建。</td></tr>}
       </tbody></table></div>
       <div className="developer-pagination" aria-label="技能列表分页"><span className="pagination-total">共 {total} 条</span><button className="button small" disabled={loading || page <= 1} onClick={() => goToPage(page - 1)}><ChevronLeft size={14} />上一页</button><div className="pagination-pages">{pageNumbers.map(number => <button key={number} className={`button small ${number === page ? 'primary' : ''}`} aria-current={number === page ? 'page' : undefined} disabled={loading} onClick={() => goToPage(number)}>{number}</button>)}</div><button className="button small" disabled={loading || page >= pages} onClick={() => goToPage(page + 1)}>下一页<ChevronRight size={14} /></button></div>
@@ -265,14 +275,18 @@ export default function DeveloperPage() {
           <button className="button danger" disabled={!!busy} onClick={() => { setMessage(''); setOfflineReasonCode(''); setOfflineReasonText(''); setOfflinePrompt(true) }}>下线</button>
         </> : <>
           {selected?.status === '草稿' && <button className="button danger" disabled={!!busy} onClick={() => { setMessage(''); setDraftDeletePrompt(true) }}>删除草稿</button>}
-          <button className={selected ? 'button primary' : 'button'} disabled={!!busy} onClick={saveDraft}>{selected ? '保存修改' : '保存草稿'}</button>{selected?.status !== '已下线' && <button className="button primary" disabled={!!busy} onClick={build}>{busy === 'build' ? primaryBusy : selected ? '在线调试' : '调试'}</button>}
+          <button className={selected ? 'button primary' : 'button'} disabled={!!busy} onClick={saveDraft}>{selected ? '保存修改' : '保存草稿'}</button>{selected?.status !== '已下线' && <button className="button primary" disabled={!!busy} onClick={requestBuild}>{busy === 'build' ? primaryBusy : selected ? '在线调试' : '调试'}</button>}
         </>}
       </>}
     </>}>
       {readonly && <p className="form-hint">创建者：{selected?.creatorName || '历史创建者'}。仅创建者本人可编辑此实现类。</p>}
-      {online && !readonly && <p className="helper-text">保存修改后系统自动递增版本，并回到草稿状态重新调试。{selected?.pendingChangedAt && `编辑稿保存于 ${dateText(selected.pendingChangedAt)}。`}</p>}
+      {online && !readonly && <p className="helper-text">保存修改后回到草稿状态，重新调试通过并上线时生成新版本。{selected?.pendingChangedAt && `编辑稿保存于 ${dateText(selected.pendingChangedAt)}。`}</p>}
       {selected?.status === '已下线' && <p className="helper-text">该技能已下线。可继续编辑，重新调试通过后重新上线。</p>}
       <div ref={formRoot}><SkillFields form={form} update={update} skillClasses={skillClasses} applications={applications} errors={errors} disabled={!!busy || readonly} editing={!!selected} activeIds={activeUploads.map(row => row.id)} onAdd={addFiles} onRemove={removeFile} /></div>
+    </Dialog>}
+
+    {debugSavePrompt && <Dialog title="保存修改后调试" onClose={() => setDebugSavePrompt(false)} busy={!!busy} footer={<><button className="button" disabled={!!busy} onClick={() => setDebugSavePrompt(false)}>取消</button><button className="button primary" disabled={!!busy} onClick={() => { setDebugSavePrompt(false); void build(true) }}>保存并调试</button></>}>
+      <p>当前内容有未保存的修改，是否保存修改后进入调试？</p>
     </Dialog>}
 
     {offlinePrompt && selected && <Dialog title={<>确认下线 · {selected.name}</>} onClose={() => setOfflinePrompt(false)} busy={!!busy} footer={<><button className="button" disabled={!!busy} onClick={() => setOfflinePrompt(false)}>取消下线</button><button className="button danger" disabled={!!busy || !offlineReasonCode || (offlineReasonCode === 'OTHER' && !offlineReasonText.trim())} onClick={offline}>{busy === 'offline' ? primaryBusy : '确认下线'}</button></>}>

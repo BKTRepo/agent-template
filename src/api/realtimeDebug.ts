@@ -102,7 +102,7 @@ export async function mountedDebugFiles(item: Implementation): Promise<File[]> {
       files.push(new File([blob], resource.name, { type: blob.type, lastModified: resource.lastModified }))
     }
   }
-  if (item.buildOrigin === 'backend' && item.build?.files.some(row => row.path !== 'SKILL.md' && row.path !== 'manifest.json' && !files.some(file => row.path.split('/').pop() === file.name))) {
+  if (item.buildOrigin === 'backend' && item.build?.files.filter(row => row.path !== 'SKILL.md' && row.path !== 'manifest.json').length !== files.length) {
     throw new Error('部分后端包内资源只有文件信息，未取得原文件；请先重新上传对应资源再调试，避免遗漏挂载内容。')
   }
   if (files.length > mountedResourceLimit) throw new Error(`调试接口最多支持 ${mountedResourceLimit} 个挂载资源文件，当前有 ${files.length} 个，请调整挂载资源。`)
@@ -301,7 +301,26 @@ async function createDebugTask(item: Implementation, input: DebugInput, markdown
   }
   const checked = validateResourceFiles(selected, [], documentExtensions, debugDocumentLimits)
   if (checked.errors.length) throw new Error(checked.errors.join('；'))
-  for (const file of await mountedDebugFiles(item)) form.append('mounted_resources', file, file.name)
+  const resources = await Promise.all((await mountedDebugFiles(item)).map(async file => ({ file,
+    hash: Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer())), byte => byte.toString(16).padStart(2, '0')).join('') })))
+  const entries = (item.build?.files ?? []).filter(row => row.path !== 'SKILL.md' && row.path !== 'manifest.json')
+  if (entries.length !== resources.length) throw new Error('挂载资源与当前构建清单不一致，请重新构建技能。')
+  const paths = new Set<string>()
+  for (const { file } of resources) {
+    if (!file.size || /[\\/<>:"|?*\x00-\x1f]/.test(file.name) || !/\.(py|js|md|xlsx|docx|png|jpg|jpeg)$/i.test(file.name)) throw new Error(`技能资源文件不合法：${file.name}`)
+  }
+  for (const entry of entries) {
+    const parts = entry.path.split('/')
+    if (parts.length < 2 || !['scripts', 'assets', 'references'].includes(parts[0]) || parts.some(part => !part || part === '.' || part === '..' || /[\\<>:"|?*\x00-\x1f]/.test(part))) throw new Error(`资源路径不合法：${entry.path}`)
+    const key = entry.path.normalize('NFKC').toLowerCase()
+    if ([...paths].some(old => key === old || key.startsWith(old + '/') || old.startsWith(key + '/'))) throw new Error(`资源路径重复或冲突：${entry.path}`)
+    paths.add(key)
+    const index = resources.findIndex(row => row.hash === entry.sha256 && row.file.size === entry.size)
+    if (index < 0) throw new Error(`资源“${entry.path}”内容与当前构建不一致，请重新构建技能。`)
+    const [{ file }] = resources.splice(index, 1)
+    // 沿用同事既定接口：filename 为原文件名，不新增目录传参要求。
+    form.append('mounted_resources', file, file.name)
+  }
   const response = await fetch(`${base}/runs`, { method: 'POST', headers: authHeaders(), body: form })
   const task = await taskResponse(response, item.backendSkillId || item.id)
   const debug: DebugRun = { id: task.run_id, runId: task.run_id, buildId: item.buildId,

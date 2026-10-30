@@ -83,7 +83,10 @@ export async function listDeveloperSkillsPage(page = 1, pageSize = 10): Promise<
 export async function listDeveloperSkills(page = 1, pageSize = 10) {
   return (await listDeveloperSkillsPage(page, pageSize)).items
 }
-export async function getDeveloperMetadata() { return request<DeveloperMetadata>('/skills/developer/metadata') }
+export async function getDeveloperMetadata() {
+  const metadata = await request<DeveloperMetadata>('/skills/developer/metadata')
+  return { ...metadata, skill_classes: metadata.skill_classes.map(row => ({ ...row, id: String(row.id) })) }
+}
 export async function createDeveloperSkill(form: ImplementationForm) { return toImplementation(await request<ServerSkill>('/skills/developer/', { method: 'POST', body: JSON.stringify(body(form)) })) }
 export async function updateDeveloperSkill(id: string, form: ImplementationForm) { return toImplementation(await request<ServerSkill>(`/skills/developer/${id}`, { method: 'PUT', body: JSON.stringify(body(form)) })) }
 export async function deleteDeveloperSkill(id: string) { await request<unknown>(`/skills/developer/${id}`, { method: 'DELETE' }) }
