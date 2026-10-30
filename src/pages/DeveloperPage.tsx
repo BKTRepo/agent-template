@@ -139,7 +139,15 @@ export default function DeveloperPage() {
       const ready = await persistSkillResources(form, uploads)
       setForm(ready)
       const saved = selectedId ? await updateDeveloperSkill(selectedId, ready) : await createDeveloperSkill(ready)
-      replace(saved); setPanel(null); setNotice('草稿已保存到后端数据库。')
+      replace(saved)
+      // 从详情页保存时保留窗口和当前编辑内容，方便继续修改或直接进入调试。
+      if (selectedId) {
+        setSelectedId(saved.id)
+        // 保存会递增后端 revision；窗口不关闭时必须立即回填，否则下一次提交仍会携带旧的 expected_revision。
+        setForm(previous => ({ ...previous, revision: saved.revision, skillVersionId: saved.skillVersionId, version: saved.version }))
+        setNotice('修改已保存到后端数据库。')
+      }
+      else { setPanel(null); setNotice('草稿已保存到后端数据库。') }
     } catch (error) { setMessage((error as Error).message) } finally { setBusy(null) }
   }
   async function savePublished() {
@@ -148,8 +156,12 @@ export default function DeveloperPage() {
     if (showFormErrors(issues)) return
     setBusy('save'); setMessage('')
     try {
-      const saved = await updateDeveloperSkill(selected.id, await persistSkillResources(form, uploads))
-      replace(saved); setPanel(null)
+      const ready = await persistSkillResources(form, uploads)
+      setForm(ready)
+      const saved = await updateDeveloperSkill(selected.id, ready)
+      replace(saved); setSelectedId(saved.id)
+      // 已上线技能保存后同样要使用服务端返回的新版本信息，支持在当前窗口连续保存。
+      setForm(previous => ({ ...previous, revision: saved.revision, skillVersionId: saved.skillVersionId, version: saved.version }))
       setNotice('修改已保存为新草稿，需重新调试后再上线。')
     } catch (error) { setMessage((error as Error).message) } finally { setBusy(null) }
   }

@@ -9,7 +9,6 @@ import type { DebugMonitorOptions } from '@/api/realtimeDebug'
 import { debugDocumentLimits, documentExtensions, validateResourceFiles } from '@/lib/skillForm'
 import { renderSkillMarkdown } from '@/api/skillArchive'
 import { skillDefinition } from '@/lib/skillDefinition'
-import { downloadBlob, readBlob } from '@/lib/resourceStorage'
 import type { DebugInput, Implementation } from '@/types/developer'
 
 export default function DebugDialog({ item, onClose, onEdit, onPublish, onSaveDefinition, onResult }: { item: Implementation; onClose: () => void; onEdit?: () => void; onPublish?: () => Promise<void>; onSaveDefinition?: (markdown: string) => Promise<void>; onResult: (debug: Implementation['debug']) => void | Promise<void> }) {
@@ -66,23 +65,14 @@ export default function DebugDialog({ item, onClose, onEdit, onPublish, onSaveDe
     change({ ...input, documents: [...input.documents, ...additions.map(row => ({ id: row.id, name: row.file.name, size: row.file.size, lastModified: row.file.lastModified }))] })
     setError(result.errors.join('；'))
   }
-  async function download(debug = result) {
-    const artifacts = debug?.artifacts?.length ? debug.artifacts : debug?.artifact ? [debug.artifact] : []
-    for (const artifact of artifacts) {
-      const blob = await readBlob(artifact.key)
-      if (!blob) throw new Error(`调试结果文件“${artifact.name}”已丢失，请重试下载。`)
-      downloadBlob(blob, artifact.name)
-    }
-  }
-  async function executeDebug(work: (signal: AbortSignal, options: DebugMonitorOptions) => Promise<Implementation['debug']>, autoDownload = false) {
+  async function executeDebug(work: (signal: AbortSignal, options: DebugMonitorOptions) => Promise<Implementation['debug']>) {
     requestRef.current?.abort()
     const current = ++generation.current
     const controller = new AbortController()
     requestRef.current = controller
     setError(''); setBusy('run')
     try {
-      const debug = await work(controller.signal, { onProgress: progressFor(current) })
-      if (current === generation.current && !controller.signal.aborted && autoDownload && debug?.artifact) await download(debug)
+      await work(controller.signal, { onProgress: progressFor(current) })
     } catch (error) {
       if (current === generation.current && !controller.signal.aborted) setError((error as Error).message)
     } finally { if (current === generation.current) setBusy(null) }
@@ -93,7 +83,7 @@ export default function DebugDialog({ item, onClose, onEdit, onPublish, onSaveDe
       if (!definition) throw new Error('请先查询本次构建定义。')
       validateInput(item, input)
       if (!realtimeDebugEnabled) throw new Error('沙箱调试服务尚未配置，不能使用前端模拟结果。')
-      await executeDebug((signal, options) => runRealtimeDebug(item, input, markdown, files, signal, options), true)
+      await executeDebug((signal, options) => runRealtimeDebug(item, input, markdown, files, signal, options))
     } catch (error) { setError((error as Error).message) }
   }
   async function resume() {
@@ -111,7 +101,6 @@ export default function DebugDialog({ item, onClose, onEdit, onPublish, onSaveDe
       if (controller.signal.aborted) return
       const debug = { ...result, artifacts, artifact: artifacts[0], documentError: undefined }
       setResult(debug); await onResult(debug)
-      await download(debug)
     } catch (error) { setError(controller.signal.aborted ? '下载请求超时，请重试下载。' : (error as Error).message) }
     finally { window.clearTimeout(timer); requestRef.current = null; setBusy(null) }
   }
