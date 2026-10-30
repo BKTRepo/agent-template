@@ -11,7 +11,11 @@ from starlette.datastructures import UploadFile
 
 from applications.user.models.user_model import User
 from applications.zhaoyunlong.schemas.online_debug_schema import OnlineModelDebugRequest
-from applications.zhaoyunlong.services.online_debug_file_parser import FileParseError, extract_uploaded_file
+from applications.zhaoyunlong.services.online_debug_file_parser import (
+    FileParseError,
+    extract_mounted_resource,
+    extract_uploaded_file,
+)
 from applications.zhaoyunlong.services.online_debug_run_service import (
     OnlineDebugRunNotFoundError,
     OnlineDebugRunService,
@@ -33,7 +37,7 @@ realtime_test_case_router = APIRouter()
             "skill_definition": {"type": "string", "description": "Markdown 格式的 Skill 定义文本"},
             "conversation_input": {"type": "string", "description": "自然语言调试诉求"},
             "documents": {"type": "array", "description": "需求文档文件，最多 10 个", "items": {"type": "string", "format": "binary"}},
-            "mounted_resources": {"type": "array", "description": "只读挂载资源文件，最多 20 个", "items": {"type": "string", "format": "binary"}},
+            "mounted_resources": {"type": "array", "description": "已挂载的只读资源，最多 20 个；不重复进行前端上传格式白名单校验", "items": {"type": "string", "format": "binary"}},
         }}},
     }}},
 )
@@ -128,8 +132,14 @@ async def _parse_debug_request(request: Request) -> dict[str, Any]:
     }).model_dump()
     return {
         **text_fields,
-        "documents": await _parse_uploads(form.getlist("documents"), "documents", 10),
-        "mounted_resources": await _parse_uploads(form.getlist("mounted_resources"), "mounted_resources", 20),
+        # 文档输入来自本次前端上传，必须执行允许格式校验。
+        "documents": await _parse_uploads(
+            form.getlist("documents"), "documents", 10, extract_uploaded_file,
+        ),
+        # 挂载资源已由资源系统管理，此处只读取文本，不重复进行格式白名单校验。
+        "mounted_resources": await _parse_uploads(
+            form.getlist("mounted_resources"), "mounted_resources", 20, extract_mounted_resource,
+        ),
     }
 
 
@@ -147,8 +157,13 @@ def _form_text(value: object, name: str, *, required: bool = False) -> str:
     return text
 
 
-async def _parse_uploads(items: list[object], name: str, limit: int) -> list[dict[str, str]]:
-    """读取上传文件后立即解析为文本，原始二进制文件不会进入容器。"""
+async def _parse_uploads(
+    items: list[object],
+    name: str,
+    limit: int,
+    parser: Any,
+) -> list[dict[str, str]]:
+    """读取文件并交给对应来源的解析器；文档与已挂载资源采用不同校验策略。"""
     if len(items) > limit:
         raise ValueError(f"{name} 最多上传 {limit} 个文件")
     result: list[dict[str, str]] = []
@@ -156,7 +171,7 @@ async def _parse_uploads(items: list[object], name: str, limit: int) -> list[dic
         if not isinstance(item, UploadFile):
             raise ValueError(f"{name} 必须为文件字段")
         try:
-            result.append(extract_uploaded_file(item.filename or "", await item.read()))
+            result.append(parser(item.filename or "", await item.read()))
         finally:
             await item.close()
     return result

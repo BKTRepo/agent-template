@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import io
-from pathlib import Path, PurePath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Final
 
 
@@ -18,11 +18,41 @@ class FileParseError(ValueError):
 
 
 def extract_uploaded_file(filename: str, content: bytes) -> dict[str, str]:
-    """提取六种允许格式的文本，并返回沙箱内的安全文件名与内容。"""
-    safe_name = PurePath(filename).name
+    """校验并提取前端上传的六种允许格式文件。"""
+    safe_name = _safe_filename(filename)
     suffix = Path(safe_name).suffix.lower()
-    if not safe_name or safe_name != filename or suffix not in FILE_SUFFIXES:
+    if suffix not in FILE_SUFFIXES:
         raise FileParseError("仅支持 PDF、DOCX、Markdown、TXT、XLSX、JSON 文件")
+    return _extract_file_content(safe_name, suffix, content)
+
+
+def extract_mounted_resource(filename: str, content: bytes) -> dict[str, str]:
+    """提取已挂载资源文本，不重复执行前端上传文件的格式白名单校验。"""
+    safe_name = _safe_filename(filename)
+    suffix = Path(safe_name).suffix.lower()
+    return _extract_file_content(safe_name, suffix, content, allow_other_text=True)
+
+
+def _safe_filename(filename: str) -> str:
+    """仅接受文件名，拒绝 Windows 与 POSIX 两种路径分隔符的路径穿越。"""
+    safe_name = filename.strip()
+    if (
+        not safe_name
+        or PurePosixPath(safe_name).name != safe_name
+        or PureWindowsPath(safe_name).name != safe_name
+    ):
+        raise FileParseError("文件名不合法")
+    return safe_name
+
+
+def _extract_file_content(
+    safe_name: str,
+    suffix: str,
+    content: bytes,
+    *,
+    allow_other_text: bool = False,
+) -> dict[str, str]:
+    """将受支持文件或已解析资源转换为容器可读取的文本。"""
     if not content:
         raise FileParseError(f"上传文件为空：{safe_name}")
     if len(content) > MAX_UPLOAD_BYTES:
@@ -37,9 +67,15 @@ def extract_uploaded_file(filename: str, content: bytes) -> dict[str, str]:
     elif suffix == ".docx":
         text = _extract_docx_text(content, safe_name)
         sandbox_name = f"{safe_name}.md"
-    else:
+    elif suffix == ".xlsx":
         text = _extract_xlsx_text(content, safe_name)
         sandbox_name = f"{safe_name}.md"
+    elif allow_other_text:
+        # 已挂载资源的格式已由资源系统确认；此处只尝试读取其文本内容，不再使用格式白名单拒绝。
+        text = _decode_text(content, safe_name)
+        sandbox_name = safe_name
+    else:
+        raise FileParseError("仅支持 PDF、DOCX、Markdown、TXT、XLSX、JSON 文件")
 
     if not text.strip():
         raise FileParseError(f"未能从文件提取可读文本：{safe_name}")
