@@ -2,6 +2,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { useKnowledgeStore } from '@/stores/knowledgeStore'
 import { readBlob, saveBlobs } from '@/lib/resourceStorage'
 import { debugDocumentLimits, documentExtensions, validateResourceFiles } from '@/lib/skillForm'
+import { sha256Hex } from '@/lib/sha256'
 import { DeveloperCenterError, getDeveloperDebugLink, recordDeveloperDebugResult } from './developerCenter'
 import type { DebugArtifact, DebugInput, Implementation, RealtimeDocument, RealtimeTask } from '@/types/developer'
 
@@ -302,7 +303,7 @@ async function createDebugTask(item: Implementation, input: DebugInput, markdown
   const checked = validateResourceFiles(selected, [], documentExtensions, debugDocumentLimits)
   if (checked.errors.length) throw new Error(checked.errors.join('；'))
   const resources = await Promise.all((await mountedDebugFiles(item)).map(async file => ({ file,
-    hash: Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer())), byte => byte.toString(16).padStart(2, '0')).join('') })))
+    hash: await sha256Hex(await file.arrayBuffer()) })))
   const entries = (item.build?.files ?? []).filter(row => row.path !== 'SKILL.md' && row.path !== 'manifest.json')
   if (entries.length !== resources.length) throw new Error('挂载资源与当前构建清单不一致，请重新构建技能。')
   const paths = new Set<string>()

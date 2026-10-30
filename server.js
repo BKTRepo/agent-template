@@ -66,7 +66,9 @@ function buildProxyHeaders(req, target, realtime) {
   }
   headers.host = target.host
   if (realtime && process.env.REALTIME_DEBUG_TOKEN) headers.token = process.env.REALTIME_DEBUG_TOKEN
-  if (!realtime && process.env.SKILL_API_TOKEN) headers.token = process.env.SKILL_API_TOKEN
+  if (!realtime && (process.env.SKILL_API_TOKEN || process.env.REALTIME_DEBUG_TOKEN)) {
+    headers.token = process.env.SKILL_API_TOKEN || process.env.REALTIME_DEBUG_TOKEN
+  }
   return headers
 }
 

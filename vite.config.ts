@@ -32,17 +32,21 @@ function appCssReload(): Plugin {
 // assetsDir 保持默认 "assets"。
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
+  // 默认将两类接口代理到同一个后端；保留各自 TARGET 变量，供确有拆分部署时覆盖。
+  const backendTarget = env.BACKEND_URL || 'http://127.0.0.1:8000'
   const platformProxy: ProxyOptions = {
-    target: env.SKILL_BACKEND_TARGET || 'http://127.0.0.1:8519',
+    target: env.SKILL_BACKEND_TARGET || backendTarget,
     changeOrigin: true,
     configure(proxy) {
       proxy.on('proxyReq', request => {
-        if (env.SKILL_API_TOKEN) request.setHeader('token', env.SKILL_API_TOKEN)
+        // 默认与实时调试共用同一个后端 token；拆分部署时可单独设置 SKILL_API_TOKEN 覆盖。
+        const token = env.SKILL_API_TOKEN || env.REALTIME_DEBUG_TOKEN
+        if (token) request.setHeader('token', token)
       })
     },
   }
   const realtimeProxy: ProxyOptions = {
-    target: env.REALTIME_DEBUG_TARGET || 'http://127.0.0.1:8519',
+    target: env.REALTIME_DEBUG_TARGET || backendTarget,
     changeOrigin: true,
     timeout: 660_000,
     proxyTimeout: 660_000,

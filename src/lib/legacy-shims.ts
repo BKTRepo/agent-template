@@ -25,6 +25,25 @@ if (!Object.hasOwn) {
 }
 
 // ---------------------------------------------------------------------------
+// crypto.randomUUID: 较旧浏览器，以及通过 http://局域网IP 访问的非安全上下文，
+// 可能没有该 API。页面仅用它生成本地表单/文件 ID，缺失时生成 RFC 4122 v4 格式 ID。
+// ---------------------------------------------------------------------------
+if (typeof globalThis !== 'undefined' && typeof globalThis.crypto?.randomUUID !== 'function') {
+  const cryptoTarget = globalThis.crypto ?? ({} as Crypto)
+  if (!globalThis.crypto) Object.defineProperty(globalThis, 'crypto', { value: cryptoTarget, configurable: true })
+  const randomUUID = () => {
+    const bytes = new Uint8Array(16)
+    try { cryptoTarget.getRandomValues?.(bytes) } catch { /* 无安全随机源时仅生成前端本地标识。 */ }
+    if (!bytes.some(byte => byte !== 0)) for (let index = 0; index < bytes.length; index++) bytes[index] = Math.floor(Math.random() * 256)
+    bytes[6] = (bytes[6] & 0x0f) | 0x40
+    bytes[8] = (bytes[8] & 0x3f) | 0x80
+    const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0'))
+    return `${hex.slice(0, 4).join('')}-${hex.slice(4, 6).join('')}-${hex.slice(6, 8).join('')}-${hex.slice(8, 10).join('')}-${hex.slice(10).join('')}`
+  }
+  Object.defineProperty(cryptoTarget, 'randomUUID', { value: randomUUID, configurable: true })
+}
+
+// ---------------------------------------------------------------------------
 // checkVisibility: 判断元素是否可见。垫片实现覆盖常见场景:
 // display:none（offsetParent 为 null 且非 fixed/根元素）、visibility:hidden、
 // 尺寸为 0。不透支 content-visibility / opacity 精细判断, 对 react-aria 的
