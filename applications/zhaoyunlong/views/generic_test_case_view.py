@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import ValidationError
 from starlette.datastructures import UploadFile
 
@@ -89,7 +89,9 @@ async def get_latest_online_debug_run(
         )
         return await OnlineDebugRunService.as_response(record)
     except OnlineDebugRunNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        # 首次打开调试窗口没有历史任务是正常状态。前端据 HTTP 404 继续创建
+        # 新任务；不能交给全局异常处理器包装成 HTTP 200 的业务失败响应。
+        return JSONResponse(status_code=404, content={"status": "failure", "message": str(exc)})
 
 
 @realtime_test_case_router.get(

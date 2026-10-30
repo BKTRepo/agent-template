@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
+import os
+import shutil
 import sys
+import traceback
+from typing import Dict, Any
 
-from aerich import Command
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from starlette.exceptions import HTTPException
@@ -10,8 +13,7 @@ from starlette.staticfiles import StaticFiles
 from tortoise import Tortoise
 from tortoise.exceptions import DoesNotExist
 
-from configure import PROJECT_CONFIG
-from configure.project_config import TORTOISE_ORM
+from configure import PROJECT_CONFIG, LOGGER
 from core.exceptions.http_exceptions import (
     request_validation_exception_handler,
     response_validation_exception_handler,
@@ -26,16 +28,63 @@ from services import DependAuth
 
 
 async def register_database(app: FastAPI) -> None:
-    """连接数据库；迁移默认由 Aerich CLI 显式执行。"""
-    await Tortoise.init(config=TORTOISE_ORM)
-    if PROJECT_CONFIG.DATABASE_AUTO_MIGRATION:
-        command = Command(
-            app="models",
-            tortoise_config=TORTOISE_ORM,
-            location=PROJECT_CONFIG.MIGRATION_DIR,
-        )
-        await command.init()
-        await command.upgrade(run_in_transaction=True)
+    config: Dict[str, Any] = {
+        "connections": PROJECT_CONFIG.DATABASE_CONNECTIONS,
+        "apps": {
+            "models": {
+                "models": PROJECT_CONFIG.APPLICATIONS_MODELS,
+                "default_connection": "default"
+            }
+        },
+        "use_tz": False,
+        "timezone": "Asia/Shanghai",
+    }
+    # register_tortoise 会把初始化注册到 FastAPI 的生命周期回调；本项目在
+    # lifespan 内调用此函数，后续初始化用户和开发者中心数据时连接尚未就绪。
+    # 这里直接初始化，确保同一生命周期中可以立刻读写数据库。
+    await Tortoise.init(config=config)
+
+    # 云数据库的表结构由显式迁移脚本维护。开发者中心启动不自动扫描、创建其它业务表，
+    # 避免在同事共用数据库中意外改动非本模块表结构。
+    if not PROJECT_CONFIG.aerich_should_run_on_startup:
+        return
+
+    from aerich import Command
+
+    # 确保迁移目录存在
+    if not os.path.exists(PROJECT_CONFIG.MIGRATION_DIR):
+        os.makedirs(PROJECT_CONFIG.MIGRATION_DIR)
+
+    # 初始化Aerich命令
+    command = Command(
+        app='models',
+        tortoise_config=config,
+        location=PROJECT_CONFIG.MIGRATION_DIR,
+    )
+
+    # 初始化数据库和迁移
+    try:
+        # 当 safe 设置为 True 时，如果数据库中已经存在 Aerich 所需的迁移表（通常是 aerich 表），init_db 方法不会尝试去重新创建这些表，避免因为表已存在而抛出错误。
+        # 当 safe 设置为 False 时，如果数据库中已经存在 Aerich 所需的迁移表，init_db 方法会尝试重新创建这些表，这可能会导致现有表被删除并重新创建，从而丢失表中的数据。
+        await command.init_db(safe=True)
+    except FileExistsError:
+        pass
+
+    await command.init()
+
+    # 生成迁移文件
+    try:
+        await command.migrate(name="auto_migrate")
+    except AttributeError as e:
+        LOGGER.error(f"无法从数据库中检索模型历史记录, 请检查[migration]与[aerich]表记录是否一致: {e}\n错误回溯: {traceback.format_exc()}")
+        if PROJECT_CONFIG.aerich_should_run_on_startup:
+            shutil.rmtree(PROJECT_CONFIG.MIGRATION_DIR)
+            await command.init_db(safe=True)
+        else:
+            raise RuntimeError("数据库迁移元数据与本地[migration]不一致, 无法进行迁移, 请手工修复或从备份恢复后再启动应用")
+
+    # 应用迁移
+    await command.upgrade(run_in_transaction=True)
 
 
 # 注册异常处理器
@@ -116,6 +165,9 @@ def register_routers(app: FastAPI) -> None:
     # 导入路由蓝图
     from applications.base.views import base_public, base_secure, router_secure, audit_secure
     from applications.user.views import user_public_router, user_secure_router
+    from applications.example.views import example_category_router, example_product_router
+    from applications.weixianzhe.views import test_case_gen_router
+    from applications.zhoushengjie.views import case_recommendation_router
     from applications.zhaoyunlong.views import realtime_test_case_router
 
     # 挂在路由蓝图
@@ -127,3 +179,22 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(router=user_secure_router, prefix="/user", tags=["用户服务"], dependencies=[DependAuth])
     # 开发者中心在线调试：同步运行 Docker 沙箱并生成 Excel 测试用例文档。
     app.include_router( router=realtime_test_case_router, prefix="/realtime-test-case-gen", tags=["开发者中心-在线调试"],)
+    app.include_router(router=example_category_router, prefix="/example", tags=["示例服务-商品分类"], dependencies=[DependAuth])
+    app.include_router(router=example_product_router, prefix="/example", tags=["示例服务-商品模型"], dependencies=[DependAuth])
+    app.include_router(router=case_recommendation_router, prefix="/case-recommendation", tags=["用例推荐"])
+    app.include_router(router=test_case_gen_router, prefix="/test-case-gen", tags=["测试用例生成"])
+
+    from applications.agent.views import mcp_servers_router, skills_router
+    from applications.conversation.views import chat_router, history_router
+    from applications.knowledge_base.views import knowledge_router
+    from applications.model_config.views import model_router
+
+    app.include_router(router=chat_router, prefix="/chat", tags=["RAG-对话"], dependencies=[DependAuth])
+    app.include_router(router=history_router, prefix="/conversations", tags=["RAG-历史"], dependencies=[DependAuth])
+    app.include_router(router=knowledge_router, prefix="/knowledge-bases", tags=["RAG-知识库"], dependencies=[DependAuth])
+    app.include_router(router=model_router, prefix="/model-configs", tags=["RAG-模型配置"], dependencies=[DependAuth])
+    app.include_router(router=skills_router, prefix="/skills", tags=["RAG-Agent技能"], dependencies=[DependAuth])
+    app.include_router(router=mcp_servers_router, prefix="/mcp-servers", tags=["RAG-MCP服务"], dependencies=[DependAuth])
+
+    from applications.task_center.views import task_center_router
+    app.include_router(router=task_center_router, prefix="/task-center", tags=["任务中心"], dependencies=[DependAuth])

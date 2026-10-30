@@ -1,0 +1,5 @@
+# case-recommender skill dependencies
+# Install with: pip install -r requirements.txt
+
+# No external dependencies required - uses Python standard library only
+# parse_jacoco.py only depends on standard library (re, json, pathlib)

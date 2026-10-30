@@ -1,5 +1,12 @@
 # -*- coding: utf-8 -*-
+import asyncio
+import sys
 from contextlib import asynccontextmanager
+
+# 云 MySQL 要求 TLS。asyncmy 在 Windows 的 ProactorEventLoop 下执行 TLS
+# 升级会触发 WinError 87，因此本地启动统一使用 SelectorEventLoop。
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
@@ -11,6 +18,7 @@ from core.initializations import (
     register_exceptions,
     register_middlewares,
     register_routers,
+    init_database_table,
 )
 from core.responses import SuccessResponse
 from applications.zhaoyunlong.services.online_debug_cleanup_scheduler import (
@@ -33,6 +41,7 @@ async def lifespan(app: FastAPI):
             await register_database(app)
         except DBConnectionError as exc:
             raise RuntimeError(f"数据库连接失败，请检查连接配置: {exc}") from exc
+        await init_database_table(app)
 
         for route in app.routes:
             if isinstance(route, APIRoute):
@@ -86,3 +95,10 @@ if __name__ == '__main__':
         log_config=None,
         log_level=None,
     )
+
+    # ========== 启动命令（在项目根目录下执行，且保证 PYTHONPATH 含所在目录）==========
+    # Worker（消费 default + autotest_queue）：
+    #   Windows（单线程）：celery -A celery_scheduler.celery_worker worker -Q default,autotest_queue --pool=solo -l INFO
+    #   Linux：          celery -A celery_scheduler.celery_worker worker -Q default,autotest_queue -c 4 -l INFO
+    # Beat（定时下发 scan_and_dispatch_tasks，必须单独起一个进程）：
+    #   celery -A celery_scheduler.celery_worker beat -l INFO

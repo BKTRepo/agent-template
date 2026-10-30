@@ -1,0 +1,10 @@
+{
+  "skill_id": "replace-with-real-skill-id",
+  "skill_name": "核心系统用例生成",
+  "description": "根据业务需求生成正向、异常和边界测试用例，适用于功能测试设计。",
+  "version": "0.2.0",
+  "instructions": "读取用户需求，按照业务规则生成测试用例。关键信息缺失时列出待补充内容，不自行编造。",
+  "knowledge_base_ids": [],
+  "resource_usage": "",
+  "compatibility": ""
+}

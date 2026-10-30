@@ -2,7 +2,7 @@
 """
 轻量分布式追踪：X-Trace-ID + X-Span-ID + X-Parent-Span-ID。
 - TraceID：仅来自请求头 X-Trace-ID，未传则由后端留空（日志为 -）
-- SpanID：每个入站 HTTP 请求由服务端分配，经 X-Span-ID 回传
+- SpanID：每个入站 HTTP、Celery 任务由服务端分配，经 X-Span-ID 回传/下发
 """
 from __future__ import annotations
 
@@ -36,12 +36,44 @@ def new_span_id() -> str:
     return uuid.uuid4().hex[:16]
 
 
+def _sync_celery_local(trace_id: str, span_id: str) -> None:
+    try:
+        from celery_scheduler.celery_base import LOCAL_CONTEXT_VAR
+
+        LOCAL_CONTEXT_VAR.trace_id = trace_id or None
+        LOCAL_CONTEXT_VAR.span_id = span_id or None
+    except Exception:
+        pass
+
+
 def get_trace_id() -> str:
-    return _TRACE_ID.get() or _MISSING
+    tid = _TRACE_ID.get()
+    if tid:
+        return tid
+    try:
+        from celery_scheduler.celery_base import LOCAL_CONTEXT_VAR
+
+        legacy = getattr(LOCAL_CONTEXT_VAR, "trace_id", None)
+        if legacy:
+            return str(legacy)
+    except Exception:
+        pass
+    return _MISSING
 
 
 def get_span_id() -> str:
-    return _SPAN_ID.get() or _MISSING
+    sid = _SPAN_ID.get()
+    if sid:
+        return sid
+    try:
+        from celery_scheduler.celery_base import LOCAL_CONTEXT_VAR
+
+        legacy = getattr(LOCAL_CONTEXT_VAR, "span_id", None)
+        if legacy:
+            return str(legacy)
+    except Exception:
+        pass
+    return _MISSING
 
 
 def get_parent_span_id() -> str:
@@ -62,6 +94,7 @@ def bind_trace_context(
         parent_span_id: str = "",
 ) -> Tuple[Token, Token, Token]:
     """绑定 Trace/Span 到当前上下文，返回用于 reset 的 token 元组。"""
+    _sync_celery_local(trace_id, span_id)
     return (
         _TRACE_ID.set(trace_id or ""),
         _SPAN_ID.set(span_id or ""),
@@ -99,6 +132,66 @@ def enter_server_span(request: Request) -> Tuple[TraceSnapshot, Tuple[Token, Tok
     span_id = new_span_id()
     tokens = bind_trace_context(trace_id, span_id, parent_span_id)
     return TraceSnapshot(trace_id=trace_id, span_id=span_id, parent_span_id=parent_span_id), tokens
+
+
+def enter_celery_span(
+        trace_id: str = "",
+        parent_span_id: str = "",
+        span_id: str = "",
+) -> Tuple[TraceSnapshot, Tuple[Token, Token, Token]]:
+    """
+    Celery Worker 绑定追踪上下文。
+    - 消息头含 span_id 时复用（HTTP 直连下发）
+    - 否则为本任务新建 SpanID
+    """
+    tid = (trace_id or "").strip()
+    sid = (span_id or "").strip() or new_span_id()
+    tokens = bind_trace_context(tid, sid, (parent_span_id or "").strip())
+    parent = (parent_span_id or "").strip()
+    return TraceSnapshot(trace_id=tid, span_id=sid, parent_span_id=parent), tokens
+
+
+def _is_inside_celery_worker() -> bool:
+    try:
+        from celery._state import get_current_task
+
+        return get_current_task() is not None
+    except Exception:
+        return False
+
+
+def celery_dispatch_trace_headers() -> Dict[str, str]:
+    """
+    下发 Celery 时写入消息头追踪字段。
+    - HTTP 上下文：透传 trace_id（若有）与当前 span_id（子任务复用同一 Span）
+    - Celery 内再下发：仅透传 trace_id 与 parent_span_id，子任务新建 Span
+    """
+    headers: Dict[str, str] = {}
+    trace_id = get_trace_id()
+    if trace_id and trace_id != _MISSING:
+        headers["trace_id"] = trace_id
+    span_id = get_span_id()
+    if span_id == _MISSING:
+        return headers
+    if _is_inside_celery_worker():
+        headers["parent_span_id"] = span_id
+    else:
+        headers["span_id"] = span_id
+    return headers
+
+
+def _extract_celery_trace_fields(request_dict: Mapping[str, Any]) -> Tuple[str, str, str]:
+    trace_id = (request_dict.get("trace_id") or "").strip()
+    span_id = (request_dict.get("span_id") or "").strip()
+    parent_span_id = (request_dict.get("parent_span_id") or "").strip()
+    nested = request_dict.get("headers")
+    if isinstance(nested, dict):
+        inner = nested.get("headers") if isinstance(nested.get("headers"), dict) else nested
+        if isinstance(inner, dict):
+            trace_id = trace_id or (inner.get("trace_id") or "").strip()
+            span_id = span_id or (inner.get("span_id") or "").strip()
+            parent_span_id = parent_span_id or (inner.get("parent_span_id") or "").strip()
+    return trace_id, span_id, parent_span_id
 
 
 def apply_response_trace_headers(headers: MutableMapping[str, str], snapshot: TraceSnapshot) -> None:

@@ -24,7 +24,7 @@ async def get_login_access_token(
     try:
         user: User = await user_crud.authenticate(credentials)
     except (NotFoundException, NoPermissionException) as e:
-        return NotFoundResponse(message=str(e.message))
+        return NotFoundResponse(message=str(e.message), data=credentials.model_dump())
 
     await user_crud.update_last_login(user.id)
     access_token_expires = timedelta(minutes=PROJECT_CONFIG.AUTH_JWT_ACCESS_TOKEN_EXPIRE_MINUTES)

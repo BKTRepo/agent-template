@@ -1,0 +1,15 @@
+{
+  "name": "core-case-generator",
+  "display_name": "核心系统用例生成",
+  "description": "根据支付需求生成正向、异常和边界测试用例；在进行支付业务测试设计时使用。",
+  "instructions": "读取用户需求，参考挂载业务规则，按输出模板组织测试用例。需求缺少关键规则时，先列出待补充的信息。",
+  "compatibility": "",
+  "version": "0.1.0",
+  "system": "核心系统",
+  "team": "测试一组",
+  "resources": [
+    {"upload_index": 0, "role": "reference", "target_path": "business-rules.md", "usage": "生成测试用例前读取，作为演示业务规则依据。"},
+    {"upload_index": 1, "role": "asset", "target_path": "testcase-template.json", "usage": "输出测试用例时采用此模板的字段结构。"}
+  ],
+  "knowledge_base_ids": []
+}
