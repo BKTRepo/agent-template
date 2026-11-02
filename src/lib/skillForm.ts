@@ -4,7 +4,8 @@ const normalizedName = (value: string) => value.trim().normalize('NFKC').trim().
 export const resourceExtensions = ['.py', '.js', '.sh', '.bash', '.ps1', '.zip', '.whl', '.gz', '.tgz', '.tar', '.md', '.txt', '.json', '.csv', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp']
 // 定稿中“资源上传”明确允许的 Skill 附件格式。
 export const skillResourceExtensions = ['.py', '.js', '.md', '.xlsx', '.docx', '.png', '.jpg', '.jpeg']
-export const documentExtensions = ['.pdf', '.doc', '.docx', '.md', '.txt', '.xls', '.xlsx', '.json']
+// 在线调试仅接收当前 Office 格式，避免旧版 .doc/.xls 文档解析不稳定。
+export const documentExtensions = ['.pdf', '.docx', '.md', '.txt', '.xlsx', '.json']
 export const resourceCategories = ['参考资料', '模板', '静态资源', '脚本'] as const
 export interface ResourceFileLimits { maxFileBytes?: number; maxFiles?: number; maxTotalBytes?: number }
 export const skillResourceLimits: ResourceFileLimits = { maxFileBytes: 50 * 1024 * 1024, maxTotalBytes: 50 * 1024 * 1024 }
