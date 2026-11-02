@@ -14,7 +14,7 @@ import yaml
 
 from applications.wrq.agent.models.agent_model import Skill
 from applications.wrq.agent.views import skills_router
-from applications.wrq.knowledge_base.models.knowledge_base_model import Document, KnowledgeBase
+from applications.knowledge_base.models.knowledge_base_model import Document, KnowledgeBase
 from applications.user.models.user_model import User
 from configure import PROJECT_CONFIG
 

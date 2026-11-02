@@ -131,7 +131,7 @@ class SkillResourceBinding(models.Model):
     skill_id = fields.CharField(max_length=64, description="技能编号")
     skill_version_id = fields.IntField(index=True, description="技能表单版本编号")
     source_type = fields.CharField(max_length=32, description="来源：upload knowledge_base knowledge_document")
-    source_id = fields.IntField(null=True, description="来源对象整数主键；不表示用途")
+    source_id = fields.CharField(max_length=64, null=True, description="来源对象编号；知识库和文档使用字符串编号")
     file_id = fields.IntField(null=True, description="上传文件编号；整库挂载为空")
     display_name = fields.CharField(max_length=255, default="", description="挂载时展示名称")
     usage_text = fields.TextField(null=True, description="单项资源使用说明")

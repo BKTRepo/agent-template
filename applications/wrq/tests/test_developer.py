@@ -31,7 +31,7 @@ class DeveloperTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         await Tortoise.init(db_url='sqlite://:memory:',modules={'models':[
             'applications.user.models.user_model','applications.wrq.agent.models.agent_model',
-            'applications.wrq.knowledge_base.models.knowledge_base_model']})
+            'applications.knowledge_base.models.knowledge_base_model']})
         await Tortoise.generate_schemas()
         await connections.get('default').execute_script("CREATE TABLE keenrobot_applications (id TEXT PRIMARY KEY,name TEXT,is_enabled INT); INSERT INTO keenrobot_applications VALUES ('credit','信用卡系统',1);")
         await connections.get('default').execute_script('CREATE UNIQUE INDEX uq_test_active_name ON keenrobot_skills(lower(trim(name))) WHERE state=0;')
@@ -331,7 +331,7 @@ class DeveloperTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_knowledge_origin_and_reference_count_use_canonical_bindings(self):
         from applications.user.models.user_model import User
-        from applications.wrq.knowledge_base.models.knowledge_base_model import KnowledgeBase
+        from applications.knowledge_base.models.knowledge_base_model import KnowledgeBase
         await User.create(id=1,username='tester',alias='测试用户',password='unused',email='test@example.com')
         kb=await KnowledgeBase.create(id='kb-real',knowledge_name='规则库',user_id=1,is_public=False)
         skill=await self.crud.create(self.user,self.form(resource_ids=[kb.id],resource_usage='读取规则'))
@@ -343,7 +343,7 @@ class DeveloperTest(unittest.IsolatedAsyncioTestCase):
         row=await self.crud.output(skill,self.user)
         self.assertEqual(row['resource_ids'],[kb.id])
         self.assertEqual(row['knowledge_bases'][0]['name'],'规则库')
-        from applications.wrq.knowledge_base.services.platform_service import KnowledgeService
+        from applications.knowledge_base.services.platform_service import KnowledgeService
         detail=await KnowledgeService().detail(kb.id,self.user)
         self.assertEqual(detail['reference_count'],1)
 

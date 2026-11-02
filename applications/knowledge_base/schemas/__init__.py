@@ -1,2 +1,22 @@
-"""兼容导入；业务实现已迁至 applications.wrq.knowledge_base.schemas。"""
-from applications.wrq.knowledge_base.schemas import *  # noqa: F401,F403
+# -*- coding: utf-8 -*-
+from applications.knowledge_base.schemas.knowledge_base_schema import (
+    DocumentChunkCreate,
+    DocumentChunkOut,
+    DocumentChunkUpdate,
+    DocumentCreate,
+    DocumentOut,
+    DocumentUpdate,
+    KnowledgeBaseCreate,
+    KnowledgeBaseOut,
+)
+
+__all__ = [
+    "KnowledgeBaseCreate",
+    "KnowledgeBaseOut",
+    "DocumentCreate",
+    "DocumentUpdate",
+    "DocumentOut",
+    "DocumentChunkCreate",
+    "DocumentChunkOut",
+    "DocumentChunkUpdate",
+]

@@ -2,14 +2,11 @@
 from __future__ import annotations
 
 import asyncio
-import traceback
 from contextvars import ContextVar
-from datetime import datetime
-from typing import Any, Awaitable, Coroutine, Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Awaitable, Coroutine, Dict, Iterator, Optional, Tuple, Union
 
 from tortoise import Tortoise, connections
 from tortoise.exceptions import DBConnectionError
-from tortoise.expressions import Q
 
 from configure import PROJECT_CONFIG, LOGGER
 
@@ -103,102 +100,6 @@ def get_span_id_for_log() -> str:
     if sid and sid != "-":
         return sid
     return getattr(LOCAL_CONTEXT_VAR, "span_id", None) or ""
-
-
-def get_task_model():
-    from applications.task_center.models.task_center_model import TaskCenterInfo
-    return TaskCenterInfo
-
-
-def get_task_status_enum():
-    from enums import TaskCenterStatus
-    return TaskCenterStatus
-
-
-def get_scheduler_value(scheduler: Any) -> Optional[str]:
-    if scheduler is None:
-        return None
-    if hasattr(scheduler, "value"):
-        return (scheduler.value or "").strip().lower() or None
-    return str(scheduler).strip().lower() or None
-
-
-async def get_scheduled_tasks(task_type: Optional[str] = None) -> List[Any]:
-    Model = get_task_model()
-    q = (
-            Q(state=0)
-            & Q(task_enabled=True)
-            & ~Q(task_celery_scheduler__isnull=True)
-    )
-    if task_type:
-        q &= Q(task_type=task_type)
-    tasks = await Model.filter(q).all()
-    return list(tasks)
-
-
-async def check_task_expired(task: Any) -> bool:
-    scheduler = getattr(task, "task_celery_scheduler", None)
-    scheduler_str = get_scheduler_value(scheduler)
-    if not scheduler_str:
-        return False
-
-    now = datetime.now()
-    last_run = getattr(task, "task_celery_time", None) or getattr(task, "created_time", None)
-    if last_run and getattr(last_run, "tzinfo", None):
-        last_run = last_run.replace(tzinfo=None) if last_run.tzinfo else last_run
-
-    if scheduler_str == "cron":
-        expr = (getattr(task, "task_crontabs_expr", None) or "").strip()
-        if not expr:
-            return False
-        try:
-            from croniter import croniter
-            base = last_run or now
-            if getattr(base, "tzinfo", None):
-                base = base.replace(tzinfo=None)
-            it = croniter(expr, base)
-            next_run = it.get_next(datetime)
-            return next_run <= now
-        except Exception as e:
-            LOGGER.warning(
-                f"【Worker】Cron表达式解析失败: \n"
-                f"任务ID: {task.id}\n"
-                f"错误类型: {type(e).__name__}\n"
-                f"错误描述: {e}\n"
-                f"错误回溯: {traceback.format_exc()}\n"
-            )
-            return False
-
-    if scheduler_str == "interval":
-        seconds = getattr(task, "task_interval_expr", None) or 0
-        if seconds <= 0:
-            return False
-        if not last_run:
-            return True
-        diff = now - last_run
-        delta = diff.total_seconds() if hasattr(diff, "total_seconds") else diff.seconds
-        return delta >= seconds
-
-    if scheduler_str == "datetime":
-        expr = (task.task_datetime_expr or "").strip()
-        if not expr:
-            return False
-        try:
-            target = datetime.strptime(expr, "%Y-%m-%d %H:%M:%S")
-            if last_run and last_run >= target:
-                return False
-            return now >= target
-        except Exception as e:
-            LOGGER.warning(
-                f"【Worker】Datetime表达式解析失败: \n"
-                f"任务ID: {task.id}\n"
-                f"错误类型: {type(e).__name__}\n"
-                f"错误描述: {e}\n"
-                f"错误回溯: {traceback.format_exc()}\n"
-            )
-            return False
-
-    return False
 
 
 class LocalContextVar:

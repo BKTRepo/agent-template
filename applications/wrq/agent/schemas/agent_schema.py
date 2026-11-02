@@ -52,7 +52,7 @@ class DeveloperSkillForm(BaseModel):
     application_ids: list[str] = Field(default_factory=list)
     description: str = Field(..., min_length=1, max_length=1024)
     instructions: str = Field(..., min_length=1, max_length=100000)
-    resource_ids: list[int] = Field(default_factory=list)
+    resource_ids: list[str | int] = Field(default_factory=list)
     resource_usage: str = Field(default="", max_length=10000)
     compatibility: str = Field(default="", max_length=500)
     technical_name: str = Field(default="", max_length=128)
@@ -73,7 +73,7 @@ class DeveloperSkillOut(BaseModel):
     application_ids: list[str] = []
     description: str
     instructions: str
-    resource_ids: list[int]
+    resource_ids: list[str]
     resource_usage: str
     compatibility: str
     technical_name: str

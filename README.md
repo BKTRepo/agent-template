@@ -53,14 +53,11 @@
 │   ├── knowledge_base/             # 知识库与文档
 │   ├── model_config/               # LLM 模型配置（连接/参数/厂商/深度思考）
 │   ├── agent/                      # Agent 技能与 MCP 服务配置
-│   ├── task_center/                # 任务中心（Celery 定时任务调度）
 │   └── example/                    # 示例模块（商品分类/模型）
 ├── celery_scheduler/               # Celery 定时任务调度
 │   ├── celery_base.py              # Celery 基础配置与 Tortoise ORM 初始化
 │   ├── celery_worker.py            # Celery Worker 实例
 │   └── tasks/                      # 任务定义
-│       ├── task_dispatch.py        # 任务调度与分发
-│       └── task_example.py         # 示例任务
 ├── core/
 │   ├── chroma_db/                  # ChromaDB 持久化目录
 │   ├── rag_db/                     # SQLite 数据库目录（rag_system.db）
@@ -159,7 +156,7 @@ uvicorn backend_main:app --host 0.0.0.0 --port 8000 --reload
 - Swagger 文档：http://localhost:8000/docs
 - ReDoc：http://localhost:8000/redoc
 
-### 6. 启动 Celery 服务（任务调度必需）
+### 6. 启动 Celery 服务（知识库任务需要）
 
 ```bash
 # 启动 Worker（处理异步任务）
@@ -357,21 +354,6 @@ from configure import PROJECT_CONFIG
 | PUT | `/api/agent/mcp-servers/{server_id}` | 更新 MCP 服务 | 是 |
 | DELETE | `/api/agent/mcp-servers/{server_id}` | 删除 MCP 服务 | 是 |
 
-### 任务中心 `/api/task-center`
-
-| 方法 | 路径 | 说明 | 认证 |
-|------|------|------|------|
-| GET | `/api/task-center/presets` | 获取任务模板与调度选项 | 是 |
-| POST | `/api/task-center/create` | 创建任务 | 是 |
-| POST | `/api/task-center/update` | 更新任务 | 是 |
-| DELETE | `/api/task-center/delete` | 删除任务 | 是 |
-| GET | `/api/task-center/get` | 查询任务详情 | 是 |
-| POST | `/api/task-center/search` | 搜索任务列表 | 是 |
-| POST | `/api/task-center/run` | 立即执行任务 | 是 |
-| POST | `/api/task-center/start` | 启动任务调度 | 是 |
-| POST | `/api/task-center/stop` | 停止任务调度 | 是 |
-| POST | `/api/task-center/record/search` | 查询执行记录 | 是 |
-
 ### 审计日志 `/api/base/audit`
 
 | 方法 | 路径 | 说明 | 认证 |
@@ -434,85 +416,6 @@ PDF 上传处理流程：
 
 对话/知识库等业务表使用 `state=1` 软删除，用于统计与留档，不提供恢复入口。
 
-## 任务中心说明
-
-### 架构设计
-
-任务中心基于 **Celery + Redis + Celery Beat** 实现异步任务调度：
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                   FastAPI 后端                           │
-│  ┌────────────────────────────────────────────────────┐ │
-│  │  TaskCenterInfo (任务定义)                          │ │
-│  │  - task_name, task_type, task_celery_node           │ │
-│  │  - task_celery_scheduler: interval/cron/datetime   │ │
-│  │  - task_enabled, task_version                      │ │
-│  └────────────────────────────────────────────────────┘ │
-│  ┌────────────────────────────────────────────────────┐ │
-│  │  TaskCenterRecord (执行记录)                        │ │
-│  │  - celery_id, task_celery_status                   │ │
-│  │  - celery_start_time, celery_end_time              │ │
-│  │  - task_summary, task_error                        │ │
-│  └────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────┐
-│              Celery + Redis + Beat                     │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │
-│  │  Beat 调度器   │  │  Worker 执行  │  │  Redis 队列   │ │
-│  │  (定时扫描)    │  │  (异步任务)   │  │  (消息中间件)  │ │
-│  └──────────────┘  └──────────────┘  └──────────────┘ │
-└─────────────────────────────────────────────────────────┘
-```
-
-### 调度机制
-
-Celery Beat 每 60 秒扫描一次启用且配置了调度的任务：
-
-```python
-"beat_schedule": {
-    "scan-task-center-tasks": {
-        "task": "celery_scheduler.tasks.task_dispatch.scan_and_dispatch_tasks",
-        "schedule": 60.0,
-    },
-}
-```
-
-调度逻辑：
-1. 查询所有启用且配置了调度的任务
-2. 检查任务是否到期（interval/cron/datetime）
-3. 到期则通过 Celery 发送任务到 Worker
-4. Worker 执行并记录执行结果
-
-### 任务状态流转
-
-```
-创建任务 ──► 启用调度 ──► 等待到期 ──► 执行中 ──► 成功/失败
-   │           │           │           │
-   │           │           │           └── 记录执行结果
-   │           │           │
-   │           │           └── 检查间隔/cron/定时
-   │           │
-   │           └── 版本号+1，调度器感知
-   │
-   └── 禁用调度 ──► 停止执行
-```
-
-### 任务调度模式
-
-- **interval**: 固定间隔（秒），如每 60 秒执行一次
-- **cron**: Cron 表达式，如 `0 9 * * 1`（每周一 9:00）
-- **datetime**: 一次性定时任务，如 `2026-06-15 10:00:00`
-
-### 注意事项
-
-1. **Celery 服务启动**：任务中心依赖 Celery Worker 和 Beat，需要单独启动（见 [快速开始](#快速开始) 第 6 步）
-2. **Redis 配置**：确保 `.env` 中配置了 Redis（用于 Celery 消息队列和 Beat 调度）
-3. **任务版本机制**：每次启用/停止任务时版本号递增，调度器通过版本号感知任务变更
-4. **执行记录**：任务执行后会生成记录，包含执行状态、开始/结束时间、耗时、错误信息
-
 ## 工具脚本
 
 ```bash
@@ -530,7 +433,7 @@ python services/scripts/build_kb.py
 
 ### 模块化分层
 
-每个业务域（`user`、`conversation`、`knowledge_base`、`model_config`、`agent`、`task_center`）均包含：
+每个业务域（`user`、`conversation`、`knowledge_base`、`model_config`、`agent`）均包含：
 
 - `models/` — Tortoise ORM 模型
 - `schemas/` — Pydantic 请求/响应模型
@@ -594,13 +497,6 @@ DATABASE_NAME=rag_system
 ```
 
 修改后重新执行 `aerich upgrade`。
-
-### 任务中心任务不执行
-
-检查以下服务是否已启动：
-1. Redis 服务
-2. Celery Worker：`celery -A celery_scheduler.celery_worker worker -Q default -c 4 -l INFO`
-3. Celery Beat：`celery -A celery_scheduler.celery_worker beat -l INFO`
 
 ### PyCharm 调试
 

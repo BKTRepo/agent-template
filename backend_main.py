@@ -100,5 +100,5 @@ if __name__ == '__main__':
     # Worker（消费 default + autotest_queue）：
     #   Windows（单线程）：celery -A celery_scheduler.celery_worker worker -Q default,autotest_queue --pool=solo -l INFO
     #   Linux：          celery -A celery_scheduler.celery_worker worker -Q default,autotest_queue -c 4 -l INFO
-    # Beat（定时下发 scan_and_dispatch_tasks，必须单独起一个进程）：
+    # Beat（知识库任务恢复巡检，必须单独起一个进程）：
     #   celery -A celery_scheduler.celery_worker beat -l INFO

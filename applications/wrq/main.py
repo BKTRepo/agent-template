@@ -7,7 +7,6 @@ if sys.platform == 'win32':
 from fastapi import FastAPI
 from tortoise import Tortoise
 from applications.wrq.agent.views import skills_router
-from applications.wrq.knowledge_base.views import knowledge_router
 from applications.wrq.database import wrq_connections
 from configure import PROJECT_CONFIG
 
@@ -23,7 +22,6 @@ async def lifespan(app):
 
 app=FastAPI(title='WRQ 开发者中心',lifespan=lifespan)
 app.include_router(skills_router,prefix='/skills')
-app.include_router(knowledge_router,prefix='/knowledge-bases')
 
 @app.get('/health')
 async def health():

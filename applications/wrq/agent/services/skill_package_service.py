@@ -28,7 +28,7 @@ from applications.wrq.agent.services.published_skill_version import display_skil
 from applications.wrq.agent.services.skill_resource_rules import resource_role
 from applications.wrq.agent.services.agent_crud import SkillCrud
 from applications.wrq.agent.skill_names import SkillNameError
-from applications.wrq.knowledge_base.models.knowledge_base_model import Document, KnowledgeBase
+from applications.knowledge_base.models.knowledge_base_model import Document, KnowledgeBase
 from configure import PROJECT_CONFIG
 
 
@@ -84,9 +84,14 @@ class LegacySkillPackageService:
                 if source.resource_usage is not None:
                     try:
                         role = resource_role(document.filename)
-                    except ValueError as exc:
-                        report.errors.append(ValidationIssue(field=f"knowledge_base_ids[{index}]", reason=str(exc)))
-                        continue
+                    except ValueError:
+                        # 知识库支持 PDF、旧版 Word 和 Excel 等参考文档。
+                        from applications.knowledge_base.services.file_type import validate_file_type
+                        try:
+                            validate_file_type(document.filename)
+                        except ValueError as exc:
+                            report.errors.append(ValidationIssue(field=f"knowledge_base_ids[{index}]", reason=str(exc)))
+                            continue
                 bindings.append(SkillResourceBinding(document_id=document.id, role=role,
                                 target_path=f"{prefix}-{document.filename}",
                                 usage=source.resource_usage or "",

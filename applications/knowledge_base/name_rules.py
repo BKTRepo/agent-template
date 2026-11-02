@@ -1,2 +1,7 @@
-"""兼容导入；业务实现已迁至 applications.wrq.knowledge_base.name_rules。"""
-from applications.wrq.knowledge_base.name_rules import *  # noqa: F401,F403
+"""与数据库无关的名称归一化，供表单和迁移审计复用。"""
+import hashlib
+import unicodedata
+
+
+def name_key(name):
+    return hashlib.sha256(unicodedata.normalize("NFKC", name.strip()).casefold().encode()).hexdigest()

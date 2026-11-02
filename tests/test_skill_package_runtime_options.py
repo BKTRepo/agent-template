@@ -21,5 +21,5 @@ def test_runtime_uses_verified_build_workspace(tmp_path):
 
 
 def test_existing_agent_calls_keep_default_workspace():
-    options = build_base_options(skills=["case-recommender"], output_dir="output")
+    options = build_base_options(skills=["example-skill"], output_dir="output")
     assert options.cwd == PROJECT_CONFIG.WORKSPACE_DIR

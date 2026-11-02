@@ -76,12 +76,14 @@ async def register_database(app: FastAPI) -> None:
     try:
         await command.migrate(name="auto_migrate")
     except AttributeError as e:
-        LOGGER.error(f"无法从数据库中检索模型历史记录, 请检查[migration]与[aerich]表记录是否一致: {e}\n错误回溯: {traceback.format_exc()}")
+        LOGGER.error(
+            f"无法从数据库中检索模型历史记录, 请检查[migration]与[aerich]表记录是否一致: {e}\n错误回溯: {traceback.format_exc()}")
         if PROJECT_CONFIG.aerich_should_run_on_startup:
             shutil.rmtree(PROJECT_CONFIG.MIGRATION_DIR)
             await command.init_db(safe=True)
         else:
-            raise RuntimeError("数据库迁移元数据与本地[migration]不一致, 无法进行迁移, 请手工修复或从备份恢复后再启动应用")
+            raise RuntimeError(
+                "数据库迁移元数据与本地[migration]不一致, 无法进行迁移, 请手工修复或从备份恢复后再启动应用")
 
     # 应用迁移
     await command.upgrade(run_in_transaction=True)
@@ -165,10 +167,11 @@ def register_routers(app: FastAPI) -> None:
     # 导入路由蓝图
     from applications.base.views import base_public, base_secure, router_secure, audit_secure
     from applications.user.views import user_public_router, user_secure_router
-    from applications.example.views import example_category_router, example_product_router
-    from applications.weixianzhe.views import test_case_gen_router
-    from applications.zhoushengjie.views import case_recommendation_router
     from applications.zhaoyunlong.views import realtime_test_case_router
+    from applications.agent.views import mcp_servers_router, skills_router
+    from applications.conversation.views import chat_router, history_router
+    from applications.knowledge_base.views import knowledge_router
+    from applications.model_config.views import model_router
 
     # 挂在路由蓝图
     app.include_router(router=base_public, prefix="/base", tags=["基础服务"])
@@ -178,23 +181,12 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(router=user_public_router, prefix="/user", tags=["用户服务"])
     app.include_router(router=user_secure_router, prefix="/user", tags=["用户服务"], dependencies=[DependAuth])
     # 开发者中心在线调试：同步运行 Docker 沙箱并生成 Excel 测试用例文档。
-    app.include_router( router=realtime_test_case_router, prefix="/realtime-test-case-gen", tags=["开发者中心-在线调试"],)
-    app.include_router(router=example_category_router, prefix="/example", tags=["示例服务-商品分类"], dependencies=[DependAuth])
-    app.include_router(router=example_product_router, prefix="/example", tags=["示例服务-商品模型"], dependencies=[DependAuth])
-    app.include_router(router=case_recommendation_router, prefix="/case-recommendation", tags=["用例推荐"])
-    app.include_router(router=test_case_gen_router, prefix="/test-case-gen", tags=["测试用例生成"])
+    app.include_router(router=realtime_test_case_router, prefix="/realtime-test-case-gen",tags=["开发者中心-在线调试"], )
 
-    from applications.agent.views import mcp_servers_router, skills_router
-    from applications.conversation.views import chat_router, history_router
-    from applications.knowledge_base.views import knowledge_router
-    from applications.model_config.views import model_router
+    app.include_router(router=skills_router, prefix="/skills", tags=["开发者中心-Agent技能"], dependencies=[DependAuth])
+    app.include_router(router=knowledge_router, prefix="/knowledge-bases", tags=["知识库与文件管理"], dependencies=[DependAuth])
 
     app.include_router(router=chat_router, prefix="/chat", tags=["RAG-对话"], dependencies=[DependAuth])
     app.include_router(router=history_router, prefix="/conversations", tags=["RAG-历史"], dependencies=[DependAuth])
-    app.include_router(router=knowledge_router, prefix="/knowledge-bases", tags=["RAG-知识库"], dependencies=[DependAuth])
     app.include_router(router=model_router, prefix="/model-configs", tags=["RAG-模型配置"], dependencies=[DependAuth])
-    app.include_router(router=skills_router, prefix="/skills", tags=["RAG-Agent技能"], dependencies=[DependAuth])
     app.include_router(router=mcp_servers_router, prefix="/mcp-servers", tags=["RAG-MCP服务"], dependencies=[DependAuth])
-
-    from applications.task_center.views import task_center_router
-    app.include_router(router=task_center_router, prefix="/task-center", tags=["任务中心"], dependencies=[DependAuth])

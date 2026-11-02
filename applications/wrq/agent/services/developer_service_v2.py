@@ -133,14 +133,20 @@ class DeveloperSkillCrud:
         knowledge=[]
         if data.resource_ids:
             from tortoise import connections
-            tables = await connections.get('default').execute_query_dict(
-                "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='keenrobot_knowledge_bases'")
+            connection = db or connections.get('default')
+            if connection.capabilities.dialect == 'sqlite':
+                query = "SELECT name FROM sqlite_master WHERE type='table' AND name='keenrobot_knowledge_bases'"
+            else:
+                query = "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='keenrobot_knowledge_bases'"
+            tables = await connection.execute_query_dict(query)
             if not tables:
                 raise DeveloperError('知识库服务尚未接入，请先使用资源上传', 503, 'resource_ids')
-            from applications.wrq.knowledge_base.models.knowledge_base_model import KnowledgeBase
-            for kid in dict.fromkeys(data.resource_ids):
-                kb=await KnowledgeBase.filter(id=kid,state__not=1).first()
-                if not kb or (getattr(kb, 'create_user_login_name', None)!=user_login_name(user) and not kb.is_public):
+            from applications.knowledge_base.models.knowledge_base_model import KnowledgeBase
+            for kid in dict.fromkeys(str(value) for value in data.resource_ids):
+                query = KnowledgeBase.filter(id=kid,state__not=1)
+                if db: query = query.using_db(db)
+                kb=await query.first()
+                if not kb or (kb.user_id != user.id and not kb.is_public):
                     raise DeveloperError('知识库不存在或无挂载权限',field='resource_ids')
                 knowledge.append((kid,kb.knowledge_name))
         return files,knowledge
@@ -166,7 +172,7 @@ class DeveloperSkillCrud:
         for index,file in enumerate(files):
             row=data.uploaded_resources[index]
             await SkillResourceBinding.create(using_db=db,skill_id=skill.id,skill_version_id=version.id,
-                source_type='upload',source_id=file.id,
+                source_type='upload',source_id=str(file.id),
                 file_id=file.id,display_name=file.original_name,
                 usage_text=row.get('usage') or row.get('usage_text'),content_hash=file.sha256,sort_order=index)
         for index,(kid,name) in enumerate(knowledge,len(files)):

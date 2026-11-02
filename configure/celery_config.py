@@ -45,7 +45,6 @@ class CeleryConfig(BaseSettings):
             exclude_startswith="__",
             exclude_endswith="__.py",
         )
-
         self.CELERY_CONFIG = {
             "broker_url": self.CELERY_BROKER_URL,
             "result_backend": self.CELERY_RESULT_BACKEND,
@@ -83,16 +82,6 @@ class CeleryConfig(BaseSettings):
                     "task": "celery_scheduler.tasks.task_knowledge.sweep_document_jobs_task",
                     "schedule": 60.0,
                     "options": {"queue": "knowledge_delete"},
-                },
-                "scan-task-center-tasks": {
-                    "task": (
-                        "celery_scheduler.tasks.task_dispatch"
-                        ".scan_and_dispatch_tasks"
-                    ),
-                    "schedule": 60.0,
-                    "options": {"queue": "default"},
-                    # 默认扫描所有类型的任务，可以通过配置传递特定 task_type
-                    # "kwargs": {"task_type": "example"},  # 只扫描 example 类型
                 },
             },
             "worker_log_format": (
