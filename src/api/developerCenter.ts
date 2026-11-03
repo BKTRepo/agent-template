@@ -72,7 +72,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 export async function listDeveloperSkillsPage(page = 1, pageSize = 10): Promise<DeveloperSkillPage> {
   const params = new URLSearchParams({ page: String(Math.max(1, page)), page_size: String(Math.max(1, pageSize)) })
-  const result = await request<ServerSkill[] | { items: ServerSkill[]; total: number; page: number; page_size: number; pages: number }>(`/skills/developer?${params.toString()}`)
+  const result = await request<ServerSkill[] | { items: ServerSkill[]; total: number; page: number; page_size: number; pages: number }>(`/skills/developer/list-skills?${params.toString()}`)
   if (Array.isArray(result)) {
     const items = result.map(toImplementation)
     return { items, total: items.length, page: 1, pageSize: items.length || pageSize, pages: 1 }
@@ -84,32 +84,33 @@ export async function listDeveloperSkills(page = 1, pageSize = 10) {
   return (await listDeveloperSkillsPage(page, pageSize)).items
 }
 export async function getDeveloperMetadata() {
-  const metadata = await request<DeveloperMetadata>('/skills/developer/metadata')
+  const metadata = await request<DeveloperMetadata>('/skills/developer/get-form-metadata')
   return { ...metadata, skill_classes: metadata.skill_classes.map(row => ({ ...row, id: String(row.id) })) }
 }
-export async function createDeveloperSkill(form: ImplementationForm) { return toImplementation(await request<ServerSkill>('/skills/developer/', { method: 'POST', body: JSON.stringify(body(form)) })) }
-export async function updateDeveloperSkill(id: string, form: ImplementationForm) { return toImplementation(await request<ServerSkill>(`/skills/developer/${id}`, { method: 'PUT', body: JSON.stringify(body(form)) })) }
-export async function deleteDeveloperSkill(id: string) { await request<unknown>(`/skills/developer/${id}`, { method: 'DELETE' }) }
+export async function createDeveloperSkill(form: ImplementationForm) { return toImplementation(await request<ServerSkill>('/skills/developer/create-skill-draft', { method: 'POST', body: JSON.stringify(body(form)) })) }
+export async function updateDeveloperSkill(id: string, form: ImplementationForm) { return toImplementation(await request<ServerSkill>('/skills/developer/save-skill', { method: 'POST', body: JSON.stringify({ ...body(form), skill_id: id }) })) }
+export async function deleteDeveloperSkill(id: string) { await request<unknown>('/skills/developer/delete-skill-draft', { method: 'POST', body: JSON.stringify({ skill_id: id }) }) }
 export async function offlineDeveloperSkill(id: string, reasonCode = 'ABILITY_DEFECT', reasonText?: string) {
-  return toImplementation(await request<ServerSkill>(`/skills/developer/${id}/offline`, { method: 'POST', body: JSON.stringify({ reason_code: reasonCode, reason_text: reasonText || null }) }))
+  return toImplementation(await request<ServerSkill>('/skills/developer/offline-skill', { method: 'POST', body: JSON.stringify({ skill_id: id, reason_code: reasonCode, reason_text: reasonText || null }) }))
 }
-export async function publishDeveloperSkill(id: string) { return toImplementation(await request<ServerSkill>(`/skills/developer/${id}/publish`, { method: 'POST' })) }
+export async function publishDeveloperSkill(id: string) { return toImplementation(await request<ServerSkill>('/skills/developer/publish-skill', { method: 'POST', body: JSON.stringify({ skill_id: id }) })) }
 export async function recordDeveloperDebugResult(id: string, debug: NonNullable<Implementation['debug']>) {
   if (!debug.runId || debug.status === 'idle') return
   if (!debug.buildId && !debug.skillVersionId) throw new DeveloperCenterError('缺少本次任务实际使用的技能版本，不能登记。')
   const conversation = typeof debug.input === 'string' ? debug.input : debug.input.conversation
   const documents = typeof debug.input === 'string' ? [] : debug.input.documents
-  return toImplementation(await request<ServerSkill>(`/skills/developer/${encodeURIComponent(id)}/debug-runs`, {
-    method: 'POST', body: JSON.stringify({ run_id: debug.runId, build_id: debug.buildId || null,
+  return toImplementation(await request<ServerSkill>('/skills/developer/register-debug-run', {
+    method: 'POST', body: JSON.stringify({ skill_id: id, run_id: debug.runId, build_id: debug.buildId || null,
       skill_version_id: debug.skillVersionId, conversation_input: debug.conversationInput ?? conversation,
       request_document_count: debug.requestDocumentCount ?? documents.length })
   }))
 }
 export function getDeveloperDebugLink(id: string, runId: string, signal?: AbortSignal) {
-  return request<DeveloperDebugLink>(`/skills/developer/${encodeURIComponent(id)}/debug-runs/${encodeURIComponent(runId)}`, { signal })
+  const params = new URLSearchParams({ skill_id: id, run_id: runId })
+  return request<DeveloperDebugLink>(`/skills/developer/get-debug-run?${params}`, { signal })
 }
 
-export function getPlatformContext() { return request<{ id: string; name: string }>('/skills/developer/context') }
+export function getPlatformContext() { return request<{ id: string; name: string }>('/skills/developer/get-current-user') }
 export async function persistSkillResources(form: ImplementationForm, uploads: SkillUploads): Promise<ImplementationForm> {
   const rows = form.uploadedResources ?? []
   if (!rows.some(row => !row.fileId || row.savedCategory !== row.category)) return form
@@ -121,7 +122,7 @@ export async function persistSkillResources(form: ImplementationForm, uploads: S
     const file = files.find(upload => upload.id === row.id)?.file
     if (!file || !row.category) throw new DeveloperCenterError('请补充资源文件及用途分类。')
     const data = new FormData(); data.append('files', file, row.name); data.append('categories', JSON.stringify([row.category]))
-    const path = '/skills/developer/resources'
+    const path = '/skills/developer/upload-resource-files'
     const result = await request<NonNullable<ImplementationForm['uploadedResources']>>(path, { method: 'POST', body: data })
     saved.push({ ...result[0], savedCategory: result[0].category, fileId: result[0].fileId })
   }

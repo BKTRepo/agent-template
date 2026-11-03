@@ -4,6 +4,8 @@ import { downloadBlob, readBlob, saveBlobs } from '@/lib/resourceStorage'
 import { withSystemVersion } from '@/lib/skillModel'
 import { useKnowledgeStore } from '@/stores/knowledgeStore'
 import { downloadBuild } from './skillClient'
+import { skillResourceDownloadUrl } from './skillResourceDownload'
+import { useAuthStore } from '@/stores/authStore'
 import type { Implementation, ImplementationForm, SkillUploads } from '@/types/developer'
 
 const encoder = new TextEncoder()
@@ -19,8 +21,10 @@ export async function restoreSkillUploads(item: ImplementationForm, provided: Sk
   for (const row of item.uploadedResources ?? []) {
     const selected = all.find(upload => upload.id === row.id)
     let blob = selected?.file ?? await readBlob(`resource:${row.id}`)
-    if (!blob && row.downloadUrl) {
-      const response = await fetch(row.downloadUrl)
+    const resourceUrl = skillResourceDownloadUrl(row)
+    if (!blob && resourceUrl) {
+      const token = useAuthStore.getState().session?.token
+      const response = await fetch(resourceUrl, { headers: token ? { token } : {} })
       if (!response.ok) throw new Error(`资源 ${row.name} 下载失败，请检查平台凭证和原文件。`)
       blob = await response.blob()
     }

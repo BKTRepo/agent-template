@@ -4,6 +4,7 @@ import { readBlob, saveBlobs } from '@/lib/resourceStorage'
 import { debugDocumentLimits, documentExtensions, validateResourceFiles } from '@/lib/skillForm'
 import { sha256Hex } from '@/lib/sha256'
 import { DeveloperCenterError, getDeveloperDebugLink, recordDeveloperDebugResult } from './developerCenter'
+import { skillResourceDownloadUrl } from './skillResourceDownload'
 import type { DebugArtifact, DebugInput, Implementation, RealtimeDocument, RealtimeTask } from '@/types/developer'
 
 const base = '/realtime-test-case-gen'
@@ -85,8 +86,9 @@ export async function mountedDebugFiles(item: Implementation): Promise<File[]> {
   const files: File[] = []
   for (const resource of item.uploadedResources ?? []) {
     let blob = await readBlob(`resource:${resource.id}`)
-    if (!blob && resource.downloadUrl?.startsWith('/skills/developer/resources/')) {
-      const response = await fetch(resource.downloadUrl, { headers: authHeaders(), cache: 'no-store' })
+    const resourceUrl = skillResourceDownloadUrl(resource)
+    if (!blob && resourceUrl) {
+      const response = await fetch(resourceUrl, { headers: authHeaders(), cache: 'no-store' })
       if (!response.ok) throw new Error(await errorMessage(response, `挂载资源“${resource.name}”下载失败。`))
       if (/json|text\/html/.test(response.headers.get('content-type') || '')) throw new Error(`挂载资源“${resource.name}”没有返回原文件。`)
       blob = await response.blob()

@@ -25,3 +25,4 @@ export function assertImplementationOwner(item: Pick<Implementation, 'creatorId'
 }
 export const canEditKnowledge = (item: Pick<KnowledgeBase, 'creatorId'>, actor: Actor) => !!item.creatorId && item.creatorId === actor.id
 export const canViewKnowledge = (item: Pick<KnowledgeBase, 'creatorId' | 'scope'>, actor: Actor) => item.scope === 'public' || canEditKnowledge(item, actor)
+export const canMountKnowledge = (item: Pick<KnowledgeBase, 'creatorId' | 'scope' | 'processingStatus'>, actor: Actor) => canViewKnowledge(item, actor) && item.processingStatus === '知识处理完成'

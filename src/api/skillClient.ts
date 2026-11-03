@@ -31,13 +31,13 @@ async function request<T>(path: string, options: RequestInit = {}, authenticated
 export async function ensureSkill(item: Implementation) {
   const account = skillAccount()
   if (item.backendSkillId && item.backendAccount === account) return item.backendSkillId
-  const data = await request<{ id: string }>('/skills/', { method: 'POST', body: JSON.stringify({ name: item.name, is_enabled: false }) })
+  const data = await request<{ id: string }>('/skills/create-skill', { method: 'POST', body: JSON.stringify({ name: item.name, is_enabled: false }) })
   return data.id
 }
 export async function checkSkillName(name: string, excludeId?: string) {
   const params = new URLSearchParams({ name })
   if (excludeId) params.set('exclude_id', excludeId)
-  return request<{ available: boolean }>(`/skills/name-availability?${params}`)
+  return request<{ available: boolean }>(`/skills/check-skill-name?${params}`)
 }
 export async function buildSkill(item: Implementation, uploads: SkillUploads): Promise<SkillBuild> {
   if (item.resourceIds.some(id => !item.knowledgeBases?.some(row => row.id === id && row.source === 'backend'))) throw new SkillApiError('示例资源不能参与真实生成。', { resourceIds: '请选择真实知识库。' })
@@ -53,24 +53,24 @@ export async function buildSkill(item: Implementation, uploads: SkillUploads): P
   const form = new FormData()
   form.append('source', JSON.stringify(source))
   all.forEach(file => form.append('files', file.file))
-  return request('/skills/form/builds', { method: 'POST', body: form })
+  return request('/skills/packages/build-from-form', { method: 'POST', body: form })
 }
 export function readBuild(item: Implementation) {
   if (!item.backendSkillId || !item.buildId || item.buildOrigin !== 'backend') throw new SkillApiError('该记录是演示数据，没有真实 Skill 包。')
-  return request<SkillBuild>(`/skills/${item.backendSkillId}/builds/${item.buildId}`)
+  return request<SkillBuild>(`/skills/packages/get-build?${new URLSearchParams({ skill_id: item.backendSkillId, build_id: item.buildId })}`)
 }
 export function readSkillDefinition(item: Implementation) {
   if (!item.backendSkillId || item.buildOrigin !== 'backend') throw new SkillApiError('该记录没有真实后端 Skill 定义。')
-  return request<{ build: SkillBuild; markdown: string; version: string }>(`/skills/${item.backendSkillId}/definition`)
+  return request<{ build: SkillBuild; markdown: string; version: string }>(`/skills/packages/get-definition?${new URLSearchParams({ skill_id: item.backendSkillId })}`)
 }
 export function saveSkillDefinition(item: Implementation, markdown: string) {
   if (!item.backendSkillId) throw new SkillApiError('该技能没有后端记录。')
-  return request<SkillBuild>(`/skills/${item.backendSkillId}/definition`, { method: 'PUT', body: JSON.stringify({ markdown, expected_version: item.backendVersion || item.version }) })
+  return request<SkillBuild>('/skills/packages/save-definition', { method: 'POST', body: JSON.stringify({ skill_id: item.backendSkillId, markdown, expected_version: item.backendVersion || item.version }) })
 }
 export async function downloadBuild(item: Implementation) {
   await readBuild(item)
   const token = useAuthStore.getState().session?.token
-  const response = await fetch(`/skills/${item.backendSkillId}/builds/${item.buildId}/download`, { headers: token ? { token } : {} })
+  const response = await fetch(`/skills/packages/download-build?${new URLSearchParams({ skill_id: item.backendSkillId!, build_id: item.buildId! })}`, { headers: token ? { token } : {} })
   if (!response.ok || !response.headers.get('Content-Type')?.includes('application/zip')) throw new SkillApiError('下载失败，请重新查询生成结果或登录。')
   const url = URL.createObjectURL(await response.blob())
   const link = document.createElement('a'); link.href = url; link.download = `${item.technicalName}.zip`; link.click()

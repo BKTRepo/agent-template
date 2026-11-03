@@ -13,7 +13,7 @@ export const skillResourceLimits: ResourceFileLimits = { maxFileBytes: 50 * 1024
 export const debugDocumentLimits: ResourceFileLimits = { ...skillResourceLimits, maxFiles: 10 }
 // 20261016 调整说明明确取消知识库文件大小控制。
 export const knowledgeFileLimits: ResourceFileLimits = {}
-export const knowledgeExtensions = ['.pdf', '.doc', '.docx', '.md', '.txt', '.xls', '.xlsx']
+export const knowledgeExtensions = ['.pdf', '.docx', '.md', '.txt', '.xlsx']
 export function validateSkillForm(form: ImplementationForm, existing: { id: string; name: string; pendingChanges?: { name: string } }[], id?: string, draft = false) {
   const errors: Record<string, string> = {}
   void draft
