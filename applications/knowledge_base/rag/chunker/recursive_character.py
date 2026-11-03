@@ -14,7 +14,7 @@
 
 from typing import Any, Dict, List
 
-from applications.knowledge_base.rag._common import _make_chunk, estimate_tokens
+from applications.knowledge_base.rag.chunker._common import _make_chunk, estimate_tokens
 from configure import PROJECT_CONFIG
 
 # 分隔符优先级 — 语义边界从强到弱。句末标点优先于词/字符级，
@@ -37,7 +37,7 @@ _RECURSIVE_SEPARATORS = [
 def chunking_by_recursive_character(
         text: str,
         chunk_token_size: int = PROJECT_CONFIG.CHUNK_SIZE,
-        chunk_overlap_token_size: int = PROJECT_CONFIG.CHUNK_OVERLAP,
+        chunk_overlap_token_size: int = PROJECT_CONFIG.CHUNK_OVERLAP_SIZE,
 ) -> List[Dict[str, Any]]:
     """递归字符切分器 — 按逐级变细的分隔符切分，尽量保持句子完整"""
     if not text or not text.strip():

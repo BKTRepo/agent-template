@@ -17,9 +17,7 @@ FILE_TYPE_REGISTRY: Dict[str, FileTypeConfig] = {
     "txt": FileTypeConfig(extensions=(".txt",), label="纯文本", loader_enabled=True),
     "md": FileTypeConfig(extensions=(".md",), label="Markdown", loader_enabled=True),
     "docx": FileTypeConfig(extensions=(".docx",), label="Word文档", loader_enabled=True),
-    "doc": FileTypeConfig(extensions=(".doc",), label="旧版Word", loader_enabled=True),
     "xlsx": FileTypeConfig(extensions=(".xlsx",), label="Excel", loader_enabled=True),
-    "xls": FileTypeConfig(extensions=(".xls",), label="旧版Excel", loader_enabled=True),
 }
 
 

@@ -348,7 +348,7 @@ class DeveloperSkillCrud:
                 category=categories.get(file.category_id,'')
                 files.append({'id':f'file:{file.id}','fileId':file.id,
                     'name':file.original_name,'size':file.byte_size,'lastModified':0,'category':category,'savedCategory':category,
-                    'downloadUrl':f'/skills/developer/resources/{file.id}/download',
+                    'downloadUrl':f'/skills/developer/download-resource-file?file_id={file.id}',
                     'usage':binding.usage_text or ''})
             elif binding.source_type=='knowledge_base':
                 knowledge.append({'id':binding.source_id,'name':binding.display_name or binding.source_id,'source':'backend'})

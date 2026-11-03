@@ -185,6 +185,8 @@ def register_routers(app: FastAPI) -> None:
 
     app.include_router(router=skills_router, prefix="/skills", tags=["开发者中心-Agent技能"], dependencies=[DependAuth])
     app.include_router(router=knowledge_router, prefix="/knowledge-bases", tags=["知识库与文件管理"], dependencies=[DependAuth])
+    from applications.knowledge_base.views.conversion_view import conversion_router
+    app.include_router(conversion_router, prefix="/api", tags=["知识库-文件处理"], dependencies=[DependAuth])
 
     app.include_router(router=chat_router, prefix="/chat", tags=["RAG-对话"], dependencies=[DependAuth])
     app.include_router(router=history_router, prefix="/conversations", tags=["RAG-历史"], dependencies=[DependAuth])

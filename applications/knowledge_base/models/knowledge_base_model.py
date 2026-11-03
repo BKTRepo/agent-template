@@ -91,7 +91,7 @@ class DocumentChunk(ScaffoldModel, TimestampMixin):
     content = fields.TextField(description="分块内容")
     chunk_index = fields.IntField(description="分块序号")
     page_number = fields.IntField(null=True, description="PDF页码(从1开始)")
-    chroma_id = fields.CharField(max_length=128, null=True, description="Chroma向量ID")
+    chroma_id = fields.CharField(max_length=128, null=True, description="Milvus向量ID（历史列名）")
     source_metadata = fields.JSONField(default=dict)
 
     class Meta:

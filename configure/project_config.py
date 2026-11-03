@@ -5,7 +5,7 @@ import platform
 import ssl
 from functools import lru_cache
 from pathlib import Path
-from typing import List, Dict, Any, Literal
+from typing import List, Dict, Any, Literal, Optional
 from urllib.parse import quote_plus
 
 from pydantic import Field, model_validator
@@ -25,6 +25,165 @@ class ProjectConfig(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
+
+    # dev-knowledge: document ingestion configuration (no source credentials).
+    RAG_INPUT_DIR: str = os.path.abspath(os.path.join(_BACKEND_PROJECT_ROOT, "input"))
+    RAG_MAX_UPLOAD_MB: int = Field(default=200, ge=1, description="服务端上传文件大小上限(MB)")
+    MAX_DELETING_RECOMPENSATE: int = Field(
+            default=5,
+            ge=1,
+            description="单个 deleting 文档允许被巡检重新投递的最大次数",
+        )
+    CHUNK_OVERLAP_SIZE: int = Field(default=100, description="分块重叠大小，应 ≤ CHUNK_SIZE/2")
+    TABLE_ROW_CHUNKS: bool = Field(
+            default=True,
+            description=(
+                "表格行级分块开关: 开启后为每张非目录表格生成 1 个表级摘要块 + "
+                "逐行块（行数据 + 表名/行号元数据 + 自然语言描述, 纯规则生成不依赖 VLM）, "
+                "与文本块并存嵌入入库"
+            ),
+        )
+    TABLE_ANCHOR_PATTERN: str = Field(
+            default=r"\b[A-Z]{2,6}\s*\d+",
+            description=(
+                "表格命名锚点标题的正则: 表格块命名时向前回溯标题流, 最近命中该模式的标题"
+                "作为'字段定义锚点'（如 'DE 3 (Processing Code)'）前置到表名, 使扁平标题文档"
+                "（全 ## 层级）里的表格块携带 DE 级祖先词汇, 可被 '3域/DE 3' 类查询命中。"
+                "置空字符串禁用锚点回溯。注意: 文档尾部与锚点章节无关的表格（如附录）在窗口内"
+                "可能被误挂祖先锚点, 介意时可调小扫描窗口或禁用"
+            ),
+        )
+    TABLE_ANCHOR_SCAN_WINDOW: int = Field(
+            default=20,
+            ge=1,
+            description="表格命名锚点回溯的最近标题扫描窗口（个）; 窗口内无命中则不前置锚点（仅大纲模式禁用时的回落路径使用）",
+        )
+    TABLE_OUTLINE_LEVELS: List[str] = Field(
+            default=[r"^DE\s*\d+\b", r"^Subelement\s*\d+\b", r"^Subfield\s*\d+\b"],
+            description=(
+                "表格命名语义大纲的层级正则（有序列表, 位置即深度: 默认 DE=章节级, "
+                "Subelement=节级, Subfield=小节级）。标题命中深度 k 时弹栈至深度<k 再压栈, 按角色维护"
+                "逻辑大纲; 表格命名取栈内祖先 + 节内 context 标题 + 表格前导标题"
+                "拼成完整定位路径"
+                "（如 'DE 3 (Processing Code) > Subfield 2 (...) > Cardholder \"From Account\" "
+                "type code'）, 解决扁平标题（全 ##）文档里两槽位命名被中间节顶掉、窗口"
+                "锚点回溯超窗落空的问题。未命中任何层级的非样板标题作节 context "
+                "与表题候选。表格处大纲栈为空时回落两槽位+锚点回溯。空列表禁用大纲模式"
+            ),
+        )
+    TABLE_HEADING_STOPLIST: List[str] = Field(
+            default=["Values", "Attributes", "Usage", "Application notes"],
+            description=(
+                "表格命名大纲的样板标题停用表（忽略大小写精确匹配）: 这些标题在每个"
+                "字段/小节下机械重复、不携带区分信息, 不进入表名祖先链; 但作为表格"
+                "紧邻前导标题时仍可用作表题。仅大纲模式生效"
+            ),
+        )
+    TABLE_OUTLINE_RESET_PATTERN: str = Field(
+            default=r"^(Appendix|Index|Glossary|Table of Contents)\b",
+            description=(
+                "表格命名大纲的重置标题正则: 命中标题时清空大纲栈, 用于附录/索引等与"
+                "正文字段定义无关的尾部章节, 防止其后的表格误挂正文最后一个锚点祖先。"
+                "空字符串禁用重置。仅大纲模式生效"
+            ),
+        )
+    DOC_SUMMARY_INPUT_MAX_CHARS: int = Field(
+            default=20000,
+            ge=1000,
+            description="生成文档摘要时送入 LLM 的正文最大字符数（头部优先, 尾部补足）",
+        )
+    TERMINOLOGY_BATCH_CONCURRENCY: int = Field(default=5, description="术语抽取 LLM 批次并发数")
+    TERMINOLOGY_BATCH_RAW_CHARS: int = Field(
+            default=30000,
+            ge=8000,
+            description="术语抽取单批原始 Markdown 字符上限",
+        )
+    TERMINOLOGY_MAX_TOKENS: int = Field(
+            default=16384,
+            description=(
+                "术语抽取单批 LLM 输出 token 上限。偏低会导致输出截断"
+                "（finish_reason=length）——检测到截断后会自动把该批对半重切重试, "
+                "实体编号密集的大文档建议按所用模型的能力上限调高该值"
+            ),
+        )
+    TERMINOLOGY_ENTITY_MAX_ITEMS: int = Field(
+            default=20,
+            ge=1,
+            description=(
+                "术语表保留的编号实体组最大条目数: 合并后条目数超过该值的组判定为"
+                "纯值域枚举（代码值表/响应码表等）, 整组丢弃——取值不是术语, "
+                "不参与查询改写; 少量编号的锚点组（如 DE 1~6）保留"
+            ),
+        )
+    VECTOR_BACKEND: Literal["milvus"] = Field(
+            default="milvus",
+            description="固定使用 Milvus Server C/S 后端",
+        )
+    MILVUS_URI: str = Field(
+            default="http://127.0.0.1:19530",
+            description="Milvus Server URI；仅支持 C/S 架构"
+        )
+    MILVUS_USER: Optional[str] = Field(default=None, description="Milvus 用户名（可选）")
+    MILVUS_PASSWORD: Optional[str] = Field(default=None, description="Milvus 密码（可选）")
+    MILVUS_TOKEN: Optional[str] = Field(default=None, description="Milvus Token（可选）")
+    MILVUS_POOL_SIZE: int = Field(
+            default=8,
+            ge=1,
+            description="单进程 Milvus 同步客户端连接池上限",
+        )
+    MILVUS_POOL_ACQUIRE_TIMEOUT: float = Field(
+            default=30.0,
+            gt=0,
+            description="等待 Milvus 连接池空闲连接的最长秒数",
+        )
+    VECTOR_UPSERT_BATCH_SIZE: int = Field(
+            default=500,
+            description=(
+                "向量库 upsert 单批写入条数: 大文档数千分块一次性写入时 payload "
+                "可达数十 MB, 可能触及 gRPC 消息上限导致整篇在最后一步失败; "
+                "分批写入（块 ID 幂等, 失败重试安全）规避该风险"
+            ),
+        )
+    LLM_MODEL: str = Field(default="deepseek-chat", description="默认 LLM 模型")
+    LLM_MAX_TOKENS: int = Field(default=8192, description="LLM 单次最大生成 token 数")
+    LLM_TEMPERATURE: float = Field(default=0.7, description="LLM 默认采样温度")
+    EMBEDDING_BINDING_HOST: str = Field(default="https://api.siliconflow.cn/v1", description="Embedding API Base URL")
+    EMBEDDING_BINDING_API_KEY: str = Field(default="", description="Embedding API Key")
+    EMBEDDING_MODEL: str = Field(default="BAAI/bge-m3", description="默认 Embedding 模型")
+    EMBEDDING_DIM: int = Field(default=1024, description="向量维度（Milvus 建集合使用）")
+    EMBEDDING_BATCH_NUM: int = Field(
+            default=20,
+            ge=1,
+            le=20,
+            description=(
+                "Embedding 单次请求条数。当前百炼 OpenAI 兼容嵌入接口要求 "
+                "input.contents 不超过 20 条；在配置层强制上限，避免大文档到最后阶段才失败"
+            ),
+        )
+    EMBEDDING_MAX_CONCURRENT: int = Field(
+            default=1,
+            ge=1,
+            description=(
+                "Embedding API 最大并发请求数。两个约束: ① Windows 的 asyncio "
+                "SelectorEventLoop 底层 select() 有 512 socket 硬上限; "
+                "② 供应商 TPM（tokens/分钟）配额——并发越高单位时间灌入的 "
+                "token 越多, 越容易触发 429 限流。大文档频繁 429 时应继续调小"
+            ),
+        )
+    EMBEDDING_SEND_DIM: bool = Field(default=False, description="请求时是否显式传递维度参数")
+    EMBEDDING_USE_BASE64: bool = Field(default=True, description="是否使用 base64 编码传输向量")
+    EMBEDDING_MAX_CHARS_PER_TEXT: int = Field(
+            default=5000,
+            description=(
+                "嵌入输入单条文本的字符上限, 超限部分截断后再向量化。"
+                "需覆盖最大分块长度（分块口径 CHUNK_SIZE × 每 token 1.3 字符 ≈ 1560 + 缓冲）, "
+                "否则分块尾部内容不参与向量化, 尾部关键词的稠密检索命中率下降"
+            ),
+        )
+    ENABLE_VLM: bool = Field(default=False, description="是否默认启用 VLM 多模态分析")
+    VLM_API_BASE: str = Field(default="http://127.0.0.1:11434/v1", description="VLM API Base URL (OpenAI 兼容)")
+    VLM_MODEL: str = Field(default="gpt-4o", description="VLM 模型")
+    VLM_API_KEY: str = Field(default="not-needed", description="VLM API Key")
 
     # 项目描述
     APP_VERSION: str = "1.0.0"
@@ -277,6 +436,14 @@ class ProjectConfig(BaseSettings):
 
     @model_validator(mode="after")
     def validate_env_and_assemble_urls(self) -> Self:
+        for target, legacy in (("LLM_MODEL", "LLM_MODEL_NAME"),
+                               ("EMBEDDING_MODEL", "EMBEDDING_MODEL_NAME"),
+                               ("EMBEDDING_BINDING_HOST", "EMBEDDING_BASE_URL"),
+                               ("EMBEDDING_BINDING_API_KEY", "EMBEDDING_API_KEY")):
+            value = getattr(self, legacy, "")
+            if value and target not in self.model_fields_set:
+                setattr(self, target, value)
+
         if self.KNOWLEDGE_RAG_ENV_FILE:
             from dotenv import dotenv_values
             path = Path(self.KNOWLEDGE_RAG_ENV_FILE)

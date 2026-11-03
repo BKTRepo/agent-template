@@ -122,7 +122,8 @@ class KnowledgeService:
 
     async def save(self, user, form: KnowledgeForm, files, *, kb_id=None, expected_document=None):
         try:
-            validate_application(form.application, allow_all=True)
+            if form.application:
+                validate_application(form.application, allow_all=True)
         except ValueError as exc:
             raise KnowledgeError(str(exc), "application") from exc
         creating = kb_id is None
@@ -130,8 +131,6 @@ class KnowledgeService:
             raise KnowledgeError("新建知识库至少上传一个文件", "files")
         if not creating:
             await self.require(kb_id, user, write=True)
-            if not form.change_summary:
-                raise KnowledgeError("编辑时请填写变更摘要", "change_summary")
         kb_id = kb_id or str(uuid.uuid4())
         staged = await self.stage(kb_id, files)
         jobs = []

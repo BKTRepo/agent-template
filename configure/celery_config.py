@@ -60,6 +60,9 @@ class CeleryConfig(BaseSettings):
             "result_expires": 3600,
             "result_persistent": True,
             "task_routes": {
+                "applications.knowledge_base.tasks.task_rag_pipeline.process_document_task": {"queue": "knowledge_parse"},
+                "applications.knowledge_base.tasks.task_rag_pipeline.rollback_document_task": {"queue": "knowledge_parse"},
+                "applications.knowledge_base.tasks.task_rag_pipeline.delete_document_task": {"queue": "knowledge_delete"},
                 "celery_scheduler.tasks.task_knowledge.process_document_task": {"queue": "knowledge_parse"},
                 "celery_scheduler.tasks.task_knowledge.delete_document_task": {"queue": "knowledge_delete"},
                 "celery_scheduler.tasks.task_knowledge.sweep_document_jobs_task": {"queue": "knowledge_delete"},
@@ -93,7 +96,7 @@ class CeleryConfig(BaseSettings):
                 "[line:%(lineno)d] -> %(message)s"
             ),
             "worker_log_color": False,
-            "imports": task_imports,
+            "imports": task_imports + ["applications.knowledge_base.tasks.task_rag_pipeline"],
             "task_send_sent_event": True,
             "task_track_started": True,
             "task_ignore_result": False,

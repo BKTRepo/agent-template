@@ -13,6 +13,9 @@ from applications.wrq.agent.schemas.agent_schema import (
     SkillUpdate,
 )
 from applications.wrq.agent.services.agent_crud import McpServerCrud, SkillCrud
+from applications.wrq.agent.schemas.api_request_schema import (
+    SkillIdRequest, SkillUpdateBody, McpIdRequest, McpUpdateBody, business_payload,
+)
 from applications.wrq.agent.skill_names import SkillNameError
 from applications.wrq.auth import PlatformIdentity as User
 from configure import LOGGER
@@ -30,7 +33,7 @@ def name_error(exc):
         {"field": "skill_name", "reason": str(exc)}]})
 
 
-@skills.get("/name-availability", summary="开发者中心-检查技能名称是否可用")
+@skills.get("/check-skill-name", summary="开发者中心-检查技能名称是否重复或可用")
 async def check_skill_name(name: str = Query(..., max_length=128), exclude_id: str = None,
                            current_user: User = DependAuth,
                            skill_crud: SkillCrud = Depends(get_skill_crud)):
@@ -44,7 +47,7 @@ async def check_skill_name(name: str = Query(..., max_length=128), exclude_id: s
         return NotFoundResponse(message=exc.message)
 
 
-@skills.get("/", summary="Agent-查询技能列表")
+@skills.get("/list-skills", summary="技能管理-查询技能列表")
 async def list_skills(
         search: str = None,
         manage: bool = Query(default=False, description="管理页模式，包含已禁用项"),
@@ -62,7 +65,7 @@ async def list_skills(
         return FailureResponse(message=f"查询失败: {e}")
 
 
-@skills.post("/", summary="Agent-新增技能")
+@skills.post("/create-skill", summary="技能管理-创建技能（请使用开发者中心完整表单）")
 async def create_skill(
         data: SkillCreate,
         current_user: User = DependAuth,
@@ -78,9 +81,9 @@ async def create_skill(
         return FailureResponse(message=f"创建失败: {e}")
 
 
-@skills.get("/{skill_id}", summary="Agent-按id查询技能详情")
+@skills.get("/get-skill", summary="技能管理-按编号查询技能详情")
 async def get_skill(
-        skill_id: str,
+        skill_id: str = Query(..., min_length=1, max_length=64),
         current_user: User = DependAuth,
         skill_crud: SkillCrud = Depends(get_skill_crud),
 ):
@@ -94,15 +97,14 @@ async def get_skill(
         return FailureResponse(message=f"查询失败: {e}")
 
 
-@skills.put("/{skill_id}", summary="Agent-按id更新技能")
+@skills.post("/update-skill", summary="技能管理-更新技能（请使用开发者中心完整表单）")
 async def update_skill(
-        skill_id: str,
-        data: SkillUpdate,
+        data: SkillUpdateBody,
         current_user: User = DependAuth,
         skill_crud: SkillCrud = Depends(get_skill_crud),
 ):
     try:
-        instance = await skill_crud.update_skill(skill_id, current_user, data)
+        instance = await skill_crud.update_skill(data.skill_id, current_user, business_payload(data, SkillUpdate))
         return SuccessResponse(data=SkillOut.model_validate(instance).model_dump())
     except SkillNameError as exc:
         return name_error(exc)
@@ -113,14 +115,14 @@ async def update_skill(
         return FailureResponse(message=f"更新失败: {e}")
 
 
-@skills.delete("/{skill_id}", summary="Agent-按id删除技能")
+@skills.post("/delete-skill", summary="技能管理-删除技能草稿")
 async def delete_skill(
-        skill_id: str,
+        data: SkillIdRequest,
         current_user: User = DependAuth,
         skill_crud: SkillCrud = Depends(get_skill_crud),
 ):
     try:
-        await skill_crud.delete_skill(skill_id, current_user)
+        await skill_crud.delete_skill(data.skill_id, current_user)
         return SuccessResponse(message="技能已删除")
     except NotFoundException as e:
         return NotFoundResponse(message=e.message)
@@ -129,7 +131,7 @@ async def delete_skill(
         return FailureResponse(message=f"删除失败: {e}")
 
 
-@mcp_servers.get("/", summary="Agent-查询MCP服务列表")
+@mcp_servers.get("/list-mcp-servers", summary="MCP服务管理-查询MCP服务列表")
 async def list_mcp_servers(
         search: str = None,
         manage: bool = Query(default=False, description="管理页模式，包含已禁用项"),
@@ -147,7 +149,7 @@ async def list_mcp_servers(
         return FailureResponse(message=f"查询失败: {e}")
 
 
-@mcp_servers.post("/", summary="Agent-新增MCP服务")
+@mcp_servers.post("/create-mcp-server", summary="MCP服务管理-创建MCP服务配置")
 async def create_mcp_server(
         data: McpServerCreate,
         current_user: User = DependAuth,
@@ -161,9 +163,9 @@ async def create_mcp_server(
         return FailureResponse(message=f"创建失败: {e}")
 
 
-@mcp_servers.get("/{mcp_id}", summary="Agent-按id查询MCP服务详情")
+@mcp_servers.get("/get-mcp-server", summary="MCP服务管理-按编号查询MCP服务详情")
 async def get_mcp_server(
-        mcp_id: str,
+        mcp_id: str = Query(..., min_length=1, max_length=64),
         current_user: User = DependAuth,
         mcp_crud: McpServerCrud = Depends(get_mcp_server_crud),
 ):
@@ -177,15 +179,14 @@ async def get_mcp_server(
         return FailureResponse(message=f"查询失败: {e}")
 
 
-@mcp_servers.put("/{mcp_id}", summary="Agent-按id更新MCP服务")
+@mcp_servers.post("/update-mcp-server", summary="MCP服务管理-更新MCP服务配置")
 async def update_mcp_server(
-        mcp_id: str,
-        data: McpServerUpdate,
+        data: McpUpdateBody,
         current_user: User = DependAuth,
         mcp_crud: McpServerCrud = Depends(get_mcp_server_crud),
 ):
     try:
-        instance = await mcp_crud.update_mcp_server(mcp_id, current_user, data)
+        instance = await mcp_crud.update_mcp_server(data.mcp_id, current_user, business_payload(data, McpServerUpdate, "mcp_id"))
         return SuccessResponse(data=McpServerOut.model_validate(instance).model_dump())
     except NotFoundException as e:
         return NotFoundResponse(message=e.message)
@@ -194,14 +195,14 @@ async def update_mcp_server(
         return FailureResponse(message=f"更新失败: {e}")
 
 
-@mcp_servers.delete("/{mcp_id}", summary="Agent-按id删除MCP服务")
+@mcp_servers.post("/delete-mcp-server", summary="MCP服务管理-删除MCP服务配置")
 async def delete_mcp_server(
-        mcp_id: str,
+        data: McpIdRequest,
         current_user: User = DependAuth,
         mcp_crud: McpServerCrud = Depends(get_mcp_server_crud),
 ):
     try:
-        await mcp_crud.delete_mcp_server(mcp_id, current_user)
+        await mcp_crud.delete_mcp_server(data.mcp_id, current_user)
         return SuccessResponse(message="MCP 服务已删除")
     except NotFoundException as e:
         return NotFoundResponse(message=e.message)

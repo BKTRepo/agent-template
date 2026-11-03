@@ -6,9 +6,9 @@ from pydantic import BaseModel, ConfigDict, Field
 class KnowledgeForm(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     knowledge_name: str = Field(min_length=1, max_length=128)
-    description: str = Field(min_length=1, max_length=10_000)
-    tag: Literal["general", "custom"]
-    application: str = Field(min_length=1, max_length=128)
+    description: str = Field(default="", max_length=10_000)
+    tag: Literal["general", "custom", ""] = ""
+    application: str = Field(default="", max_length=128)
     is_public: bool = True
     change_summary: str = Field(default="", max_length=10_000)
     expected_version: str | None = None
@@ -19,7 +19,7 @@ class KnowledgeForm(BaseModel):
 class DocumentEdit(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     content: str = Field(min_length=1)
-    change_summary: str = Field(min_length=1, max_length=10_000)
+    change_summary: str = Field(default="", max_length=10_000)
     expected_generation: int = Field(ge=1)
 
 

@@ -70,7 +70,7 @@ class SourceService:
                                 raise
                     results.append({'id': f'file:{source.id}', 'fileId': source.id,
                         'name': source.original_name, 'size': source.byte_size, 'lastModified': 0, 'category': kind.name,
-                        'savedCategory': kind.name, 'downloadUrl': f'/skills/developer/resources/{source.id}/download'})
+                        'savedCategory': kind.name, 'downloadUrl': f'/skills/developer/download-resource-file?file_id={source.id}'})
             return results
         except BaseException:
             for path in paths:

@@ -30,6 +30,8 @@ async def lifespan(app):
 
 app = FastAPI(title="知识库与文件管理", lifespan=lifespan)
 app.include_router(knowledge_router, prefix="/knowledge-bases")
+from applications.knowledge_base.views.conversion_view import conversion_router
+app.include_router(conversion_router, prefix="/api")
 
 
 @app.get("/health")
