@@ -1,5 +1,4 @@
 import { useAuthStore } from '@/stores/authStore'
-import { useKnowledgeStore } from '@/stores/knowledgeStore'
 import { readBlob, saveBlobs } from '@/lib/resourceStorage'
 import { debugDocumentLimits, documentExtensions, validateResourceFiles } from '@/lib/skillForm'
 import { sha256Hex } from '@/lib/sha256'
@@ -99,15 +98,7 @@ export async function mountedDebugFiles(item: Implementation): Promise<File[]> {
     if (!blob) throw new Error(`挂载资源“${resource.name}”原文件缺失，请在技能中重新上传后再调试。`)
     files.push(new File([blob], resource.name, { type: blob.type, lastModified: resource.lastModified }))
   }
-  for (const id of item.resourceIds) {
-    const knowledge = useKnowledgeStore.getState().knowledgeBases.find(row => row.id === id)
-    if (!knowledge) throw new Error('部分挂载资源缺少原文件，请先修改技能，移除历史示例文件或重新上传真实资源。')
-    for (const resource of knowledge.files) {
-      const blob = resource.sampleContent !== undefined ? new Blob([resource.sampleContent], { type: 'text/plain' }) : await readBlob(`resource:${resource.id}`)
-      if (!blob) throw new Error(`知识库文件“${resource.name}”缺失，请重新上传后再调试。`)
-      files.push(new File([blob], resource.name, { type: blob.type, lastModified: resource.lastModified }))
-    }
-  }
+  // 知识库由后端按本次技能版本授权，通过 MCP 检索，不作为原文件附件发送。
   if (item.buildOrigin === 'backend' && item.build?.files.filter(row => row.path !== 'SKILL.md' && row.path !== 'manifest.json').length !== files.length) {
     throw new Error('部分后端包内资源只有文件信息，未取得原文件；请先重新上传对应资源再调试，避免遗漏挂载内容。')
   }
@@ -303,6 +294,8 @@ async function createDebugTask(item: Implementation, input: DebugInput, markdown
   const form = new FormData()
   form.append('skill_definition', markdown)
   form.append('skill_id', item.backendSkillId || item.id)
+  form.append('build_id', item.buildId || '')
+  form.append('skill_version_id', String(item.skillVersionId || ''))
   form.append('conversation_input', input.conversation.trim())
   const selected: File[] = []
   for (const document of input.documents) {

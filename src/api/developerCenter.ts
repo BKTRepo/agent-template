@@ -26,7 +26,7 @@ export interface DeveloperSkillPage {
   pages: number
 }
 export interface DeveloperDebugLink {
-  run_id: string; skill_id: string; skill_version_id: number; version: string
+  run_id: string; skill_id: number; skill_version_id: number; version: string
   build_id: string; is_current_version: boolean; task: Record<string, unknown> | null
 }
 
@@ -88,19 +88,19 @@ export async function getDeveloperMetadata() {
   return { ...metadata, skill_classes: metadata.skill_classes.map(row => ({ ...row, id: String(row.id) })) }
 }
 export async function createDeveloperSkill(form: ImplementationForm) { return toImplementation(await request<ServerSkill>('/skills/developer/create-skill-draft', { method: 'POST', body: JSON.stringify(body(form)) })) }
-export async function updateDeveloperSkill(id: string, form: ImplementationForm) { return toImplementation(await request<ServerSkill>('/skills/developer/save-skill', { method: 'POST', body: JSON.stringify({ ...body(form), skill_id: id }) })) }
-export async function deleteDeveloperSkill(id: string) { await request<unknown>('/skills/developer/delete-skill-draft', { method: 'POST', body: JSON.stringify({ skill_id: id }) }) }
+export async function updateDeveloperSkill(id: string, form: ImplementationForm) { return toImplementation(await request<ServerSkill>('/skills/developer/save-skill', { method: 'POST', body: JSON.stringify({ ...body(form), skill_id: Number(id) }) })) }
+export async function deleteDeveloperSkill(id: string) { await request<unknown>('/skills/developer/delete-skill-draft', { method: 'POST', body: JSON.stringify({ skill_id: Number(id) }) }) }
 export async function offlineDeveloperSkill(id: string, reasonCode = 'ABILITY_DEFECT', reasonText?: string) {
-  return toImplementation(await request<ServerSkill>('/skills/developer/offline-skill', { method: 'POST', body: JSON.stringify({ skill_id: id, reason_code: reasonCode, reason_text: reasonText || null }) }))
+  return toImplementation(await request<ServerSkill>('/skills/developer/offline-skill', { method: 'POST', body: JSON.stringify({ skill_id: Number(id), reason_code: reasonCode, reason_text: reasonText || null }) }))
 }
-export async function publishDeveloperSkill(id: string) { return toImplementation(await request<ServerSkill>('/skills/developer/publish-skill', { method: 'POST', body: JSON.stringify({ skill_id: id }) })) }
+export async function publishDeveloperSkill(id: string) { return toImplementation(await request<ServerSkill>('/skills/developer/publish-skill', { method: 'POST', body: JSON.stringify({ skill_id: Number(id) }) })) }
 export async function recordDeveloperDebugResult(id: string, debug: NonNullable<Implementation['debug']>) {
   if (!debug.runId || debug.status === 'idle') return
   if (!debug.buildId && !debug.skillVersionId) throw new DeveloperCenterError('缺少本次任务实际使用的技能版本，不能登记。')
   const conversation = typeof debug.input === 'string' ? debug.input : debug.input.conversation
   const documents = typeof debug.input === 'string' ? [] : debug.input.documents
   return toImplementation(await request<ServerSkill>('/skills/developer/register-debug-run', {
-    method: 'POST', body: JSON.stringify({ skill_id: id, run_id: debug.runId, build_id: debug.buildId || null,
+    method: 'POST', body: JSON.stringify({ skill_id: Number(id), run_id: debug.runId, build_id: debug.buildId || null,
       skill_version_id: debug.skillVersionId, conversation_input: debug.conversationInput ?? conversation,
       request_document_count: debug.requestDocumentCount ?? documents.length })
   }))

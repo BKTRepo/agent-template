@@ -13,7 +13,7 @@ const json=(value,status=200)=>Response.json(value,{status})
 const success=data=>json({status:'success',data})
 let sequence=0
 function fixture(changes={}) {
-  const item={id:`async-unit-${++sequence}`,name:'联调技能',creatorId:'1',buildId:'build-1',skillVersionId:1,resourceIds:[],uploadedResources:[]}
+  const item={id:String(1000 + ++sequence),name:'联调技能',creatorId:'1',buildId:'build-1',skillVersionId:1,resourceIds:[],uploadedResources:[]}
   const state={status:'queued',registered:false,current:true,buildId:'build-1',versionId:1,failRegister:0,failPoll:0,failDownload:0,auto:true,...changes}
   const runId='run/'+item.id, calls=[]
   const documents=()=>state.status==='completed'?[{filename:'测试.xlsx',format:'xlsx',size_bytes:bytes.length,test_case_count:18,
@@ -66,7 +66,7 @@ test('POST新任务后立即登记冻结版本；queued→running→completed才
     const register=f.calls.findIndex(c=>c.method==='POST' && c.path.endsWith('/register-debug-run'))
     const poll=f.calls.findIndex(c=>c.path.startsWith('/realtime-test-case-gen/runs/') && !c.path.includes('/document'))
     assert.ok(register>0 && register<poll)
-    assert.deepEqual(JSON.parse(f.calls[register].options.body),{skill_id:f.item.id,run_id:f.runId,build_id:'build-1',skill_version_id:1,conversation_input:input.conversation,request_document_count:0})
+    assert.deepEqual(JSON.parse(f.calls[register].options.body),{skill_id:Number(f.item.id),run_id:f.runId,build_id:'build-1',skill_version_id:1,conversation_input:input.conversation,request_document_count:0})
     assert.deepEqual(progress,['queued','running','passed'])
     assert.equal(result.status,'passed');assert.equal(result.versionRegistered,true);assert.equal(result.isCurrentVersion,true)
     assert.equal(result.artifact.name,'测试.xlsx')
@@ -77,7 +77,7 @@ test('POST新任务后立即登记冻结版本；queued→running→completed才
   })
 })
 
-test('原始文档和资源按multipart提交；版本字段只发给我方登记接口',async()=>{
+test('原始文档与上传资源按multipart提交，固定版本同时交给MCP授权和任务登记',async()=>{
   const f=fixture({status:'completed'}),file=new File(['# 需求'],'需求.md'),script=new File(['print(1)'],'check.py')
   await saveBlobs([{key:'resource:script',blob:script}])
   await use(f,async()=>{
@@ -85,7 +85,7 @@ test('原始文档和资源按multipart提交；版本字段只发给我方登�
       {...input,documents:[{id:'doc',name:file.name}]},'# 定义',[{id:'doc',file}],undefined,options)
     const form=f.calls[0].options.body
     assert.ok(form instanceof FormData);assert.equal(form.get('skill_definition'),'# 定义')
-    assert.equal(form.get('skill_version_id'),null);assert.equal(await form.get('documents').text(),'# 需求')
+    assert.equal(form.get('skill_version_id'),'1');assert.equal(form.get('build_id'),'build-1');assert.equal(await form.get('documents').text(),'# 需求')
     assert.equal(await form.get('mounted_resources').text(),'print(1)')
   })
 })
@@ -253,6 +253,7 @@ test('数量、格式、50MB大小及缺失原文件在创建任务前拦截',as
     await assert.rejects(runRealtimeDebug(f.item,{...input,documents:[{id:'doc',name:file.name}]},'# 定义',[{id:'doc',file}]),/格式|支持/)
     const large=new File(['x'],'large.pdf');Object.defineProperty(large,'size',{value:50*1024*1024+1})
     await assert.rejects(runRealtimeDebug(f.item,{...input,documents:[{id:'doc',name:large.name}]},'# 定义',[{id:'doc',file:large}]),/50/)
-    await assert.rejects(mountedDebugFiles({...f.item,resourceIds:['missing']}),/原文件/)
+    assert.deepEqual(await mountedDebugFiles({...f.item,resourceIds:['12']}),[]) // 知识库改由MCP检索，不恢复原文件。
+    await assert.rejects(mountedDebugFiles({...f.item,uploadedResources:[{id:'missing',name:'missing.md'}]}),/原文件/)
   })
 })

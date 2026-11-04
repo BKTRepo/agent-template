@@ -83,34 +83,34 @@ const skill = (id, changes = {}) => ({ id, name: id, class_id: 1, creator_login_
   version: '1.0.0', current_revision: 4, skill_version_id: 10, status: '已上线', updated_at: '', ...changes })
 
 test('多选抽象类读取全部本人分页，完整调用技能更新接口，部分失败可仅重试失败项', async () => {
-  const rows = new Map([['one', skill('one')], ['two', skill('two')], ['existing', skill('existing', { resource_ids: ['kb-real'] })],
-    ['other', skill('other', { creator_login_name: 'someone-else' })], ['unselected', skill('unselected', { class_id: 2 })]])
+  const rows = new Map([['101', skill('101')], ['102', skill('102')], ['103', skill('103', { resource_ids: ['kb-real'] })],
+    ['104', skill('104', { creator_login_name: 'someone-else' })], ['105', skill('105', { class_id: 2 })]])
   let fail = true
   const saved = [], pages = []
   await mocked(async (url, options) => {
     if (url.startsWith('/knowledge-bases/detail?')) return success(knowledge())
     if (url.startsWith('/skills/developer/list-skills?')) {
       const page = Number(new URL(url, 'http://local').searchParams.get('page')); pages.push(page)
-      return success({ items: page === 1 ? [rows.get('one'), rows.get('other')] : [rows.get('two'), rows.get('existing'), rows.get('unselected')], page, pages: 2, page_size: 100, total: 5 })
+      return success({ items: page === 1 ? [rows.get('101'), rows.get('104')] : [rows.get('102'), rows.get('103'), rows.get('105')], page, pages: 2, page_size: 100, total: 5 })
     }
     assert.equal(url, '/skills/developer/save-skill'); assert.equal(options.method, 'POST')
-    const body = JSON.parse(options.body); saved.push(body.skill_id)
+    const body = JSON.parse(options.body); saved.push(String(body.skill_id)); assert.equal(typeof body.skill_id, 'number')
     assert.equal(body.expected_revision, 4); assert.equal(body.description, 'Keep description')
     assert.equal(body.instructions, 'Keep instructions'); assert.equal(body.compatibility, 'Python 3.12')
     assert.equal(body.uploaded_resources[0].fileId, 8); assert.equal(body.skill_markdown, '# Existing definition')
     assert.deepEqual(body.resource_ids, ['old-kb', 'kb-real']); assert.equal(body.resource_usage, 'Keep usage')
-    if (fail && body.skill_id === 'two') return Response.json({ status: 'failure', message: 'revision conflict' }, { status: 409 })
-    rows.set(body.skill_id, { ...rows.get(body.skill_id), resource_ids: body.resource_ids, current_revision: 5, status: '草稿' })
-    return success(rows.get(body.skill_id))
+    if (fail && body.skill_id === 102) return Response.json({ status: 'failure', message: 'revision conflict' }, { status: 409 })
+    rows.set(String(body.skill_id), { ...rows.get(String(body.skill_id)), resource_ids: body.resource_ids, current_revision: 5, status: '草稿' })
+    return success(rows.get(String(body.skill_id)))
   }, async () => {
     const result = await mountKnowledge('kb-real', ['1'])
     assert.deepEqual(pages, [1, 2]); assert.equal(result.matched, 3)
     assert.equal(result.saved, 1); assert.equal(result.skipped, 1)
-    assert.equal(result.failures[0].id, 'two'); assert.deepEqual(saved, ['one', 'two'])
+    assert.equal(result.failures[0].id, '102'); assert.deepEqual(saved, ['101', '102'])
     fail = false
     const repeated = await mountKnowledge('kb-real', ['1'])
     assert.equal(repeated.saved, 1); assert.equal(repeated.skipped, 2); assert.deepEqual(repeated.failures, [])
-    assert.deepEqual(saved, ['one', 'two', 'two'])
+    assert.deepEqual(saved, ['101', '102', '102'])
   })
 })
 

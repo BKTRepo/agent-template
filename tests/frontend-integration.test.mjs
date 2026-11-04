@@ -9,9 +9,9 @@ import { listDeveloperSkills,createDeveloperSkill,updateDeveloperSkill,deleteDev
 import { restoreSkillUploads } from '../src/api/skillArchive.ts'
 import { validateInput } from '../src/api/developer.ts'
 const session={token:'test-only-token',username:'test',alias:'测试用户'}
-const form={classId:'SKILL-CASE-001',name:'测试技能',technicalName:'skill-test',applicationIds:['*'],version:'999.0.0',
+const form={classId:'1',name:'测试技能',technicalName:'skill-test',applicationIds:['*'],version:'999.0.0',
   description:'测试描述',instructions:'生成用例',resourceIds:[],uploadedResources:[],resourceUsage:'',revision:2}
-const row={id:'server-id',name:'测试技能',class_id:'SKILL-CASE-001',application_ids:['*'],version:'1.0.2',current_revision:3,
+const row={id:101,name:'测试技能',class_id:1,application_ids:['*'],version:'1.0.2',current_revision:3,
   skill_version_id:12,status:'草稿',creator_id:'1',creator_name:'测试用户',updated_at:'2026-10-24T10:00:00',
   description:'测试描述',instructions:'生成用例',resource_ids:[],uploaded_resources:[],knowledge_bases:[]}
 const success=data=>Response.json({status:'success',data})
@@ -33,25 +33,25 @@ test('创建使用服务器返回的ID和版本，客户端版本不上传',asyn
   assert.deepEqual(body.application_ids,['*']);return success(row)
  },async()=>{
   const item=await createDeveloperSkill(form)
-  assert.equal(item.id,'server-id');assert.equal(item.version,'1.0.2');assert.equal(item.revision,3);assert.equal(item.skillVersionId,12)
+  assert.equal(item.id,'101');assert.equal(item.version,'1.0.2');assert.equal(item.revision,3);assert.equal(item.skillVersionId,12)
  })
 })
 test('保存修改携带打开时的revision，后端冲突提示原样显示',async()=>{
  await mocked(async(url,options)=>{
-  assert.equal(url,'/skills/developer/save-skill');assert.equal(options.method,'POST');assert.equal(JSON.parse(options.body).skill_id,'server-id')
+  assert.equal(url,'/skills/developer/save-skill');assert.equal(options.method,'POST');assert.equal(JSON.parse(options.body).skill_id,101)
   assert.equal(JSON.parse(options.body).expected_revision,2)
   return Response.json({status:'failure',message:'技能已被修改，请刷新后重试'},{status:409})
- },async()=>{await assert.rejects(updateDeveloperSkill('server-id',form),/技能已被修改/)})
+ },async()=>{await assert.rejects(updateDeveloperSkill('101',form),/技能已被修改/)})
 })
 test('删除调用后端接口，不在浏览器伪造删除成功',async()=>{
  await mocked(async(url,options)=>{
-  assert.equal(url,'/skills/developer/delete-skill-draft');assert.equal(options.method,'POST');assert.equal(JSON.parse(options.body).skill_id,'server-id')
+  assert.equal(url,'/skills/developer/delete-skill-draft');assert.equal(options.method,'POST');assert.equal(JSON.parse(options.body).skill_id,101)
   return Response.json({status:'failure',message:'只有草稿可以删除'},{status:400})
- },async()=>{await assert.rejects(deleteDeveloperSkill('server-id'),/只有草稿/)})
+ },async()=>{await assert.rejects(deleteDeveloperSkill('101'),/只有草稿/)})
 })
 test('上线完全由后端校验，前端passed标签不能代替当前版本通过记录',async()=>{
  await mocked(async()=>Response.json({status:'failure',message:'当前版本尚未取得沙箱调试通过结果，不能上线'},{status:409}),
-  async()=>{await assert.rejects(publishDeveloperSkill('server-id'),/不能上线/)})
+  async()=>{await assert.rejects(publishDeveloperSkill('101'),/不能上线/)})
 })
 test('刷新通过接口取得列表和目录，空结果保持空白',async()=>{
  await mocked(async(url)=>success(url.includes('metadata')?{skill_classes:[],applications:[]}:[]),async()=>{

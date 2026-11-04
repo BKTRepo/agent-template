@@ -31,8 +31,8 @@ async function request<T>(path: string, options: RequestInit = {}, authenticated
 export async function ensureSkill(item: Implementation) {
   const account = skillAccount()
   if (item.backendSkillId && item.backendAccount === account) return item.backendSkillId
-  const data = await request<{ id: string }>('/skills/create-skill', { method: 'POST', body: JSON.stringify({ name: item.name, is_enabled: false }) })
-  return data.id
+  const data = await request<{ id: number }>('/skills/create-skill', { method: 'POST', body: JSON.stringify({ name: item.name, is_enabled: false }) })
+  return String(data.id)
 }
 export async function checkSkillName(name: string, excludeId?: string) {
   const params = new URLSearchParams({ name })
@@ -49,7 +49,7 @@ export async function buildSkill(item: Implementation, uploads: SkillUploads): P
     if (!category || !categoryNames[category]) throw new SkillApiError(`请选择 ${upload.file.name} 的资源用途分类。`, { uploadedResources: '每个上传资源都需要选择分类。' })
     return categoryNames[category]
   })
-  const source = { skill_id: item.backendSkillId, skill_name: item.name, skill_class_id: item.classId, application: item.applicationIds?.[0] || null, description: item.description, version: item.version, expected_version: item.backendVersion || item.version, instructions: item.instructions, compatibility: item.compatibility ?? '', resource_usage: item.resourceUsage ?? '', knowledge_base_ids: item.resourceIds, resource_categories: resourceCategories }
+  const source = { skill_id: Number(item.backendSkillId), skill_name: item.name, skill_class_id: item.classId, application: item.applicationIds?.[0] || null, description: item.description, version: item.version, expected_version: item.backendVersion || item.version, instructions: item.instructions, compatibility: item.compatibility ?? '', resource_usage: item.resourceUsage ?? '', knowledge_base_ids: item.resourceIds, resource_categories: resourceCategories }
   const form = new FormData()
   form.append('source', JSON.stringify(source))
   all.forEach(file => form.append('files', file.file))
@@ -65,7 +65,7 @@ export function readSkillDefinition(item: Implementation) {
 }
 export function saveSkillDefinition(item: Implementation, markdown: string) {
   if (!item.backendSkillId) throw new SkillApiError('该技能没有后端记录。')
-  return request<SkillBuild>('/skills/packages/save-definition', { method: 'POST', body: JSON.stringify({ skill_id: item.backendSkillId, markdown, expected_version: item.backendVersion || item.version }) })
+  return request<SkillBuild>('/skills/packages/save-definition', { method: 'POST', body: JSON.stringify({ skill_id: Number(item.backendSkillId), markdown, expected_version: item.backendVersion || item.version }) })
 }
 export async function downloadBuild(item: Implementation) {
   await readBuild(item)
