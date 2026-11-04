@@ -1,5 +1,7 @@
 # 智能服务调度集前端
 
+2026-11-04 技能中心独立查询真实发布目录，支持分类展开、筛选分页、发布详情、模板/ZIP下载及固定构建在线测试，见 [技能中心接入说明](docs/skill-catalog-integration.md)。目标库已完成后端技能大类四列和统计列的SSL迁移。调用和下载次数已接服务端累计值，按整数编号兼容；知识库七张现有空表也已按后续授权改为INT主键及整数关联。
+
 2026-11-04 当前分支 dev-zyl-前端 已合并 zdhgj-znfw-uat-fronted。知识库已改为真实上传、进度、失败重试；按多选抽象类逐个调用技能保存接口挂载本人实现，见 [当前接入与验证说明](docs/knowledge-integration.md)。本次调用仅用 GET/POST，不使用旧 PUT/DELETE 路径。
 
 项目分支：`znfw/frontend-developer-center-20261029`。本分支仅包含独立前端项目，使用 React、TypeScript、Vite、Zustand 和 Lucide，保留 HeroUI 通用组件及原工程的 CSS 兼容构建脚本。后端和沙箱服务需独立启动，不包含在本分支中。

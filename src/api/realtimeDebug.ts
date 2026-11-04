@@ -5,6 +5,7 @@ import { debugDocumentLimits, documentExtensions, validateResourceFiles } from '
 import { sha256Hex } from '@/lib/sha256'
 import { DeveloperCenterError, getDeveloperDebugLink, recordDeveloperDebugResult } from './developerCenter'
 import { skillResourceDownloadUrl } from './skillResourceDownload'
+import { catalogResourceFiles, getCatalogSkill } from './skillCatalog'
 import type { DebugArtifact, DebugInput, Implementation, RealtimeDocument, RealtimeTask } from '@/types/developer'
 
 const base = '/realtime-test-case-gen'
@@ -23,10 +24,11 @@ interface PendingReceipt {
   conversation: string; documentCount: number
 }
 const creating = new Map<string, Promise<{ task: RealtimeTask; debug: DebugRun }>>()
+const pendingCatalogIds = new Map<string, string>()
 
 // 只暂存尚未登记成功的任务收据；成功后删除，业务列表及版本仍从后端读取。
 function receiptKey(item: Implementation) {
-  return `znfwdd-pending-debug:${item.creatorId ?? 'platform'}:${item.backendSkillId || item.id}`
+  return `znfwdd-pending-debug:${item.catalog ? `catalog:${useAuthStore.getState().session?.username ?? 'platform'}` : item.creatorId ?? 'platform'}:${item.backendSkillId || item.id}`
 }
 function receipt(item: Implementation): PendingReceipt | undefined {
   try {
@@ -83,6 +85,7 @@ function documentName(disposition: string | null, fallback: string) {
 
 /** 仅提交可恢复的原文件；绝不把文件名称当成挂载文件发送。 */
 export async function mountedDebugFiles(item: Implementation): Promise<File[]> {
+  if (item.catalog) return catalogResourceFiles(item)
   const files: File[] = []
   for (const resource of item.uploadedResources ?? []) {
     let blob = await readBlob(`resource:${resource.id}`)
@@ -170,7 +173,7 @@ async function taskResponse(response: Response, skillId: string): Promise<Realti
   if (payload?.status === 'failure' || payload?.success === false) throw new Error(payload.message || '调试接口请求失败。')
   const value = payload?.data ?? payload
   if (typeof value?.run_id !== 'string' || !value.run_id.trim()) throw new Error('调试接口未返回有效的 run_id。')
-  if (value.skill_id !== skillId) throw new Error('调试接口返回的任务不属于当前技能，已停止处理。')
+  if (String(value.skill_id) !== String(skillId)) throw new Error('调试接口返回的任务不属于当前技能，已停止处理。')
   const status = String(value.status || '').toLowerCase()
   if (!['queued', 'running', 'completed', 'failed'].includes(status)) throw new Error('调试接口返回了无法识别的任务状态。')
   const documents: RealtimeDocument[] = []
@@ -182,7 +185,7 @@ async function taskResponse(response: Response, skillId: string): Promise<Realti
     documents.push({ filename: row.filename, format: row.format, size_bytes: row.size_bytes,
       test_case_count: row.test_case_count, download_url: row.download_url, expires_at: row.expires_at ?? null })
   }
-  return { run_id: value.run_id, skill_id: value.skill_id, debugger: value.debugger, status: status as RealtimeTask['status'],
+  return { run_id: value.run_id, skill_id: String(value.skill_id), debugger: value.debugger, status: status as RealtimeTask['status'],
     started_at: value.started_at ?? null, finished_at: value.finished_at ?? null, error_message: value.error_message ?? null, documents }
 }
 
@@ -207,7 +210,7 @@ function withTask(debug: DebugRun, task: RealtimeTask): DebugRun {
 
 async function verifyLink(item: Implementation, debug: DebugRun): Promise<DebugRun> {
   const link = await getDeveloperDebugLink(item.backendSkillId || item.id, debug.runId!)
-  if (link.run_id !== debug.runId || link.skill_id !== (item.backendSkillId || item.id)
+  if (link.run_id !== debug.runId || String(link.skill_id) !== String(item.backendSkillId || item.id)
     || (debug.buildId && link.build_id !== debug.buildId)
     || (debug.skillVersionId && link.skill_version_id !== debug.skillVersionId)) throw new Error('任务的技能版本关联不一致，已停止处理。')
   removeReceipt(item, debug.runId!)
@@ -219,7 +222,7 @@ async function monitor(item: Implementation, first: RealtimeTask, initial: Debug
   let task = first, debug = initial
   for (;;) {
     debug = withTask({ ...debug, monitorError: undefined }, task)
-    if (!debug.versionRegistered && debug.buildId) {
+    if (!item.catalog && !debug.versionRegistered && debug.buildId) {
       try {
         // 任务创建后的登记不随窗口关闭而取消；仅后续状态查询接受AbortSignal。
         await recordDeveloperDebugResult(item.backendSkillId || item.id, debug)
@@ -230,7 +233,7 @@ async function monitor(item: Implementation, first: RealtimeTask, initial: Debug
     }
     aborted(signal)
     if (task.status === 'completed' || task.status === 'failed') {
-      if (debug.versionRegistered) {
+      if (!item.catalog && debug.versionRegistered) {
         try { debug = await verifyLink(item, debug) }
         catch (error) { debug = { ...debug, monitorError: `暂时无法核对任务版本：${(error as Error).message}` } }
       }
@@ -259,6 +262,8 @@ async function monitor(item: Implementation, first: RealtimeTask, initial: Debug
 }
 
 export async function restoreRealtimeDebug(item: Implementation, signal?: AbortSignal, options: DebugMonitorOptions = {}): Promise<DebugRun | undefined> {
+  // 目录测试不参与发布校验；latest-run不携带构建版本，不能拿历史任务套当前发布版。
+  if (item.catalog) return item.debug
   const skillId = item.backendSkillId || item.id
   const pending = receipt(item)
   let task = await getLatestRealtimeRun(skillId, signal)
@@ -287,6 +292,10 @@ export async function resumeRealtimeDebug(item: Implementation, debug: DebugRun,
 }
 
 async function createDebugTask(item: Implementation, input: DebugInput, markdown: string, documents: DocumentUpload[]) {
+  if (item.catalog) {
+    const current = await getCatalogSkill(item.id)
+    if (current.status !== '已上线' || current.buildId !== item.buildId || current.skillVersionId !== item.skillVersionId) throw new Error('技能已下线或发布版本已变更，请刷新后重试。')
+  }
   if (!markdown.trim()) throw new Error('Skill 定义不能为空。')
   if (!item.buildId) throw new Error('缺少本次实际构建编号，请先生成当前版本。')
   if (!input.conversation.trim() && !input.documents.length) throw new Error('请填写对话或上传需求文档，至少提供一项输入。')
@@ -304,13 +313,36 @@ async function createDebugTask(item: Implementation, input: DebugInput, markdown
   }
   const checked = validateResourceFiles(selected, [], documentExtensions, debugDocumentLimits)
   if (checked.errors.length) throw new Error(checked.errors.join('；'))
+  if (item.catalog) {
+    const documentHashes = await Promise.all(selected.map(async file => [file.name, await sha256Hex(await file.arrayBuffer())]))
+    const requestKey = JSON.stringify([useAuthStore.getState().session?.username, item.id, item.buildId, input.conversation.trim(), documentHashes])
+    const requestId = pendingCatalogIds.get(requestKey) ?? crypto.randomUUID().replaceAll('-', '')
+    pendingCatalogIds.set(requestKey, requestId)
+    // 发布定义和资源由后端从已校验的ZIP快照获取，浏览器只提交需求。
+    const submission = new FormData()
+    submission.append('source', JSON.stringify({ skill_id: Number(item.backendSkillId || item.id), build_id: item.buildId,
+      request_id: requestId, conversation_input: input.conversation.trim() }))
+    selected.forEach(file => submission.append('documents', file, file.name))
+    const response = await fetch('/skills/catalog/create-test-run', { method: 'POST', headers: authHeaders(), body: submission })
+    const task = await taskResponse(response, item.backendSkillId || item.id)
+    pendingCatalogIds.delete(requestKey)
+    const debug: DebugRun = { id: task.run_id, runId: task.run_id, buildId: item.buildId, skillVersionId: item.skillVersionId,
+      input, conversationInput: input.conversation.trim(), requestDocumentCount: input.documents.length,
+      status: 'queued', output: '', origin: 'backend', versionRegistered: false }
+    return { task, debug }
+  }
   const resources = await Promise.all((await mountedDebugFiles(item)).map(async file => ({ file,
     hash: await sha256Hex(await file.arrayBuffer()) })))
+  if (resources.length > mountedResourceLimit) throw new Error(`调试接口最多支持 ${mountedResourceLimit} 个挂载资源文件。`)
   const entries = (item.build?.files ?? []).filter(row => row.path !== 'SKILL.md' && row.path !== 'manifest.json')
   if (entries.length !== resources.length) throw new Error('挂载资源与当前构建清单不一致，请重新构建技能。')
   const paths = new Set<string>()
+  const filenames = new Set<string>()
   for (const { file } of resources) {
-    if (!file.size || /[\\/<>:"|?*\x00-\x1f]/.test(file.name) || !/\.(py|js|md|xlsx|docx|png|jpg|jpeg)$/i.test(file.name)) throw new Error(`技能资源文件不合法：${file.name}`)
+    if (!file.size || /[\\/<>:"|?*\x00-\x1f]/.test(file.name) || (!item.catalog && !/\.(py|js|md|xlsx|docx|png|jpg|jpeg)$/i.test(file.name))) throw new Error(`技能资源文件不合法：${file.name}`)
+    const filename = file.name.normalize('NFKC').toLowerCase()
+    if (filenames.has(filename)) throw new Error(`挂载资源存在同名文件“${file.name}”，当前沙箱不支持目录传参，请联系维护人调整。`)
+    filenames.add(filename)
   }
   for (const entry of entries) {
     const parts = entry.path.split('/')
@@ -329,13 +361,13 @@ async function createDebugTask(item: Implementation, input: DebugInput, markdown
   const debug: DebugRun = { id: task.run_id, runId: task.run_id, buildId: item.buildId,
     skillVersionId: item.skillVersionId, input, conversationInput: input.conversation.trim(), requestDocumentCount: input.documents.length,
     status: 'queued', output: '', origin: 'backend', versionRegistered: false }
-  saveReceipt(item, debug)
+  if (!item.catalog) saveReceipt(item, debug)
   return { task, debug }
 }
 
 export async function runRealtimeDebug(item: Implementation, input: DebugInput, markdown: string, documents: DocumentUpload[], signal?: AbortSignal, options: DebugMonitorOptions = {}): Promise<DebugRun> {
   aborted(signal)
-  if (receipt(item)) {
+  if (!item.catalog && receipt(item)) {
     const recovered = await restoreRealtimeDebug(item, signal, options)
     if (recovered) return recovered
   }

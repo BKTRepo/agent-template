@@ -4,12 +4,12 @@ import { restoreSkillUploads } from './skillArchive'
 import type { Implementation, ImplementationForm, SkillUploads } from '@/types/developer'
 
 interface ApiResponse<T> { status: string; message?: string; data: T }
-interface ServerSkill {
-  id: string; name: string; class_id: string | number; application_ids?: string[]; application_paso?: string; description: string
-  instructions: string; resource_ids: string[]; resource_usage: string; compatibility: string
+export interface ServerSkill {
+  id: string | number; name: string; class_id: string | number; application_ids?: string[]; application_paso?: string; description: string
+  instructions: string; resource_ids: (string | number)[]; resource_usage: string; compatibility: string
   technical_name: string; uploaded_resources: Implementation['uploadedResources']; knowledge_bases: Implementation['knowledgeBases']
   current_revision: number; skill_version_id: number; skill_markdown?: string; version: string | null; status: Implementation['status']; creator_id?: string; creator_login_name?: string; creator_name: string; updated_at: string
-  backend_skill_id?: string; build_id?: string; build_origin?: 'backend'
+  backend_skill_id?: string | number; build_id?: string; build_origin?: 'backend'
   debug?: { id: string; runId: string; buildId?: string; skillVersionId?: number; status: 'queued' | 'running' | 'passed' | 'failed' | 'timeout'; output: string; origin: 'backend' }
 }
 export interface DeveloperCatalogOption { id: string; name: string }
@@ -30,17 +30,17 @@ export interface DeveloperDebugLink {
   build_id: string; is_current_version: boolean; task: Record<string, unknown> | null
 }
 
-function toImplementation(row: ServerSkill): Implementation {
+export function toImplementation(row: ServerSkill): Implementation {
   const applicationIds = row.application_ids ?? (row.application_paso ? [row.application_paso] : [])
   return {
-    id: row.id, revision: row.current_revision, skillVersionId: row.skill_version_id, backendVersion: row.version ?? undefined, name: row.name, classId: String(row.class_id), applicationIds,
+    id: String(row.id), revision: row.current_revision, skillVersionId: row.skill_version_id, backendVersion: row.version ?? undefined, name: row.name, classId: String(row.class_id), applicationIds,
     system: applicationIds.includes('*') ? '全应用适用' : applicationIds[0] || '', team: '',
     technicalName: row.technical_name, description: row.description, instructions: row.instructions,
-    resourceIds: row.resource_ids, resourceUsage: row.resource_usage, compatibility: row.compatibility,
-    uploadedResources: row.uploaded_resources ?? [], knowledgeBases: row.knowledge_bases ?? [], skillMarkdown: row.skill_markdown,
+    resourceIds: row.resource_ids.map(String), resourceUsage: row.resource_usage, compatibility: row.compatibility,
+    uploadedResources: row.uploaded_resources ?? [], knowledgeBases: (row.knowledge_bases ?? []).map(kb => ({ ...kb, id: String(kb.id) })), skillMarkdown: row.skill_markdown,
     version: row.version ?? '', modelTier: 'standard', status: row.status, creatorId: row.creator_id ?? row.creator_login_name,
     creatorName: row.creator_name, updatedAt: row.updated_at,
-    backendSkillId: row.backend_skill_id ?? row.id, buildId: row.build_id,
+    backendSkillId: String(row.backend_skill_id ?? row.id), buildId: row.build_id,
     buildOrigin: row.build_origin, debug: row.debug ? { ...row.debug, buildId: row.debug.buildId ?? '', input: '',
       versionRegistered: !!row.debug.buildId, isCurrentVersion: !!row.debug.buildId && row.debug.buildId === row.build_id,
     } : undefined,
@@ -54,7 +54,7 @@ function body(form: ImplementationForm) {
     knowledge_bases: form.knowledgeBases ?? [], skill_markdown: form.skillMarkdown }
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = useAuthStore.getState().session?.token
   if (!hasSkillSession()) throw new DeveloperCenterError('平台认证未配置，请检查接口代理的token配置。')
   let response: Response

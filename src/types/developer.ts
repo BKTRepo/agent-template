@@ -40,6 +40,11 @@ export interface ImplementationForm {
   uploadedResources?: UploadedResource[]
 }
 export interface Implementation extends ImplementationForm {
+  catalog?: boolean
+  maintainerId?: string
+  maintainerName?: string
+  callCount?: number | null
+  downloadCount?: number | null
   creatorId?: string
   creatorName?: string
   id: string

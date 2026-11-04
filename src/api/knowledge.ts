@@ -5,10 +5,10 @@ import type { KnowledgeBase, KnowledgeBaseOption } from '@/types/developer'
 
 export interface KnowledgeUpload { id: string; file: File }
 export interface ConversionJob { job_id?: string; id?: string; status: string; summary?: string; error_msg?: string }
-interface ServerDocument { id: string; filename: string; file_size: number; status: string; updated_time: string; conversion_job_id?: string; conversion_status?: string; error_message?: string }
+interface ServerDocument { id: string | number; filename: string; file_size: number; status: string; updated_time: string; conversion_job_id?: string; conversion_status?: string; error_message?: string }
 interface ServerKnowledge {
-  id: string; knowledge_name: string; description: string; tag: string; application: string; version: string
-  user_id: number; creator_login_name?: string; maintainer: string; is_public: boolean; can_edit: boolean
+  id: string | number; knowledge_name: string; description: string; tag: string; application: string; version: string
+  user_id: number; creator_login_name?: string; creator_name?: string; maintainer: string; is_public: boolean; can_edit: boolean
   status: string; reference_count: number; updated_time: string; documents: ServerDocument[]
   history: { version: string; maintainer: string; change_summary: string; created_at: string }[]
 }
@@ -25,14 +25,14 @@ export async function knowledgeRequest<T>(path: string, options: RequestInit = {
   return result
 }
 export function toKnowledge(row: ServerKnowledge): KnowledgeBase {
-  return { id: row.id, name: row.knowledge_name, description: row.description || '', version: row.version,
+  return { id: String(row.id), name: row.knowledge_name, description: row.description || '', version: row.version,
     tag: ({ general: '通识类', custom: '自定义', dependency: '依赖类' } as Record<string, string>)[row.tag] || '',
     team: '', scope: row.is_public ? 'public' : 'team', applicationIds: row.application ? [row.application] : [],
-    source: 'backend', creatorId: row.creator_login_name || String(row.user_id), creatorName: row.maintainer,
+    source: 'backend', creatorId: row.creator_login_name || String(row.user_id), creatorName: row.creator_name || row.creator_login_name || String(row.user_id),
     canEdit: row.can_edit, referenceCount: row.reference_count, maintainer: row.maintainer, updatedAt: row.updated_time,
     vectorized: row.status === 'completed', model: '',
     processingStatus: row.status === 'completed' ? '知识处理完成' : row.status === 'failed' ? '知识处理失败' : '知识处理中',
-    files: (row.documents || []).map(doc => ({ id: doc.id, name: doc.filename, size: doc.file_size,
+    files: (row.documents || []).map(doc => ({ id: String(doc.id), name: doc.filename, size: doc.file_size,
       lastModified: Date.parse(doc.updated_time) || 0, conversionJobId: doc.conversion_job_id,
       conversionStatus: doc.conversion_status, errorMessage: doc.error_message })),
     history: [...(row.history || [])].reverse().map((entry, i) => ({ id: `${row.id}:${entry.version}:${i}`,
