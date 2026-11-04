@@ -28,7 +28,7 @@ test('开发者中心初始没有前端示例技能，也没有浏览器持久�
 })
 test('创建使用服务器返回的ID和版本，客户端版本不上传',async()=>{
  await mocked(async(url,options)=>{
-  assert.equal(url,'/skills/developer/');assert.equal(options.method,'POST')
+  assert.equal(url,'/skills/developer/create-skill-draft');assert.equal(options.method,'POST')
   const body=JSON.parse(options.body);assert.equal(body.version,undefined);assert.equal(body.creator_id,undefined)
   assert.deepEqual(body.application_ids,['*']);return success(row)
  },async()=>{
@@ -38,14 +38,14 @@ test('创建使用服务器返回的ID和版本，客户端版本不上传',asyn
 })
 test('保存修改携带打开时的revision，后端冲突提示原样显示',async()=>{
  await mocked(async(url,options)=>{
-  assert.equal(url,'/skills/developer/server-id');assert.equal(options.method,'PUT')
+  assert.equal(url,'/skills/developer/save-skill');assert.equal(options.method,'POST');assert.equal(JSON.parse(options.body).skill_id,'server-id')
   assert.equal(JSON.parse(options.body).expected_revision,2)
   return Response.json({status:'failure',message:'技能已被修改，请刷新后重试'},{status:409})
  },async()=>{await assert.rejects(updateDeveloperSkill('server-id',form),/技能已被修改/)})
 })
 test('删除调用后端接口，不在浏览器伪造删除成功',async()=>{
  await mocked(async(url,options)=>{
-  assert.equal(url,'/skills/developer/server-id');assert.equal(options.method,'DELETE')
+  assert.equal(url,'/skills/developer/delete-skill-draft');assert.equal(options.method,'POST');assert.equal(JSON.parse(options.body).skill_id,'server-id')
   return Response.json({status:'failure',message:'只有草稿可以删除'},{status:400})
  },async()=>{await assert.rejects(deleteDeveloperSkill('server-id'),/只有草稿/)})
 })
@@ -61,7 +61,7 @@ test('刷新通过接口取得列表和目录，空结果保持空白',async()=>
  })
 })
 test('平台身份由认证接口返回，无登录表单或退出入口',async()=>{
- await mocked(async(url)=>{assert.equal(url,'/skills/developer/context');return success({id:'1',name:'系统管理员'})},async()=>{
+ await mocked(async(url)=>{assert.equal(url,'/skills/developer/get-current-user');return success({id:'1',name:'系统管理员'})},async()=>{
   assert.deepEqual(await getPlatformContext(),{id:'1',name:'系统管理员'})
  })
  const account=readFileSync('src/components/common/PlatformAccount.tsx','utf8')
@@ -80,7 +80,7 @@ test('401与非JSON响应提供明确错误，不当作空列表',async()=>{
  })
 })
 test('挂载原文件可从服务器恢复，无需依赖浏览器缓存',async()=>{
- const source={id:'file:1',fileId:1,name:'需求.md',size:6,lastModified:0,category:'参考资料',savedCategory:'参考资料',downloadUrl:'/skills/developer/resources/1/download'}
+ const source={id:'file:1',fileId:1,name:'需求.md',size:6,lastModified:0,category:'参考资料',savedCategory:'参考资料',downloadUrl:'/skills/developer/download-resource-file?file_id=1'}
  await mocked(async(url)=>{assert.equal(url,source.downloadUrl);return new Response('原始需求')},async()=>{
   const restored=await restoreSkillUploads({...form,uploadedResources:[source]})
   assert.equal(await restored.references[0].file.text(),'原始需求')
@@ -89,7 +89,7 @@ test('挂载原文件可从服务器恢复，无需依赖浏览器缓存',async(
 test('新挂载文件先上传并保存用途，表单仅引用服务端文件编号',async()=>{
  const file=new File(['需求'],'new.md');const selected={id:'browser-only',name:file.name,size:file.size,lastModified:0,category:'参考资料'}
  await mocked(async(url,options)=>{
-  assert.equal(url,'/skills/developer/resources');assert.ok(options.body instanceof FormData)
+  assert.equal(url,'/skills/developer/upload-resource-files');assert.ok(options.body instanceof FormData)
   assert.equal(options.headers['Content-Type'],undefined)
   assert.deepEqual(JSON.parse(options.body.get('categories')),['参考资料'])
   return success([{...selected,id:'file:8',fileId:8}])

@@ -86,10 +86,7 @@ export default defineConfig(({ mode }) => {
       '/knowledge-bases': platformProxy,
       '/base': platformProxy,
       '/health': platformProxy,
-      '/api': {
-        target: 'http://127.0.0.1:8519',
-        changeOrigin: true,
-      },
+      '/api': platformProxy,
       '/docs': {
         target: 'http://127.0.0.1:8519',
         changeOrigin: true,
@@ -120,7 +117,7 @@ export default defineConfig(({ mode }) => {
       '/knowledge-bases': platformProxy,
       '/base': platformProxy,
       '/health': platformProxy,
-      '/api': { target: 'http://127.0.0.1:8519', changeOrigin: true },
+      '/api': platformProxy,
       '/docs': { target: 'http://127.0.0.1:8519', changeOrigin: true },
       '/redoc': { target: 'http://127.0.0.1:8519', changeOrigin: true },
       '/swagger-assets': { target: 'http://127.0.0.1:8519', changeOrigin: true },

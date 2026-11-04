@@ -38,7 +38,7 @@ function toImplementation(row: ServerSkill): Implementation {
     technicalName: row.technical_name, description: row.description, instructions: row.instructions,
     resourceIds: row.resource_ids, resourceUsage: row.resource_usage, compatibility: row.compatibility,
     uploadedResources: row.uploaded_resources ?? [], knowledgeBases: row.knowledge_bases ?? [], skillMarkdown: row.skill_markdown,
-    version: row.version ?? '', modelTier: 'standard', status: row.status, creatorId: row.creator_id,
+    version: row.version ?? '', modelTier: 'standard', status: row.status, creatorId: row.creator_id ?? row.creator_login_name,
     creatorName: row.creator_name, updatedAt: row.updated_at,
     backendSkillId: row.backend_skill_id ?? row.id, buildId: row.build_id,
     buildOrigin: row.build_origin, debug: row.debug ? { ...row.debug, buildId: row.debug.buildId ?? '', input: '',

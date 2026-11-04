@@ -6,7 +6,7 @@ import path from 'node:path'
 const directory = await mkdtemp(path.join(tmpdir(), 'znfwdd-tests-'))
 try {
   const outputs = []
-  for (const filename of ['skill-client', 'frontend-integration', 'realtime-debug']) {
+  for (const filename of ['skill-client', 'frontend-integration', 'realtime-debug', 'knowledge-integration']) {
     const outfile = path.join(directory, `${filename}.mjs`)
     const storageSetup = "for (const key of ['localStorage','sessionStorage']) { const values = new Map(); Object.defineProperty(globalThis, key, { configurable: true, value: { getItem: name => values.get(name) ?? null, setItem: (name,value) => values.set(name,String(value)), removeItem: name => values.delete(name) } }); } globalThis.window = { localStorage: globalThis.localStorage };"
     await build({ entryPoints: [`tests/${filename}.test.mjs`], bundle: true, platform: 'node', format: 'esm', outfile, banner: { js: storageSetup }, alias: filename !== 'skill-client' ? { '@/lib/resourceStorage': path.resolve('tests/fixtures/resourceStorage.mjs') } : {} })

@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { runRealtimeDebug, restoreRealtimeDebug, resumeRealtimeDebug, downloadRealtimeDocument, downloadRealtimeDocuments, mountedDebugFiles, debugPollInterval } from '../src/api/realtimeDebug.ts'
 import { recordDeveloperDebugResult } from '../src/api/developerCenter.ts'
 import { saveBlobs, readBlob } from './fixtures/resourceStorage.mjs'
@@ -27,13 +28,13 @@ function fixture(changes={}) {
     calls.push({path,method,options})
     if(path==='/realtime-test-case-gen/runs' && method==='POST') return json(task())
     if(path.endsWith('/latest-run')) return json(task())
-    if(path===`/skills/developer/${item.id}/debug-runs` && method==='POST') {
+    if(path==='/skills/developer/register-debug-run' && method==='POST') {
       if(state.failRegister-->0) return json({status:'failure',message:'运行记录暂未可见，请稍后重试'},409)
       const body=JSON.parse(options.body)
       state.registered=true;state.buildId=body.build_id;state.versionId=body.skill_version_id ?? 1
       return success(row())
     }
-    if(path.startsWith(`/skills/developer/${item.id}/debug-runs/`)) return state.registered ? success(link()) : json({status:'failure',message:'任务尚未关联'},404)
+    if(path.startsWith('/skills/developer/get-debug-run?')) return state.registered ? success(link()) : json({status:'failure',message:'任务尚未关联'},404)
     if(path.includes('/document')) {
       assert.equal(state.status,'completed','未完成时不得请求结果文档')
       if(state.failDownload-->0) return json({message:'文档暂不可下载'},503)
@@ -62,10 +63,10 @@ test('POST新任务后立即登记冻结版本；queued→running→completed才
   await use(f,async()=>{
     const result=await runRealtimeDebug(f.item,input,'# Skill',[],undefined,{...options,onProgress:r=>progress.push(r.status)})
     assert.equal(f.calls[0].path,'/realtime-test-case-gen/runs')
-    const register=f.calls.findIndex(c=>c.method==='POST' && c.path.endsWith('/debug-runs'))
+    const register=f.calls.findIndex(c=>c.method==='POST' && c.path.endsWith('/register-debug-run'))
     const poll=f.calls.findIndex(c=>c.path.startsWith('/realtime-test-case-gen/runs/') && !c.path.includes('/document'))
     assert.ok(register>0 && register<poll)
-    assert.deepEqual(JSON.parse(f.calls[register].options.body),{run_id:f.runId,build_id:'build-1',skill_version_id:1,conversation_input:input.conversation,request_document_count:0})
+    assert.deepEqual(JSON.parse(f.calls[register].options.body),{skill_id:f.item.id,run_id:f.runId,build_id:'build-1',skill_version_id:1,conversation_input:input.conversation,request_document_count:0})
     assert.deepEqual(progress,['queued','running','passed'])
     assert.equal(result.status,'passed');assert.equal(result.versionRegistered,true);assert.equal(result.isCurrentVersion,true)
     assert.equal(result.artifact.name,'测试.xlsx')
@@ -80,7 +81,7 @@ test('原始文档和资源按multipart提交；版本字段只发给我方登�
   const f=fixture({status:'completed'}),file=new File(['# 需求'],'需求.md'),script=new File(['print(1)'],'check.py')
   await saveBlobs([{key:'resource:script',blob:script}])
   await use(f,async()=>{
-    await runRealtimeDebug({...f.item,uploadedResources:[{id:'script',name:'check.py'}]},
+    await runRealtimeDebug({...f.item,uploadedResources:[{id:'script',name:'check.py'}],build:{files:[{path:'scripts/check.py',size:script.size,sha256:createHash('sha256').update('print(1)').digest('hex')}] }},
       {...input,documents:[{id:'doc',name:file.name}]},'# 定义',[{id:'doc',file}],undefined,options)
     const form=f.calls[0].options.body
     assert.ok(form instanceof FormData);assert.equal(form.get('skill_definition'),'# 定义')
@@ -144,7 +145,7 @@ test('登记失败后刷新，用原始收据补登记旧版，绝不绑定修�
     const restored=await restoreRealtimeDebug({...f.item,buildId:'build-2',skillVersionId:2},undefined,options)
     assert.equal(restored.buildId,'build-1');assert.equal(restored.skillVersionId,1);assert.equal(restored.isCurrentVersion,false)
     assert.equal(f.calls.filter(c=>c.path==='/realtime-test-case-gen/runs').length,1)
-    assert.equal(JSON.parse(f.calls.filter(c=>c.method==='POST' && c.path.endsWith('/debug-runs')).at(-1).options.body).build_id,'build-1')
+    assert.equal(JSON.parse(f.calls.filter(c=>c.method==='POST' && c.path.endsWith('/register-debug-run')).at(-1).options.body).build_id,'build-1')
   })
 })
 
@@ -173,7 +174,7 @@ test('登记已落库但响应丢失，重新打开只读取原关联，不重�
     const restored=await restoreRealtimeDebug(f.item,undefined,options)
     assert.equal(restored.versionRegistered,true)
     assert.equal(f.calls.filter(c=>c.path==='/realtime-test-case-gen/runs').length,1)
-    assert.equal(f.calls.filter(c=>c.method==='POST' && c.path.endsWith('/debug-runs')).length,1)
+    assert.equal(f.calls.filter(c=>c.method==='POST' && c.path.endsWith('/register-debug-run')).length,1)
   })
 })
 

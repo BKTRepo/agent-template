@@ -4,6 +4,7 @@ import { canViewKnowledge } from '@/lib/access'
 import { useAccessStore } from '@/stores/accessStore'
 import { downloadBlob, readBlob } from '@/lib/resourceStorage'
 import type { KnowledgeBase } from '@/types/developer'
+import { downloadKnowledgeFile } from '@/api/knowledge'
 export default function KnowledgeFilePreview({ kb, fileId, onClose }: { kb: KnowledgeBase; fileId: string; onClose: () => void }) {
   const [text, setText] = useState('')
   const [url, setUrl] = useState('')
@@ -14,7 +15,7 @@ export default function KnowledgeFilePreview({ kb, fileId, onClose }: { kb: Know
     let canceled = false, objectUrl = ''
     void (async () => {
       if (!canViewKnowledge(kb, useAccessStore.getState().actor)) throw new Error('没有此文件的查看权限。')
-      const original = file.sampleContent !== undefined ? new Blob([file.sampleContent]) : await readBlob(`resource:${file.id}`)
+      const original = kb.source === 'backend' ? await downloadKnowledgeFile(kb.id, file.id) : await readBlob(`resource:${file.id}`)
       if (!original) throw new Error('原文件缺失，请重新上传。')
       if (canceled) return
       setBlob(original)

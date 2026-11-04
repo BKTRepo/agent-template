@@ -75,8 +75,9 @@ export interface KnowledgeBaseOption extends KnowledgeSelection { description: s
 export type ResourceCategory = '参考资料' | '模板' | '静态资源' | '脚本'
 export interface UploadedResource { sourceId?: number; fileId?: number; sourceVersionId?: number; downloadUrl?: string; savedCategory?: ResourceCategory; id: string; name: string; size: number; lastModified: number; category?: ResourceCategory }
 export interface DebugInput { conversation: string; documentText: string; documents: UploadedResource[] }
-export interface KnowledgeFile extends UploadedResource { sampleContent?: string }
+export interface KnowledgeFile extends UploadedResource { sampleContent?: string; conversionJobId?: string; conversionStatus?: string; errorMessage?: string }
 export interface KnowledgeBase {
+  source?: 'backend'; canEdit?: boolean; referenceCount?: number
   id: string; name: string; version: string; description: string; tag: string
   team: string; scope: 'public' | 'team'; vectorized: boolean; model: string
   files: KnowledgeFile[]; updatedAt: string

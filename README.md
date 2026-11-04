@@ -1,5 +1,7 @@
 # 智能服务调度集前端
 
+2026-11-04 当前分支 dev-zyl-前端 已合并 zdhgj-znfw-uat-fronted。知识库已改为真实上传、进度、失败重试；按多选抽象类逐个调用技能保存接口挂载本人实现，见 [当前接入与验证说明](docs/knowledge-integration.md)。本次调用仅用 GET/POST，不使用旧 PUT/DELETE 路径。
+
 项目分支：`znfw/frontend-developer-center-20261029`。本分支仅包含独立前端项目，使用 React、TypeScript、Vite、Zustand 和 Lucide，保留 HeroUI 通用组件及原工程的 CSS 兼容构建脚本。后端和沙箱服务需独立启动，不包含在本分支中。
 
 复制 `.env.example` 为 `.env.local`，配置后端和沙箱地址后运行 `npm ci`、`npm run dev`。生产环境使用 `npm run build` 和 `npm run serve`；`server.js` 仅提供前端静态资源和接口反向代理。下文涉及后端目录的命令需在独立的后端项目中执行。

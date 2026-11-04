@@ -23,6 +23,6 @@ export const canEditImplementation = (item: Pick<Implementation, 'creatorId'>, a
 export function assertImplementationOwner(item: Pick<Implementation, 'creatorId'>, actor: Actor) {
   if (!canEditImplementation(item, actor)) throw new Error('只有创建者本人可以修改此实现类。')
 }
-export const canEditKnowledge = (item: Pick<KnowledgeBase, 'creatorId'>, actor: Actor) => !!item.creatorId && item.creatorId === actor.id
-export const canViewKnowledge = (item: Pick<KnowledgeBase, 'creatorId' | 'scope'>, actor: Actor) => item.scope === 'public' || canEditKnowledge(item, actor)
+export const canEditKnowledge = (item: Pick<KnowledgeBase, 'creatorId' | 'canEdit'>, actor: Actor) => !!actor.id && (item.canEdit ?? (!!item.creatorId && item.creatorId === actor.id))
+export const canViewKnowledge = (item: Pick<KnowledgeBase, 'creatorId' | 'scope' | 'canEdit' | 'source'>, actor: Actor) => !!actor.id && (item.source === 'backend' || item.scope === 'public' || canEditKnowledge(item, actor))
 export const canMountKnowledge = (item: Pick<KnowledgeBase, 'creatorId' | 'scope' | 'processingStatus'>, actor: Actor) => canViewKnowledge(item, actor) && item.processingStatus === '知识处理完成'

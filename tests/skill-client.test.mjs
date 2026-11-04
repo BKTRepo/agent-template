@@ -14,7 +14,7 @@ test('定稿表单提交技能大类应用和按上传顺序排列的分类，�
   globalThis.fetch = async (url, options) => { captured = { url, ...options }; return response({ build_id: 'build' }) }
   try {
     await buildSkill(item, { references: [{ id: 'r', file: new File(['ref'], 'ref.md') }], scripts: [{ id: 's', file: new File(['code'], 'check.py') }] })
-    assert.equal(captured.url, '/skills/form/builds')
+    assert.equal(captured.url, '/skills/packages/build-from-form')
     const source = JSON.parse(captured.body.get('source'))
     assert.deepEqual(source.knowledge_base_ids, ['real-kb'])
     assert.equal(source.skill_id, 'test-skill')
@@ -40,7 +40,7 @@ test('无附件也使用同一合同，后端字段错误返回八项表单', as
   useAuthStore.getState().setSession(session)
   const original = globalThis.fetch
   globalThis.fetch = async (url, options) => {
-    assert.equal(url, '/skills/form/builds')
+    assert.equal(url, '/skills/packages/build-from-form')
     assert.equal(options.body.getAll('files').length, 0)
     return response({ build_id: 'plain' })
   }
@@ -60,7 +60,7 @@ test('复用知识库搜索参数，真实空结果不展示示例，401清除�
   globalThis.fetch = async request => { url = request; return response([]) }
   try {
     const result = await searchKnowledgeBases('  交易  ', '测试一组', new AbortController().signal)
-    assert.equal(url, '/knowledge-bases/?search=%E4%BA%A4%E6%98%93')
+    assert.equal(url, '/knowledge-bases/list?search=%E4%BA%A4%E6%98%93&offset=0&limit=100')
     assert.equal(result.demo, false)
     assert.deepEqual(result.items, [])
     globalThis.fetch = async () => new Response('{}', { status: 401 })
@@ -74,10 +74,10 @@ test('真实Markdown查询与保存使用后端定义接口和服务器版本，
  try{
   const real={...item,buildOrigin:'backend',buildId:'old-build'}
   globalThis.fetch=async(url,options)=>{
-   assert.equal(url,'/skills/test-skill/definition')
+   assert.equal(url,options.method==='POST'?'/skills/packages/save-definition':'/skills/packages/get-definition?skill_id=test-skill')
    assert.equal(options.headers.token,session.token)
-   if(options.method==='PUT'){
-    assert.deepEqual(JSON.parse(options.body),{markdown:'# 新指令',expected_version:'1.0.1'})
+   if(options.method==='POST'){
+    assert.deepEqual(JSON.parse(options.body),{skill_id:'test-skill',markdown:'# 新指令',expected_version:'1.0.1'})
     return response({build_id:'new-build',version:'1.0.2'})
    }
    return response({build:{build_id:'old-build'},markdown:'---\nname: actual\n---\n实际定义',version:'1.0.1'})
@@ -93,7 +93,7 @@ test('名称预检查传编辑ID，创建时重名错误回到名称字段，无
   const original = globalThis.fetch
   globalThis.fetch = async (url, options) => {
     const query = new URL(url, 'http://test')
-    assert.equal(query.pathname, '/skills/name-availability')
+    assert.equal(query.pathname, '/skills/check-skill-name')
     assert.equal(query.searchParams.get('name'), '中文技能')
     assert.equal(query.searchParams.get('exclude_id'), 'owned-skill')
     assert.equal(options.headers.token, session.token)
