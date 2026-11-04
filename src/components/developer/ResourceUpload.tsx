@@ -14,7 +14,7 @@ export default function ResourceUpload({ items, activeIds, disabled, error, onAd
       <span>{hint}</span><span>支持 {extensions.join(' / ')}</span><small>支持多文件{limits.maxFileBytes !== undefined && `，单个不超过 ${limits.maxFileBytes / 1024 / 1024} MB`}{limits.maxFiles !== undefined && `，最多 ${limits.maxFiles} 个`}{limits.maxTotalBytes !== undefined && `，总大小不超过 ${limits.maxTotalBytes / 1024 / 1024} MB`}</small>
     </label>
     {items.map(item => <div className="resource-row" key={item.id}><Paperclip size={16} /><div className="uploaded-name"><b>{item.name}</b><small>{(item.size / 1024).toFixed(1)} KB{!activeIds.includes(item.id) && ' · 请重新选择文件'}</small></div>{onCategory && <select aria-label={`${item.name} 的资源用途分类`} value={item.category ?? ''} aria-invalid={!!error && !item.category} aria-describedby={error && !item.category ? `${labelId}-error` : undefined} disabled={disabled} onChange={event => onCategory(item.id, event.target.value as ResourceCategory || undefined)}><option value="">请选择分类（必选）</option>{resourceCategories.map(category => <option key={category}>{category}</option>)}</select>}<button type="button" className="button small" aria-label={`移除 ${item.name}`} disabled={disabled} onClick={() => onRemove(item.id)}>移除</button></div>)}
-    {error && <p id={`${labelId}-error`} className="field-error" role="alert">{error}</p>}
+    {error && <p id={`${labelId}-error`} className="platform-field-error" role="alert">{error}</p>}
     {items.some(item => !activeIds.includes(item.id)) && <p className="helper-text">请重新选择缺失的文件，或将其移除。</p>}
   </section>
 }

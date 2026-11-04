@@ -110,7 +110,7 @@ h1,h2,h3,p { margin:0; }
 .version-grid { grid-template-columns:1fr 120px; }
 .debug-grid { grid-template-columns:1fr 1fr 1fr; }
 .form-field>.button { align-self:flex-start; }
-.field-error { color:#c52b2b; font-size:12px!important; font-weight:400!important; }
+.platform-field-error { color:#c52b2b; font-size:12px!important; font-weight:400!important; }
 .form-hint { padding:12px; font-size:12px; line-height:1.7; color:#647b97; background:#f8fbff; border-radius:7px; }
 .helper-text { color:var(--platform-muted); font-size:12px; line-height:1.8; margin-top:7px; }
 .resource-row { display:flex; align-items:center; gap:10px; padding:11px 12px; border:1px solid #e4ebf5; border-radius:7px; margin-top:7px; background:#fbfdff; color:var(--platform-text); min-width:0; }

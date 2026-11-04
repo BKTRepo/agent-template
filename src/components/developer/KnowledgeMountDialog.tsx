@@ -55,7 +55,7 @@ export default function KnowledgeMountDialog({ kb, onClose }: { kb: KnowledgeBas
       const existing = group.items.filter(item => item.resourceIds.includes(kb.id)).length
       return <article key={group.id}><label className="inline-choice"><input type="checkbox" aria-label={`选择抽象类 ${group.name}`} checked={selected.includes(group.id)} disabled={busy || !group.items.length} onChange={event => setSelected(old => event.target.checked ? [...old, group.id] : old.filter(id => id !== group.id))} /><div><h3>{group.name}</h3><p>本人实现 {group.items.length} 个 · 已挂载 {existing} 个 · 待挂载 {group.items.length - existing} 个</p><small>{group.items.map(item => `${item.name}（${applicationText(item)}）`).join('、') || '该类下暂无本人实现'}</small></div></label></article>
     })}{!shown.length && <p className="empty-table">没有匹配的抽象类。</p>}</div>}
-    {result && <div role="status"><p>命中 {result.matched} 个：已保存 {result.saved} 个，已存在 {result.skipped} 个，失败 {result.failures.length} 个。需要重新构建、调试并发布的技能请到开发者中心继续处理。</p>{result.failures.map(item => <p className="field-error" key={item.id}>{item.name}：{item.message}</p>)}{!!result.failures.length && <p>可再次确认挂载，仅重试尚未保存的实现；已成功的不会重复生成版本。</p>}</div>}
+    {result && <div role="status"><p>命中 {result.matched} 个：已保存 {result.saved} 个，已存在 {result.skipped} 个，失败 {result.failures.length} 个。需要重新构建、调试并发布的技能请到开发者中心继续处理。</p>{result.failures.map(item => <p className="platform-field-error" key={item.id}>{item.name}：{item.message}</p>)}{!!result.failures.length && <p>可再次确认挂载，仅重试尚未保存的实现；已成功的不会重复生成版本。</p>}</div>}
     {error && <p role="alert" className="error-banner">{error}</p>}
   </Dialog>
 }

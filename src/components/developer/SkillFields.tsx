@@ -5,7 +5,7 @@ import KnowledgePicker from './KnowledgePicker'
 import ResourceUpload from './ResourceUpload'
 
 export default function SkillFields({ form, update, skillClasses = [], applications = [], errors = {}, disabled = false, editing = false, activeIds = [], onAdd = () => {}, onRemove = () => {} }: { form: ImplementationForm; update: <K extends keyof ImplementationForm>(key: K, value: ImplementationForm[K]) => void; skillClasses?: { id: string; name: string }[]; applications?: { id: string; name: string }[]; errors?: Record<string, string>; disabled?: boolean; editing?: boolean; activeIds?: string[]; onAdd?: (files: File[]) => void; onRemove?: (id: string) => void }) {
-  const error = (key: string) => errors[key] && <span role="alert" className="field-error">{errors[key]}</span>
+  const error = (key: string) => errors[key] && <span role="alert" className="platform-field-error">{errors[key]}</span>
   let next = '1.0.0'
   try { if (form.version) next = nextVersion(form.version) } catch { next = '待系统校正历史版本' }
   return <fieldset className="implementation-form skill-create-form" disabled={disabled}>
