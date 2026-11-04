@@ -42,6 +42,11 @@ class DocumentPipeline:
             await self._process(document_id)
 
     async def _process(self, document_id, *, control=None):
+        from .conversion_links import linked_conversion, sync_conversion
+        conversion = await linked_conversion(document_id)
+        if conversion:
+            await sync_conversion(conversion)
+            return
         async with in_transaction() as conn:
             doc = await Document.filter(id=document_id).using_db(conn).select_for_update().first()
             if not doc or doc.is_deleted or doc.status != DocumentStatus.PROCESSING or doc.processing_started_time:

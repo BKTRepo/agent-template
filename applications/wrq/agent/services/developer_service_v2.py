@@ -142,11 +142,12 @@ class DeveloperSkillCrud:
             if not tables:
                 raise DeveloperError('知识库服务尚未接入，请先使用资源上传', 503, 'resource_ids')
             from applications.knowledge_base.models.knowledge_base_model import KnowledgeBase
+            from services.resource_isolation import resolve_isolation_rule
             for kid in dict.fromkeys(str(value) for value in data.resource_ids):
-                query = KnowledgeBase.filter(id=kid,state__not=1)
+                query = KnowledgeBase.filter(resolve_isolation_rule(user),id=kid,state__not=1)
                 if db: query = query.using_db(db)
                 kb=await query.first()
-                if not kb or (kb.user_id != user.id and not kb.is_public):
+                if not kb:
                     raise DeveloperError('知识库不存在或无挂载权限',field='resource_ids')
                 knowledge.append((kid,kb.knowledge_name))
         return files,knowledge

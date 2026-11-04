@@ -24,6 +24,7 @@ from applications.knowledge_base.services.file_type import validate_file_type
 from applications.user.models.user_model import User
 from configure import PROJECT_CONFIG, LOGGER
 from enums import DocumentStatus
+from services.resource_isolation import resolve_isolation_rule
 
 
 class KnowledgeError(Exception):
@@ -45,13 +46,13 @@ class KnowledgeService:
         self.pipeline = pipeline or DocumentPipeline()
 
     async def require(self, kb_id, user, *, write=False, connection=None):
-        query = KnowledgeBase.filter(id=kb_id, state__not=1)
+        query = KnowledgeBase.filter(resolve_isolation_rule(user), id=kb_id, state__not=1)
         if connection:
             query = query.using_db(connection).select_for_update()
         kb = await query.first()
-        if not kb or (kb.user_id != user.id and not kb.is_public):
+        if not kb:
             raise KnowledgeError("知识库不存在或无访问权限", status_code=404)
-        if write and kb.user_id != user.id:
+        if write and not await KnowledgeBase.filter(resolve_isolation_rule(user, action="write"), id=kb.id).using_db(connection).exists():
             raise KnowledgeError("只有创建者可以修改知识库", status_code=403)
         return kb
 
@@ -127,12 +128,33 @@ class KnowledgeService:
         except ValueError as exc:
             raise KnowledgeError(str(exc), "application") from exc
         creating = kb_id is None
-        if creating and not files:
+        if creating and form.conversion_job_ids:
+            # An acknowledged conversion is durable. Recover a lost create response instead of
+            # creating a second KB or requiring a duplicate ingestion of the same files.
+            from applications.knowledge_base.models.rag_document_model import RagDocument
+            entries = await RagDocument.filter(job_id__in=set(form.conversion_job_ids), owner_id=user.id)
+            if len(entries) == len(set(form.conversion_job_ids)) and all(entry.knowledge_document_id for entry in entries):
+                existing_docs = await Document.filter(id__in=[entry.knowledge_document_id for entry in entries], is_deleted=False)
+                kb_ids = {entry.knowledge_base_id for entry in existing_docs}
+                if len(existing_docs) == len(entries) and len(kb_ids) == 1:
+                    previous = await self.require(kb_ids.pop(), user, write=True)
+                    active_ids = set(await Document.filter(knowledge_base_id=previous.id, is_deleted=False).values_list('id', flat=True))
+                    if active_ids == {entry.id for entry in existing_docs} and all((getattr(previous, key) or '') == (getattr(form, key) or '') for key in
+                           ('knowledge_name', 'description', 'tag', 'application', 'is_public')):
+                        return await self.detail(previous.id, user), []
+                    raise KnowledgeError("这些任务已创建知识库，请刷新列表后继续编辑", "conversion_job_ids", 409)
+        if creating and not files and not form.conversion_job_ids:
             raise KnowledgeError("新建知识库至少上传一个文件", "files")
+        if files and form.conversion_job_ids:
+            raise KnowledgeError("请使用上传文件或已提交转换任务中的一种方式", "conversion_job_ids")
         if not creating:
             await self.require(kb_id, user, write=True)
         kb_id = kb_id or str(uuid.uuid4())
-        staged = await self.stage(kb_id, files)
+        if form.conversion_job_ids:
+            from .conversion_links import stage_conversions
+            staged = await stage_conversions(user, form.conversion_job_ids, kb_id)
+        else:
+            staged = await self.stage(kb_id, files)
         jobs = []
         try:
             async with in_transaction() as conn:
@@ -185,6 +207,10 @@ class KnowledgeService:
                     if previous and previous.content_hash != item["content_hash"]:
                         changed_ids.append(previous.id)
                 if changed_ids:
+                    if not form.conversion_job_ids:
+                        from applications.knowledge_base.models.rag_document_model import RagDocument
+                        replaced_ids = [document_id for document_id in changed_ids if document_id in retained]
+                        await RagDocument.filter(knowledge_document_id__in=replaced_ids, job_id__startswith="doc-").using_db(conn).update(knowledge_document_id=None)
                     # 事务内暂时释放变更/移除文档的旧哈希；失败会整体回滚。
                     await Document.filter(id__in=changed_ids).using_db(conn).update(content_hash=None)
                 for item in staged:
@@ -231,6 +257,10 @@ class KnowledgeService:
                         jobs.append(doc.id)
                 if not await Document.filter(knowledge_base_id=kb_id, is_deleted=False).using_db(conn).exists():
                     raise KnowledgeError("知识库至少保留一个文件", "files")
+                if form.conversion_job_ids:
+                    from .conversion_links import attach_conversions
+                    adopted = await attach_conversions(user, form.conversion_job_ids, kb_id, conn)
+                    jobs = [document_id for document_id in jobs if document_id not in adopted]
         except IntegrityError as exc:
             self.clean_files(staged)
             raise KnowledgeError("知识库名称或文档内容重复，请检查后重试", "knowledge_name") from exc
@@ -242,6 +272,8 @@ class KnowledgeService:
 
     async def detail(self, kb_id, user):
         kb = await self.require(kb_id, user)
+        from .conversion_links import sync_knowledge_conversions
+        conversions = await sync_knowledge_conversions(kb_id)
         docs = await Document.filter(knowledge_base_id=kb_id).order_by("created_time")
         visible_docs = [d for d in docs if not d.is_deleted]
         status = "processing" if any(d.status in {DocumentStatus.PROCESSING, DocumentStatus.DELETING}
@@ -249,17 +281,22 @@ class KnowledgeService:
             "failed" if any(d.status in {DocumentStatus.FAILED, DocumentStatus.DELETE_FAILED}
                 or (d.is_deleted and not d.deletion_retryable) for d in docs) else "completed")
         creator = await User.get(id=kb.user_id)
+        can_edit = await KnowledgeBase.filter(resolve_isolation_rule(user, action="write"), id=kb.id).exists()
         from applications.wrq.agent.models.agent_model import SkillResourceBinding
         current = await Skill.filter(state=0).values_list('current_version_id', flat=True)
         count = await SkillResourceBinding.filter(skill_version_id__in=current,
             source_type='knowledge_base',source_id=kb_id).count()
         return {"id": kb.id, "knowledge_name": kb.knowledge_name, "description": kb.description,
             "tag": kb.tag, "application": kb.application, "version": next_version(kb.revision),
-            "user_id": kb.user_id, "maintainer": creator.alias or creator.username,
-            "is_public": kb.is_public, "can_edit": kb.user_id == user.id,
+            "user_id": kb.user_id, "creator_login_name": creator.username,
+            "maintainer": (kb.history or [{}])[-1].get("maintainer") or creator.alias or creator.username,
+            "is_public": kb.is_public, "can_edit": can_edit,
             "status": status, "document_count": len(visible_docs), "reference_count": count,
             "created_time": kb.created_time.isoformat(), "updated_time": kb.updated_time.isoformat(),
-            "history": kb.history or [], "documents": [self.document_out(d) for d in visible_docs],
+            "history": kb.history or [], "documents": [{**self.document_out(d),
+                "conversion_job_id": conversions[d.id].job_id if d.id in conversions else None,
+                "conversion_status": conversions[d.id].status if d.id in conversions else None}
+                for d in visible_docs],
             "cleanup_pending": [d.id for d in docs if d.is_deleted],
             "cleanup_tasks": [{"document_id": d.id, "filename": d.filename,
                 "status": "delete_failed" if d.status in {DocumentStatus.FAILED, DocumentStatus.DELETE_FAILED} or not d.deletion_retryable else "deleting",
@@ -279,7 +316,7 @@ class KnowledgeService:
             "has_markdown": bool(doc.markdown), "updated_time": doc.updated_time.isoformat()}
 
     async def list(self, user, search="", *, offset=0, limit=50):
-        qs = KnowledgeBase.filter(Q(user_id=user.id) | Q(is_public=True), state__not=1)
+        qs = KnowledgeBase.filter(resolve_isolation_rule(user), state__not=1)
         if search.strip():
             qs = qs.filter(knowledge_name__icontains=search.strip())
         total = await qs.count()

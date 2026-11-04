@@ -14,6 +14,7 @@ class KnowledgeForm(BaseModel):
     expected_version: str | None = None
     # 编辑时显式声明保留的文件，避免把“没重新上传”误解成删除。
     retained_document_ids: list[str] | None = None
+    conversion_job_ids: list[str] = Field(default_factory=list, max_length=100)
 
 
 class DocumentEdit(BaseModel):
@@ -27,6 +28,21 @@ class KnowledgeMount(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     skill_ids: list[str] = Field(min_length=1, max_length=100)
     resource_usage: str = Field(min_length=1, max_length=10_000)
+
+
+class KnowledgeRetry(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    kb_id: str = Field(min_length=1, max_length=64)
+    doc_id: str | None = None
+
+
+class KnowledgeContentEdit(DocumentEdit):
+    kb_id: str = Field(min_length=1, max_length=64)
+    doc_id: str = Field(min_length=1, max_length=64)
+
+
+class KnowledgeMountRequest(KnowledgeMount):
+    kb_id: str = Field(min_length=1, max_length=64)
 
 
 def next_version(revision: int) -> str:

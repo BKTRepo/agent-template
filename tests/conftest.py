@@ -32,6 +32,9 @@ async def database():
         "applications.user.models.user_model",
         "applications.wrq.agent.models.agent_model",
         "applications.knowledge_base.models.knowledge_base_model",
+        "applications.knowledge_base.models.rag_document_model",
+        "applications.knowledge_base.models.pipeline_model",
+        "applications.knowledge_base.models.llm_call_log_model",
     ]})
     await Tortoise.generate_schemas()
     yield

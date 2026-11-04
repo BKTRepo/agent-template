@@ -17,9 +17,9 @@ PDF/DOCX/XLSX/MD/TXT → MarkItDown → 清洗 → 术语提取及结果保存 �
 - services/document_pipeline.py: 当前平台知识库 Document 与源流水线的适配层。
 - services/platform_service.py: 保留当前平台的权限、版本、资源绑定及删除流程。
 
-平台 /knowledge-bases 上传继续使用原合同，处理时进入迁入的流水线。
-兼容入口 POST /api/convert（multipart file）、GET /api/convert/status/{job_id}、POST /api/convert/retry（JSON job_id）。
-Markdown、术语、分块通过 /api/documents/{job_id}/markdown、terminology、chunks 获取。
+平台知识库保留 source/files 表单，新增 conversion_job_ids 关联已通过 convert 上传的任务；当前前端使用后者，避免重复入库。创建/保存为 POST /knowledge-bases/create、/save，保存的 kb_id 放 form-data。
+入口 POST /api/convert（multipart file）、GET /api/convert/status?job_id=...、POST /api/convert/retry（JSON job_id）。
+Markdown、术语、分块通过 GET /api/documents/markdown、terminology、chunks 查询，job_id 均放查询参数。
 这些接口沿用平台鉴权，并限制任务创建者访问。完整原文件不需要调用方访问服务器磁盘。
 
 ## 部署

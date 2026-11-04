@@ -52,10 +52,8 @@ class LegacySkillPackageService:
         return skill
 
     async def _knowledge_base(self, kb_id, user):
-        kb = await KnowledgeBase.filter(id=kb_id, state__not=1).first()
-        if not kb or (kb.user_id != user.id and not kb.is_public):
-            return None
-        return kb
+        from services.resource_isolation import resolve_isolation_rule
+        return await KnowledgeBase.filter(resolve_isolation_rule(user), id=kb_id, state__not=1).first()
 
     async def resolve(self, source: SkillPackageSource, user):
         """返回有效源、可用文件及报告；原文件内容在复制时再校验固定哈希。"""

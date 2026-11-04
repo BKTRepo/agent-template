@@ -9,7 +9,7 @@ from starlette.responses import FileResponse
 from applications.wrq.platform_catalog import applications
 from applications.wrq.validation_errors import ValidationResponseRoute, validation_issues
 from applications.knowledge_base.models.knowledge_base_model import DocumentChunk
-from applications.knowledge_base.schemas.platform_schema import DocumentEdit, KnowledgeForm, KnowledgeMount
+from applications.knowledge_base.schemas.platform_schema import KnowledgeContentEdit, KnowledgeForm, KnowledgeMountRequest, KnowledgeRetry
 from applications.knowledge_base.services.platform_service import KnowledgeError, KnowledgeService, get_knowledge_service
 from applications.user.models.user_model import User
 from configure import LOGGER, PROJECT_CONFIG
@@ -92,7 +92,7 @@ async def name_availability(name: str = Query(min_length=1, max_length=128), exc
     return await respond(operation())
 
 
-@knowledge.get("/", summary="可见知识库列表：公开及本人私有；按名称搜索")
+@knowledge.get("/list", summary="知识库-查询公开及本人知识库列表")
 async def list_knowledge(search: str = "", offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100),
                          current_user: User = DependAuth, service=Depends(get_knowledge_service)):
     try:
@@ -105,41 +105,40 @@ async def list_knowledge(search: str = "", offset: int = Query(0, ge=0), limit: 
         return result
 
 
-@knowledge.post("/", summary="创建知识库（source JSON 与至少一个 files）")
-@knowledge.post("/form", summary="创建知识库表单")
+@knowledge.post("/create", summary="知识库-创建知识库并关联上传文档转换任务")
 async def create_knowledge(request: Request, background: BackgroundTasks, source: str = Form(...),
                            files: list[UploadFile] = File(default=[]), current_user: User = DependAuth,
                            service=Depends(get_knowledge_service)):
     return await save_form(request, background, source, files, current_user, service)
 
 
-@knowledge.put("/{kb_id}", summary="保存知识库修改；版本递增；仅重处理变更文档")
-async def update_knowledge(kb_id: str, request: Request, background: BackgroundTasks, source: str = Form(...),
+@knowledge.post("/save", summary="知识库-保存修改并递增版本")
+async def update_knowledge(request: Request, background: BackgroundTasks, kb_id: str = Form(...), source: str = Form(...),
                            files: list[UploadFile] = File(default=[]), current_user: User = DependAuth,
                            service=Depends(get_knowledge_service)):
     return await save_form(request, background, source, files, current_user, service, kb_id)
 
 
-@knowledge.get("/{kb_id}", summary="知识库详情、文件状态及版本历史")
+@knowledge.get("/detail", summary="知识库-查询详情、文件状态及版本历史")
 async def detail(kb_id: str, current_user: User = DependAuth, service=Depends(get_knowledge_service)):
     return await respond(service.detail(kb_id, current_user))
 
 
-@knowledge.get("/{kb_id}/documents", summary="知识库文件列表")
+@knowledge.get("/documents", summary="知识库-查询文件列表")
 async def list_documents(kb_id: str, current_user: User = DependAuth, service=Depends(get_knowledge_service)):
     async def operation():
         return (await service.detail(kb_id, current_user))["documents"]
     return await respond(operation())
 
 
-@knowledge.get("/{kb_id}/history", summary="知识库编辑历史")
+@knowledge.get("/history", summary="知识库-查询编辑历史")
 async def history(kb_id: str, current_user: User = DependAuth, service=Depends(get_knowledge_service)):
     async def operation():
         return (await service.detail(kb_id, current_user))["history"]
     return await respond(operation())
 
 
-@knowledge.get("/{kb_id}/documents/{doc_id}/preview", summary="文件解析后的 Markdown 预览（只返回文本）")
+@knowledge.get("/documents/preview", summary="知识库-查询文件解析内容预览")
 async def preview(kb_id: str, doc_id: str, current_user: User = DependAuth, service=Depends(get_knowledge_service)):
     async def operation():
         doc = await service.require_document(kb_id, doc_id, current_user)
@@ -147,7 +146,7 @@ async def preview(kb_id: str, doc_id: str, current_user: User = DependAuth, serv
     return await respond(operation())
 
 
-@knowledge.get("/{kb_id}/documents/{doc_id}/download", summary="下载知识库原文件")
+@knowledge.get("/documents/download", summary="知识库-下载原文件")
 async def download(kb_id: str, doc_id: str, current_user: User = DependAuth, service=Depends(get_knowledge_service)):
     try:
         doc = await service.require_document(kb_id, doc_id, current_user)
@@ -161,28 +160,27 @@ async def download(kb_id: str, doc_id: str, current_user: User = DependAuth, ser
         return await respond(failed())
 
 
-@knowledge.put("/{kb_id}/documents/{doc_id}/content", summary="编辑文本/Markdown；重建该文档索引")
-async def edit_content(kb_id: str, doc_id: str, data: DocumentEdit, background: BackgroundTasks,
+@knowledge.post("/documents/save-content", summary="知识库-保存文本内容并重建索引")
+async def edit_content(data: KnowledgeContentEdit, background: BackgroundTasks,
                         current_user: User = DependAuth, service=Depends(get_knowledge_service)):
     async def operation():
-        result, jobs = await service.edit_text(kb_id, doc_id, current_user, data)
+        result, jobs = await service.edit_text(data.kb_id, data.doc_id, current_user, data)
         await schedule(background, service, jobs)
         return await service.detail(result["id"], current_user)
     return await respond(operation())
 
 
-@knowledge.post("/{kb_id}/retry", summary="仅创建者重试失败/崩溃残留任务")
-@knowledge.post("/{kb_id}/documents/{doc_id}/retry", summary="重试单个文档")
-async def retry(kb_id: str, background: BackgroundTasks, doc_id: str | None = None,
+@knowledge.post("/retry", summary="知识库-重试本人失败文档或残留任务")
+async def retry(data: KnowledgeRetry, background: BackgroundTasks,
                  current_user: User = DependAuth, service=Depends(get_knowledge_service)):
     async def operation():
-        jobs = await service.retry(kb_id, current_user, doc_id)
+        jobs = await service.retry(data.kb_id, current_user, data.doc_id)
         await schedule(background, service, jobs)
         return {"document_ids": jobs, "status": "processing"}
     return await respond(operation())
 
 
-@knowledge.get("/{kb_id}/chunks", summary="查看文档分块；遵循知识库读取权限")
+@knowledge.get("/chunks", summary="知识库-查询文档分块")
 async def chunks(kb_id: str, document_id: str | None = None, offset: int = Query(0, ge=0),
                   limit: int = Query(50, ge=1, le=100), current_user: User = DependAuth,
                   service=Depends(get_knowledge_service)):
@@ -197,13 +195,14 @@ async def chunks(kb_id: str, document_id: str | None = None, offset: int = Query
     return await respond(operation())
 
 
-@knowledge.post("/{kb_id}/mounts", summary="将可见知识库挂载到本人已生成的技能并重新打包")
-async def mount(kb_id: str, data: KnowledgeMount, current_user: User = DependAuth,
+@knowledge.post("/mounts", summary="知识库-旧版指定技能挂载并重新打包")
+async def mount(data: KnowledgeMountRequest, current_user: User = DependAuth,
                  service=Depends(get_knowledge_service)):
     from applications.wrq.agent.services.skill_package_service import SkillPackageService, SkillBuildNotFound
     from applications.wrq.agent.services.skill_package_builder import SkillPackageError
     from applications.wrq.agent.services.developer_skill_crud import DeveloperError
     from applications.wrq.agent.models.agent_model import SkillVersion
+    kb_id = data.kb_id
     async def operation():
         detail = await service.detail(kb_id, current_user)
         if detail['status'] != 'completed':
