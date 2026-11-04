@@ -28,11 +28,11 @@ class SkillCreate(SkillBase):
 
 
 class SkillUpdate(SkillBase):
-    skill_id: Optional[str] = Field(default=None, description="技能ID")
+    skill_id: Optional[int] = Field(default=None, ge=1, le=2147483647, description="技能ID")
 
 
 class SkillOut(BaseModel):
-    id: str = Field(..., description="技能ID")
+    id: int = Field(..., ge=1, description="技能ID")
     name: str = Field(..., description="技能名称")
     description: Optional[str] = Field(default=None, description="技能描述")
     is_enabled: bool = Field(default=True, description="是否启用")
@@ -66,7 +66,7 @@ class DeveloperSkillForm(BaseModel):
 
 
 class DeveloperSkillOut(BaseModel):
-    id: str
+    id: int
     name: str
     class_id: int
     application_paso: Optional[str] = None

@@ -21,6 +21,7 @@ from applications.zhaoyunlong.services.online_debug_run_service import (
     OnlineDebugRunService,
 )
 from applications.zhaoyunlong.services.online_debug_service import OnlineDebugError
+from applications.wrq.agent.services.developer_skill_crud import DeveloperError
 from services import DependAuth
 
 realtime_test_case_router = APIRouter()
@@ -33,7 +34,7 @@ realtime_test_case_router = APIRouter()
     description="接收 Skill 定义、对话输入和上传文件，创建后台 Docker 沙箱任务并立即返回 run_id。",
     openapi_extra={"requestBody": {"required": True, "content": {
         "multipart/form-data": {"schema": {"type": "object", "required": ["skill_id", "skill_definition"], "properties": {
-            "skill_id": {"type": "string", "description": "当前被调试技能的业务标识"},
+            "skill_id": {"type": "integer", "description": "当前被调试技能的业务标识"},
             "skill_definition": {"type": "string", "description": "Markdown 格式的 Skill 定义文本"},
             "conversation_input": {"type": "string", "description": "自然语言调试诉求"},
             "documents": {"type": "array", "description": "需求文档文件，最多 10 个", "items": {"type": "string", "format": "binary"}},
@@ -48,8 +49,11 @@ async def create_online_debug_run(
     """【创建调试任务接口】立即返回任务编号，沙箱在后台继续执行。"""
     try:
         payload = await _parse_debug_request(request)
+        payload["_identity"] = current_user
         debugger = (current_user.alias or current_user.username).strip()
         return await OnlineDebugRunService.create_and_start(payload, int(current_user.id), debugger)
+    except DeveloperError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     except (OnlineDebugError, FileParseError, ValidationError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -79,7 +83,7 @@ async def get_online_debug_run(
     description="弹窗重新打开时，根据 skill_id 找回该技能最近一次调试的状态和结果。",
 )
 async def get_latest_online_debug_run(
-    skill_id: str,
+    skill_id: int,
     current_user: User = DependAuth,
 ) -> dict[str, Any]:
     """【查询技能最新任务接口】用于恢复已关闭调试弹窗的展示状态。"""
@@ -134,6 +138,8 @@ async def _parse_debug_request(request: Request) -> dict[str, Any]:
     }).model_dump()
     return {
         **text_fields,
+        "build_id": _form_text(form.get("build_id"), "build_id"),
+        "skill_version_id": _form_text(form.get("skill_version_id"), "skill_version_id"),
         # 文档输入来自本次前端上传，必须执行允许格式校验。
         "documents": await _parse_uploads(
             form.getlist("documents"), "documents", 10, extract_uploaded_file,

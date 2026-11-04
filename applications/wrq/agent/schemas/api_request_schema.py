@@ -10,23 +10,23 @@ from .skill_package_schema import SkillDefinitionEdit, SkillPackageSource
 
 class SkillIdRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-    skill_id: str = Field(min_length=1, max_length=64, description="技能编号")
+    skill_id: int = Field(ge=1, le=2147483647, description="技能编号")
 
 
 class DeveloperSkillSaveRequest(DeveloperSkillForm):
-    skill_id: str = Field(min_length=1, max_length=64, description="技能编号")
+    skill_id: int = Field(ge=1, le=2147483647, description="技能编号")
 
 
 class OfflineSkillBody(OfflineSkillRequest):
-    skill_id: str = Field(min_length=1, max_length=64, description="技能编号")
+    skill_id: int = Field(ge=1, le=2147483647, description="技能编号")
 
 
 class RegisterDebugRunRequest(DeveloperDebugResult):
-    skill_id: str = Field(min_length=1, max_length=64, description="技能编号")
+    skill_id: int = Field(ge=1, le=2147483647, description="技能编号")
 
 
 class SkillUpdateBody(SkillUpdate):
-    skill_id: str = Field(min_length=1, max_length=64, description="技能编号")
+    skill_id: int = Field(ge=1, le=2147483647, description="技能编号")
 
 
 class McpIdRequest(BaseModel):
@@ -39,11 +39,11 @@ class McpUpdateBody(McpServerUpdate):
 
 
 class SkillDefinitionSaveRequest(SkillDefinitionEdit):
-    skill_id: str = Field(min_length=1, max_length=64, description="技能编号")
+    skill_id: int = Field(ge=1, le=2147483647, description="技能编号")
 
 
 class SkillPackageRequest(SkillPackageSource):
-    skill_id: str = Field(min_length=1, max_length=64, description="技能编号")
+    skill_id: int = Field(ge=1, le=2147483647, description="技能编号")
 
 
 def business_payload(request: BaseModel, model: type[BaseModel], identifier="skill_id"):

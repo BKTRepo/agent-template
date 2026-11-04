@@ -22,7 +22,8 @@ class SkillDisplayStatus(str, Enum):
     OFFLINE = "OFFLINE"
 
 class Skill(models.Model):
-    id = fields.CharField(max_length=64, pk=True, default=unique_identify, description="技能唯一编号")
+    id = fields.IntField(pk=True, description="技能自增整数编号")
+    legacy_id = fields.CharField(max_length=64, null=True, unique=True, description="迁移前技能编号；仅用于核验历史构建")
     name = fields.CharField(max_length=128, description="技能名称；仅未删除记录唯一")
     create_user_login_name = fields.CharField(max_length=10, description="创建人工号")
     update_user_login_name = fields.CharField(max_length=10, null=True, description="最近修改人工号")
@@ -63,7 +64,7 @@ class Skill(models.Model):
 
 class SkillVersion(models.Model):
     id = fields.IntField(pk=True, description="技能版本整数主键")
-    skill_id = fields.CharField(max_length=64, index=True, description="所属技能编号")
+    skill_id = fields.IntField(index=True, description="所属技能编号")
     version = fields.CharField(max_length=32, null=True, description="对外显示版本号；首次成功上线前为空")
     revision = fields.IntField(description="技能内修订次数")
     build_id = fields.CharField(max_length=64, null=True, description="本版不可变构建编号")
@@ -128,7 +129,7 @@ class Source(models.Model):
 
 class SkillResourceBinding(models.Model):
     id = fields.IntField(pk=True, description="关联主键")
-    skill_id = fields.CharField(max_length=64, description="技能编号")
+    skill_id = fields.IntField(description="技能编号")
     skill_version_id = fields.IntField(index=True, description="技能表单版本编号")
     source_type = fields.CharField(max_length=32, description="来源：upload knowledge_base knowledge_document")
     source_id = fields.CharField(max_length=64, null=True, description="来源对象编号；知识库和文档使用字符串编号")
@@ -147,7 +148,7 @@ class SkillResourceBinding(models.Model):
 class SkillDebugRun(models.Model):
     id = fields.IntField(pk=True, description="我方任务关联自增主键")
     run_id = fields.CharField(max_length=128, unique=True, description="同事沙箱任务编号")
-    skill_id = fields.CharField(max_length=64, description="关联技能编号")
+    skill_id = fields.IntField(description="关联技能编号")
     skill_version_id = fields.IntField(index=True, description="实际执行的表单版本编号")
     build_id = fields.CharField(max_length=64, null=True, description="实际使用的构建编号")
     conversation_input = fields.TextField(default="", description="本次调试输入，不保存临时文档原件")
@@ -163,7 +164,7 @@ class SkillDebugRun(models.Model):
 
 class SkillPublication(models.Model):
     id = fields.IntField(pk=True, description="上下线操作自增主键")
-    skill_id = fields.CharField(max_length=64, description="技能编号")
+    skill_id = fields.IntField(description="技能编号")
     skill_version_id = fields.IntField(description="操作的技能版本")
     action = fields.CharField(max_length=16, description="PUBLISH上线 OFFLINE下线")
     version = fields.CharField(max_length=32, null=True, description="操作时的对外版本号")

@@ -133,6 +133,11 @@ class OnlineDebugService:
         output_dir.mkdir(mode=0o700)
         try:
             self._write_input(input_dir, payload)
+            if payload.get('_knowledge_token'):
+                bridge = Path(__file__).resolve().parents[2] / 'wrq' / 'knowledge_mcp.py'
+                shutil.copyfile(bridge, input_dir / 'knowledge_mcp.py')
+                model_environment['KNOWLEDGE_RUN_TOKEN'] = payload['_knowledge_token']
+                model_environment['KNOWLEDGE_SEARCH_URL'] = os.environ.get('KNOWLEDGE_SEARCH_URL', 'http://host.docker.internal:8519/skills/knowledge/search')
             result = self.runner.run(SandboxConfig(
                 skill_dir=self.skill_dir,
                 input_dir=input_dir,
@@ -143,6 +148,8 @@ class OnlineDebugService:
                 timeout_seconds=self.execution_timeout_seconds,
             ))
             _, skill_result = self._extract_skill_result(result.stdout)
+            payload['_knowledge_search_ids'] = (skill_result or {}).get('summary', {}).get('knowledge_search_ids', [])
+            payload['_knowledge_receipts'] = (skill_result or {}).get('summary', {}).get('knowledge_receipts', [])
             documents = self._validate_sandbox_result(result, skill_result, output_dir)
             documents = self._persist_result_files(documents, run_dir)
             expires_at = time.time() + self.retention_seconds

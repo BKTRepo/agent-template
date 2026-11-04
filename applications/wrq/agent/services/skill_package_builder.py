@@ -116,25 +116,25 @@ class SkillPackageBuilder:
         if size > self.max_file_bytes:
             raise self._issue(field, f"单个文件不能超过 {self.max_file_bytes / (1024 * 1024):g}MiB")
 
-    def _parent(self, user_id: int, skill_id: str) -> Path:
+    def _parent(self, user_id: int, skill_id: int | str) -> Path:
         valid_owner = (isinstance(user_id, int) and not isinstance(user_id, bool) and user_id > 0) or (isinstance(user_id, str) and 0 < len(user_id) <= 10)
-        if not valid_owner or not ID_RE.fullmatch(skill_id):
+        if not valid_owner or not ID_RE.fullmatch(str(skill_id)):
             raise ValueError("无效的用户或技能 ID")
         # 物理目录使用短哈希，避免 Windows MAX_PATH（当前项目绝对路径较长，
         # 再拼接工号、技能 ID 和技术名称后会超过 260 个字符）。真实身份和
         # 技能编号仍写入 manifest，读取时会再次校验，短目录只用于落盘。
         owner_key = hashlib.sha256(str(user_id).encode()).hexdigest()[:12]
-        skill_key = hashlib.sha256(skill_id.encode()).hexdigest()[:12]
+        skill_key = hashlib.sha256(str(skill_id).encode()).hexdigest()[:12]
         parent = self.root / f"u-{owner_key}" / f"s-{skill_key}"
         if not parent.resolve().is_relative_to(self.root):
             raise ValueError("构建目录越界")
         return parent
 
-    def _legacy_parent(self, user_id: int, skill_id: str) -> Path:
+    def _legacy_parent(self, user_id: int, skill_id: int | str) -> Path:
         """读取旧版按完整工号/技能 ID 保存的构建，新增构建不再使用该布局。"""
         folder = ('login-' + hashlib.sha256(user_id.encode()).hexdigest()[:24]
                   if isinstance(user_id, str) else str(user_id))
-        parent = self.root / folder / skill_id
+        parent = self.root / folder / str(skill_id)
         if not parent.resolve().is_relative_to(self.root):
             raise ValueError("构建目录越界")
         return parent
@@ -144,7 +144,7 @@ class SkillPackageBuilder:
         return SkillPackageError(SkillValidationReport(errors=[ValidationIssue(field=field, reason=reason)]))
 
     @staticmethod
-    def _render_skill(source: SkillPackageSource, entries: list[dict], *, user_id: int, skill_id: str) -> str:
+    def _render_skill(source: SkillPackageSource, entries: list[dict], *, user_id: int, skill_id: int | str) -> str:
         """标准 YAML 字段与平台元信息分开；正文只采用用户提供的内容。"""
         metadata = {"version": source.version, "skill_id": skill_id, ("creator_login_name" if isinstance(user_id, str) else "creator_id"): str(user_id),
                     "display_name": source.display_name}
@@ -180,10 +180,15 @@ class SkillPackageBuilder:
                 body += "\n"
         if entries or source.resource_usage:
             body += "<!-- platform-resources:end -->\n"
+        if source.knowledge_base_ids:
+            body += "\n<!-- platform-knowledge:start -->\n## 知识库检索\n"
+            body += "本技能挂载知识库：" + "、".join(source.knowledge_base_ids) + "\n"
+            body += "请自主调用 knowledge_search 检索业务规则，依据返回的原文生成结果并保留来源。未查到依据时不得编造。\n"
+            body += "<!-- platform-knowledge:end -->\n"
         return f"---\n{frontmatter}---\n\n{body}"
 
     def build(self, source: SkillPackageSource, resources: list[ResolvedSkillResource],
-              *, user_id: int, skill_id: str) -> dict:
+              *, user_id: int, skill_id: int | str) -> dict:
         report = validate_source(source)
         if not report.valid:
             raise SkillPackageError(report)
@@ -288,7 +293,7 @@ class SkillPackageBuilder:
                 if not target.is_relative_to(directory.resolve()) or not target.is_file():
                     raise self._issue("instructions", f"本地资源引用不存在：{relative}")
 
-    def read(self, *, user_id: int, skill_id: str, build_id: str, verify: bool = False) -> dict:
+    def read(self, *, user_id: int, skill_id: int | str, build_id: str, verify: bool = False) -> dict:
         if not re.fullmatch(r"[0-9a-f]{32}", build_id):
             raise FileNotFoundError("构建记录不存在")
         directory = None
@@ -302,7 +307,7 @@ class SkillPackageBuilder:
         if not directory.resolve().is_relative_to(self.root):
             raise FileNotFoundError("构建记录不存在")
         manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
-        if (manifest.get("user_login_name", manifest.get("user_id")), manifest.get("skill_id"), manifest.get("build_id")) != (user_id, skill_id, build_id):
+        if (manifest.get("user_login_name", manifest.get("user_id")), str(manifest.get("skill_id")), manifest.get("build_id")) != (user_id, str(skill_id), build_id):
             raise FileNotFoundError("构建记录不存在")
         name = manifest.get("name", "")
         if not NAME_RE.fullmatch(name):
@@ -325,11 +330,11 @@ class SkillPackageBuilder:
             self._validate_directory(skill_dir, name)
         return {**manifest, "workspace_dir": str(directory), "skill_directory": str(skill_dir)}
 
-    def archive_path(self, *, user_id: int, skill_id: str, build_id: str) -> Path:
+    def archive_path(self, *, user_id: int, skill_id: int | str, build_id: str) -> Path:
         record = self.read(user_id=user_id, skill_id=skill_id, build_id=build_id, verify=True)
         return Path(record["workspace_dir"]) / "package.zip"
 
-    def list_builds(self, *, user_id: int, skill_id: str, limit: int = 20, offset: int = 0) -> dict:
+    def list_builds(self, *, user_id: int, skill_id: int | str, limit: int = 20, offset: int = 0) -> dict:
         directories_by_id = {}
         for parent in (self._parent(user_id, skill_id), self._legacy_parent(user_id, skill_id)):
             if not parent.exists():

@@ -65,7 +65,7 @@ async def build_skill_from_form(request: Request, source: str = Form(...),
 
 
 @skill_packages.get("/packages/get-definition", summary="Skill包-查询当前技能Markdown定义")
-async def get_definition(skill_id: str = Query(..., min_length=1, max_length=64), current_user: User = DependAuth,
+async def get_definition(skill_id: int = Query(..., ge=1, le=2147483647), current_user: User = DependAuth,
                          service: SkillPackageService = Depends(get_skill_package_service)):
     return await _respond(service.definition(skill_id, current_user))
 
@@ -94,7 +94,7 @@ async def build_skill_package(source: SkillPackageRequest,
 
 
 @skill_packages.post("/packages/build-from-uploads", summary="Skill包-从技能表单和统一上传文件构建生成Skill包")
-async def build_skill_package_with_uploads(skill_id: str = Form(..., min_length=1, max_length=64), source: str = Form(...),
+async def build_skill_package_with_uploads(skill_id: int = Form(..., ge=1, le=2147483647), source: str = Form(...),
                                           files: list[UploadFile] = File(default=[]),
                                           current_user: User = DependAuth,
                                           service: SkillPackageService = Depends(get_skill_package_service)):
@@ -111,7 +111,7 @@ async def build_skill_package_with_uploads(skill_id: str = Form(..., min_length=
 
 
 @skill_packages.post("/packages/build-from-entries", summary="Skill包-从参考资料及脚本分入口上传构建生成Skill包")
-async def build_skill_package_from_entries(request: Request, skill_id: str = Form(..., min_length=1, max_length=64), source: str = Form(...),
+async def build_skill_package_from_entries(request: Request, skill_id: int = Form(..., ge=1, le=2147483647), source: str = Form(...),
                                           reference_files: list[UploadFile] = File(default=[]),
                                           script_files: list[UploadFile] = File(default=[]),
                                           current_user: User = DependAuth,
@@ -145,20 +145,20 @@ async def build_skill_package_from_entries(request: Request, skill_id: str = For
 
 
 @skill_packages.get("/packages/get-build", summary="Skill包-查询构建清单及资源目录")
-async def get_skill_package(skill_id: str = Query(..., min_length=1, max_length=64), build_id: str = Query(..., min_length=1, max_length=64), current_user: User = DependAuth,
+async def get_skill_package(skill_id: int = Query(..., ge=1, le=2147483647), build_id: str = Query(..., min_length=1, max_length=64), current_user: User = DependAuth,
                            service: SkillPackageService = Depends(get_skill_package_service)):
     return await _respond(service.get(skill_id, build_id, current_user, verify=True))
 
 
 @skill_packages.get("/packages/list-builds", summary="Skill包-分页查询技能构建历史")
-async def list_skill_packages(skill_id: str = Query(..., min_length=1, max_length=64), limit: int = Query(default=20, ge=1, le=100),
+async def list_skill_packages(skill_id: int = Query(..., ge=1, le=2147483647), limit: int = Query(default=20, ge=1, le=100),
                              offset: int = Query(default=0, ge=0), current_user: User = DependAuth,
                              service: SkillPackageService = Depends(get_skill_package_service)):
     return await _respond(service.list_builds(skill_id, current_user, limit=limit, offset=offset))
 
 
 @skill_packages.get("/packages/download-build", summary="Skill包-下载完整技能ZIP构建包")
-async def download_skill_package(skill_id: str = Query(..., min_length=1, max_length=64), build_id: str = Query(..., min_length=1, max_length=64), current_user: User = DependAuth,
+async def download_skill_package(skill_id: int = Query(..., ge=1, le=2147483647), build_id: str = Query(..., min_length=1, max_length=64), current_user: User = DependAuth,
                                 service: SkillPackageService = Depends(get_skill_package_service)):
     try:
         content = await service.download(skill_id, build_id, current_user)

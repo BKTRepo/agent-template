@@ -10,7 +10,7 @@ class OnlineDebugRun(ScaffoldModel):
     """记录一次在线调试从提交、执行到生成结果文档的完整状态。"""
 
     # 前端或上游技能服务传入的技能标识；当前项目尚未建立独立技能表。
-    skill_id = fields.CharField(max_length=128, index=True, description="被调试技能的标识")
+    skill_id = fields.IntField(index=True, description="被调试技能的标识")
     # 对外返回的随机任务编号，用于查询状态和下载对应结果文件。
     run_id = fields.CharField(max_length=32, unique=True, index=True, description="在线调试任务编号")
     # 状态仅允许由服务端按 queued、running、completed、failed 四种值写入。

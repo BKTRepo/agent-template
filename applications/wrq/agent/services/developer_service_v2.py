@@ -92,7 +92,7 @@ class DeveloperSkillCrud:
 
     async def name_available(self,name,exclude_id=None,connection=None):
         key=normalized_skill_name(name)
-        q=Skill.filter(state=0).exclude(id=exclude_id or '')
+        q=Skill.filter(state=0).exclude(id=exclude_id or 0)
         if connection: q=q.using_db(connection)
         return not any(normalized_skill_name(r.name)==key for r in await q)
 
@@ -148,6 +148,8 @@ class DeveloperSkillCrud:
                 kb=await query.first()
                 if not kb or (kb.user_id != user.id and not kb.is_public):
                     raise DeveloperError('知识库不存在或无挂载权限',field='resource_ids')
+                from applications.wrq.knowledge import document_scope
+                await document_scope(user.id, [kid])
                 knowledge.append((kid,kb.knowledge_name))
         return files,knowledge
 
@@ -156,14 +158,14 @@ class DeveloperSkillCrud:
         if expected!=skill.current_revision:
             raise DeveloperError('技能已被修改或缺少版本信息，请刷新后重试',409)
 
-    async def _write(self,skill,data,user,files,knowledge,db,markdown=None,artifacts=None):
+    async def _write(self,skill,data,user,files,knowledge,db,markdown=None,artifacts=None,extra_update_fields=()):
         published = await SkillVersion.filter(id=skill.published_version_id).using_db(db).first() if skill.published_version_id else None
         version=await SkillVersion.create(using_db=db,skill_id=skill.id,version=published.version if published else None,
             revision=skill.current_revision,create_user_login_name=user_login_name(user),
             update_user_login_name=user_login_name(user))
         markdown_path = write_markdown(skill.id, markdown) if markdown else ''
         if markdown_path and artifacts is not None: artifacts.append(markdown_path)
-        technical=data.technical_name or 'skill-'+hashlib.sha256(skill.id.encode()).hexdigest()[:24]
+        technical=data.technical_name or 'skill-'+hashlib.sha256(str(skill.id).encode()).hexdigest()[:24]
         await SkillForm.create(using_db=db,skill_version_id=version.id,name=data.name.strip(),
             skill_class_id=data.class_id,application_paso=data.effective_application_paso,
             description=data.description.strip(),instructions=data.instructions.strip(),
@@ -178,13 +180,17 @@ class DeveloperSkillCrud:
         for index,(kid,name) in enumerate(knowledge,len(files)):
             await SkillResourceBinding.create(using_db=db,skill_id=skill.id,skill_version_id=version.id,
                 source_type='knowledge_base',source_id=kid,
-                display_name=name,sort_order=index)
+                display_name=name,usage_text=data.resource_usage or None,sort_order=index)
         skill.name=data.name.strip()
         skill.application_paso=data.effective_application_paso
         skill.skill_classes_id=data.class_id
         skill.update_user_login_name=user_login_name(user)
         skill.current_version_id=version.id
-        await skill.save(using_db=db)
+        await skill.save(using_db=db, update_fields=[
+            'name', 'application_paso', 'skill_classes_id',
+            'update_user_login_name', 'current_version_id', 'updated_time',
+            *extra_update_fields,
+        ])
         return skill
 
     async def create(self,user,data):
@@ -215,7 +221,9 @@ class DeveloperSkillCrud:
                 skill.current_revision+=1
                 skill.display_status='DRAFT'
                 skill.last_debug_run_id=None
-                return await self._write(skill,data,user,files,kbs,db,markdown=data.skill_markdown if definition else None,artifacts=artifacts)
+                return await self._write(skill,data,user,files,kbs,db,
+                    markdown=data.skill_markdown if definition else None,artifacts=artifacts,
+                    extra_update_fields=('current_revision', 'display_status', 'last_debug_run_id'))
         except BaseException as exc:
             for relative in artifacts: discard_markdown(relative)
             if isinstance(exc, IntegrityError):
@@ -242,7 +250,9 @@ class DeveloperSkillCrud:
                 raise DeveloperError('该下线原因不允许填写额外说明', field='reason_text')
             skill.display_status='OFFLINE'; skill.offline_at=datetime.now()
             skill.update_user_login_name=user_login_name(user)
-            await skill.save(using_db=db)
+            await skill.save(using_db=db, update_fields=[
+                'display_status', 'offline_at', 'update_user_login_name', 'updated_time',
+            ])
             published = await SkillVersion.get_or_none(id=skill.published_version_id).using_db(db) if skill.published_version_id else None
             await SkillPublication.create(using_db=db,skill_id=skill.id,skill_version_id=skill.published_version_id or skill.current_version_id,
                 version=published.version if published else None, action='OFFLINE',operator_login_name=user_login_name(user),
@@ -279,7 +289,10 @@ class DeveloperSkillCrud:
             skill.display_status='ONLINE'; skill.published_at=datetime.now(); skill.published_version_id=version.id
             skill.update_user_login_name=user_login_name(user)
             skill.last_debug_run_id=accepted[0].run_id
-            await skill.save(using_db=db)
+            await skill.save(using_db=db, update_fields=[
+                'display_status', 'published_at', 'published_version_id',
+                'update_user_login_name', 'last_debug_run_id', 'updated_time',
+            ])
             await SkillPublication.create(using_db=db,skill_id=skill.id,skill_version_id=version.id,
                 version=version.version, action='PUBLISH',operator_login_name=user_login_name(user))
             return skill
@@ -307,10 +320,12 @@ class DeveloperSkillCrud:
                 if skill.current_version_id==version.id:
                     skill.last_debug_run_id=data.run_id
                     skill.update_user_login_name=user_login_name(user)
+                    update_fields = ['last_debug_run_id', 'update_user_login_name', 'updated_time']
                     target = self.debug_status(result) or 'DEBUGGING'
                     if skill.display_status not in ('ONLINE', 'OFFLINE'):
                         skill.display_status = target
-                    await skill.save(using_db=db)
+                        update_fields.append('display_status')
+                    await skill.save(using_db=db, update_fields=update_fields)
                 return skill
         except IntegrityError as exc:
             raise DeveloperError('任务登记发生并发冲突，请使用原任务编号重试',409) from exc

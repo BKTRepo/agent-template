@@ -49,9 +49,11 @@ class KnowledgeService:
         if connection:
             query = query.using_db(connection).select_for_update()
         kb = await query.first()
-        if not kb or (kb.user_id != user.id and not kb.is_public):
+        from applications.wrq.knowledge import knowledge_permissions
+        permissions = knowledge_permissions(user.id, kb)
+        if not permissions['can_view']:
             raise KnowledgeError("知识库不存在或无访问权限", status_code=404)
-        if write and kb.user_id != user.id:
+        if write and not permissions['can_edit']:
             raise KnowledgeError("只有创建者可以修改知识库", status_code=403)
         return kb
 
@@ -241,6 +243,7 @@ class KnowledgeService:
         return await self.detail(kb_id, user), jobs
 
     async def detail(self, kb_id, user):
+        from applications.wrq.knowledge import knowledge_permissions
         kb = await self.require(kb_id, user)
         docs = await Document.filter(knowledge_base_id=kb_id).order_by("created_time")
         visible_docs = [d for d in docs if not d.is_deleted]
@@ -256,7 +259,7 @@ class KnowledgeService:
         return {"id": kb.id, "knowledge_name": kb.knowledge_name, "description": kb.description,
             "tag": kb.tag, "application": kb.application, "version": next_version(kb.revision),
             "user_id": kb.user_id, "maintainer": creator.alias or creator.username,
-            "is_public": kb.is_public, "can_edit": kb.user_id == user.id,
+            "is_public": kb.is_public, "can_edit": knowledge_permissions(user.id,kb)['can_edit'],
             "status": status, "document_count": len(visible_docs), "reference_count": count,
             "created_time": kb.created_time.isoformat(), "updated_time": kb.updated_time.isoformat(),
             "history": kb.history or [], "documents": [self.document_out(d) for d in visible_docs],
@@ -279,7 +282,8 @@ class KnowledgeService:
             "has_markdown": bool(doc.markdown), "updated_time": doc.updated_time.isoformat()}
 
     async def list(self, user, search="", *, offset=0, limit=50):
-        qs = KnowledgeBase.filter(Q(user_id=user.id) | Q(is_public=True), state__not=1)
+        from applications.wrq.knowledge import knowledge_permissions
+        qs = KnowledgeBase.filter(knowledge_permissions(user.id,None)['visible_filter'], state__not=1)
         if search.strip():
             qs = qs.filter(knowledge_name__icontains=search.strip())
         total = await qs.count()
