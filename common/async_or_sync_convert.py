@@ -56,6 +56,9 @@ class AsyncEventLoopContextIOPool:
         except RuntimeError:
             pass
 
+        # __new__ 会返回已有实例；重复构造必须复用 ORM 连接所属的常驻循环。
+        if getattr(self, "loop", None) is not None and self.loop.is_running():
+            return
         self.limit = 1
         self.loop = aio.new_event_loop()
         self.loop_runner = threading.Thread(

@@ -76,6 +76,9 @@ async def auth_middleware(request: Request, call_next):
         "GET /",
         "GET /health",
 
+        # 此入口由路由核验短期知识库运行凭据；沙箱不持有平台登录 token。
+        "POST /skills/knowledge/search",
+
         # openapi/docs
         f"GET {PROJECT_CONFIG.APP_DOCS_URL}",
         f"GET {PROJECT_CONFIG.APP_REDOC_URL}",

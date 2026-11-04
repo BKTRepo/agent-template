@@ -196,7 +196,7 @@ class SkillPackageService(LegacySkillPackageService):
                     return await self.get(skill.id, saved.build_id, user, verify=True)
                 links = await SkillResourceBinding.filter(skill_version_id=saved.id).exclude(file_id=None).using_db(db).order_by('sort_order','id')
                 knowledge_links = await SkillResourceBinding.filter(skill_version_id=saved.id,source_type='knowledge_base').using_db(db)
-                if set(map(str,form.knowledge_base_ids)) != {row.source_id for row in knowledge_links}:
+                if set(map(str, form.knowledge_base_ids)) != {str(row.source_id) for row in knowledge_links}:
                     raise DeveloperError('知识库挂载与保存版本不一致，请先保存修改',409)
                 files = [await Source.filter(id=r.file_id).using_db(db).select_for_update().first() for r in links]
                 if any(f is None or f.state == 'DELETED' or f.create_user_login_name != user_login_name(user) for f in files):

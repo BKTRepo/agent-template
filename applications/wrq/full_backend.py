@@ -70,5 +70,7 @@ def create_app():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(create_app(), host=PROJECT_CONFIG.SERVER_HOST,
-                port=PROJECT_CONFIG.SERVER_PORT, reload=False)
+    # 由现有 Windows Selector 策略创建循环，避免 Uvicorn 改回 Proactor 后 TLS 握手失败。
+    server = uvicorn.Server(uvicorn.Config(create_app(), host=PROJECT_CONFIG.SERVER_HOST,
+                port=PROJECT_CONFIG.SERVER_PORT, reload=False))
+    asyncio.run(server.serve())

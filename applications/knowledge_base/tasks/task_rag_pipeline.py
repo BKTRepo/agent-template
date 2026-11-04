@@ -13,7 +13,8 @@ from celery_scheduler.celery_worker import celery
 from celery import current_task
 
 def get_celery_execution_id():
-    return getattr(current_task.request, "id", None) if current_task else None
+    from celery_scheduler.celery_base import LOCAL_CONTEXT_VAR
+    return LOCAL_CONTEXT_VAR.task_id or (getattr(current_task.request, "id", None) if current_task else None)
 
 from configure import LOGGER
 

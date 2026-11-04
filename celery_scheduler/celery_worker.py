@@ -110,6 +110,7 @@ def create_celery():
             return super().on_failure(exc, task_id, args, kwargs, einfo)
 
         def __call__(self, *args, **kwargs):
+            request_context = self.request.__dict__.copy()
             try:
                 hdr = self.request.headers or {}
                 if isinstance(hdr, dict):
@@ -125,8 +126,11 @@ def create_celery():
 
             ensure_tortoise_orm_initialized()
 
+            previous_task_id = LOCAL_CONTEXT_VAR.task_id
+            LOCAL_CONTEXT_VAR.task_id = request_context.get("id")
             _task_stack.push(self)
-            self.push_request(args=args, kwargs=kwargs)
+            # 保留 Celery 的原始编号及重试信息；ContextVar 将编号带入异步池线程。
+            self.push_request(**{**request_context, "args": args, "kwargs": kwargs})
             try:
                 if asyncio.iscoroutinefunction(self.run):
                     return get_async_event_loop_pool().run(self.run(*args, **kwargs))
@@ -134,6 +138,7 @@ def create_celery():
             finally:
                 self.pop_request()
                 _task_stack.pop()
+                LOCAL_CONTEXT_VAR.task_id = previous_task_id
 
     _celery_: Celery = NewCelery("Worker", task_cls=ContextTask)
     _celery_.config_from_object(CELERY_CONFIG.CELERY_CONFIG)

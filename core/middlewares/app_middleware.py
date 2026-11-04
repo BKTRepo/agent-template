@@ -54,7 +54,10 @@ def is_download_response(response: Response) -> bool:
     :returns: 为附件下载时返回 True。
     """
     content_disposition: str = response.headers.get("content-disposition", "")
-    return "attachment" in content_disposition.lower()
+    content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    return ("attachment" in content_disposition.lower()
+            or content_type in {"application/zip", "application/octet-stream", "application/pdf"}
+            or content_type.startswith("application/vnd."))
 
 
 def is_longtext_response(response: Response) -> bool:
@@ -149,6 +152,10 @@ async def logging_middleware(request: Request, call_next):
     request_method: str = request.method
     request_router: str = request.url.path
     request_header: dict = dict(request.headers)
+    # 审计保留请求信息，但不持久化平台或 MCP 的明文访问凭据。
+    for sensitive_header in ("token", "authorization", "cookie", "proxy-authorization"):
+        if sensitive_header in request_header:
+            request_header[sensitive_header] = "[REDACTED]"
     if "referer" in request_header and request_header["referer"]:
         try:
             request_header["referer"] = unquote(request_header["referer"])

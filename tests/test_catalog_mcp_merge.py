@@ -16,9 +16,33 @@ from applications.wrq.auth import PlatformIdentity
 from applications.wrq.knowledge import prepare_execution
 from applications.wrq.markdown_storage import write_markdown
 from applications.wrq.models.knowledge_execution_model import KnowledgeExecution
+from applications.wrq.agent.schemas.skill_package_schema import SkillDeveloperForm
+from applications.wrq.agent.models.agent_model import SkillForm, SkillVersion
 from applications.zhaoyunlong.models.online_debug_run_model import OnlineDebugRun
 from applications.zhaoyunlong.services.online_debug_run_service import OnlineDebugRunService
 from test_skill_catalog_flow import catalog_flow, seed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('string_id', [False, True])
+async def test_build_form_accepts_integer_knowledge_bindings(catalog_flow, string_id):
+    _, kind, _ = catalog_flow
+    skill, version, kb, _ = await bound_skill(kind, public=True)
+    version.build_id = None
+    await version.save(update_fields=['build_id'])
+    form = await SkillForm.get(skill_version_id=version.id)
+    form.resource_usage = 'Use knowledge_search before generating test cases.'
+    form.skill_markdown_path = ''
+    await form.save(update_fields=['resource_usage', 'skill_markdown_path'])
+    request = SkillDeveloperForm(skill_id=skill.id, skill_name=form.name,
+        skill_class_id=kind.id, description=form.description, instructions=form.instructions,
+        expected_version=version.version, resource_usage=form.resource_usage,
+        application_paso=form.application_paso, compatibility=form.compatibility or '',
+        knowledge_base_ids=[str(kb.id) if string_id else kb.id])
+    result = await SkillPackageService().build_form(request,
+        PlatformIdentity(1, 'owner', 'Owner', login_name='owner'), [])
+    assert result['build_id']
+    assert (await SkillVersion.get(id=version.id)).build_id == result['build_id']
 
 
 async def bound_skill(kind, *, public):

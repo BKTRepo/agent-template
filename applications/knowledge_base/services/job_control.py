@@ -34,7 +34,7 @@ class DocumentLease:
             client = redis.Redis.from_url(CELERY_CONFIG.CELERY_BROKER_URL,
                 socket_connect_timeout=2, socket_timeout=2)
         self.client = client
-        self.key = "knowledge:document:" + document_id
+        self.key = "knowledge:document:" + str(document_id)
         self.token = uuid.uuid4().hex  # 每次执行独立，不能让相同 Celery ID 的重投递重入。
         self.ttl = PROJECT_CONFIG.KNOWLEDGE_LOCK_TTL_SECONDS * 1000
 

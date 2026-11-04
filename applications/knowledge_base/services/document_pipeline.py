@@ -29,7 +29,7 @@ class MilvusIndex:
         from applications.knowledge_base.rag.milvus_store import delete_by_doc_id
         for job in await RagDocument.filter(knowledge_document_id=document_id):
             await asyncio.to_thread(delete_by_doc_id, job.job_id)
-        await asyncio.to_thread(delete_by_doc_id, document_id)
+        await asyncio.to_thread(delete_by_doc_id, str(document_id))
         await RagDocument.filter(knowledge_document_id=document_id).delete()
 
 
