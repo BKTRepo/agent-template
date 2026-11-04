@@ -67,11 +67,15 @@ async def create_from_job(client, job, name='Business knowledge', public=False):
 async def test_convert_create_poll_complete_and_skill_update_binding(flow):
     client, actor, owner, _, submitted, _ = flow
     job = (await client.post('/api/convert', files={'file': ('rules.md', b'business rule')})).json()['data']['job_id']
+    assert await KnowledgeBase.all().count() == 0
+    assert await SkillResourceBinding.all().count() == 0
     response = await create_from_job(client, job)
     assert response.status_code == 200, response.text
     kb = response.json()['data']
     assert kb['status'] == 'processing'
     assert kb['documents'][0]['conversion_job_id'] == job
+    assert isinstance(kb['id'], int) and isinstance(kb['documents'][0]['id'], int)
+    assert await SkillResourceBinding.all().count() == 0  # 创建知识库不自动挂载技能。
     assert len(submitted) == 1
     assert (await client.get('/api/convert/status', params={'job_id': job})).json()['data']['status'] == 'embedding'
     assert await DocumentChunk.all().count() == 0

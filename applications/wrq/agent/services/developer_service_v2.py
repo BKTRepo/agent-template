@@ -92,7 +92,9 @@ class DeveloperSkillCrud:
 
     async def name_available(self,name,exclude_id=None,connection=None):
         key=normalized_skill_name(name)
-        q=Skill.filter(state=0).exclude(id=exclude_id or '')
+        q=Skill.filter(state=0)
+        if exclude_id is not None:
+            q=q.exclude(id=exclude_id)
         if connection: q=q.using_db(connection)
         return not any(normalized_skill_name(r.name)==key for r in await q)
 
@@ -164,7 +166,7 @@ class DeveloperSkillCrud:
             update_user_login_name=user_login_name(user))
         markdown_path = write_markdown(skill.id, markdown) if markdown else ''
         if markdown_path and artifacts is not None: artifacts.append(markdown_path)
-        technical=data.technical_name or 'skill-'+hashlib.sha256(skill.id.encode()).hexdigest()[:24]
+        technical=data.technical_name or 'skill-'+hashlib.sha256(str(skill.id).encode()).hexdigest()[:24]
         await SkillForm.create(using_db=db,skill_version_id=version.id,name=data.name.strip(),
             skill_class_id=data.class_id,application_paso=data.effective_application_paso,
             description=data.description.strip(),instructions=data.instructions.strip(),
@@ -185,7 +187,8 @@ class DeveloperSkillCrud:
         skill.skill_classes_id=data.class_id
         skill.update_user_login_name=user_login_name(user)
         skill.current_version_id=version.id
-        await skill.save(using_db=db)
+        await skill.save(using_db=db, update_fields=['name','application_paso','skill_classes_id',
+            'update_user_login_name','current_version_id','current_revision','display_status','last_debug_run_id','updated_time'])
         return skill
 
     async def create(self,user,data):
@@ -243,7 +246,7 @@ class DeveloperSkillCrud:
                 raise DeveloperError('该下线原因不允许填写额外说明', field='reason_text')
             skill.display_status='OFFLINE'; skill.offline_at=datetime.now()
             skill.update_user_login_name=user_login_name(user)
-            await skill.save(using_db=db)
+            await skill.save(using_db=db,update_fields=['display_status','offline_at','update_user_login_name','updated_time'])
             published = await SkillVersion.get_or_none(id=skill.published_version_id).using_db(db) if skill.published_version_id else None
             await SkillPublication.create(using_db=db,skill_id=skill.id,skill_version_id=skill.published_version_id or skill.current_version_id,
                 version=published.version if published else None, action='OFFLINE',operator_login_name=user_login_name(user),
@@ -280,7 +283,8 @@ class DeveloperSkillCrud:
             skill.display_status='ONLINE'; skill.published_at=datetime.now(); skill.published_version_id=version.id
             skill.update_user_login_name=user_login_name(user)
             skill.last_debug_run_id=accepted[0].run_id
-            await skill.save(using_db=db)
+            await skill.save(using_db=db,update_fields=['display_status','published_at','published_version_id',
+                'update_user_login_name','last_debug_run_id','updated_time'])
             await SkillPublication.create(using_db=db,skill_id=skill.id,skill_version_id=version.id,
                 version=version.version, action='PUBLISH',operator_login_name=user_login_name(user))
             return skill
@@ -311,7 +315,7 @@ class DeveloperSkillCrud:
                     target = self.debug_status(result) or 'DEBUGGING'
                     if skill.display_status not in ('ONLINE', 'OFFLINE'):
                         skill.display_status = target
-                    await skill.save(using_db=db)
+                    await skill.save(using_db=db,update_fields=['last_debug_run_id','update_user_login_name','display_status','updated_time'])
                 return skill
         except IntegrityError as exc:
             raise DeveloperError('任务登记发生并发冲突，请使用原任务编号重试',409) from exc
@@ -353,7 +357,8 @@ class DeveloperSkillCrud:
                     'usage':binding.usage_text or ''})
             elif binding.source_type=='knowledge_base':
                 knowledge.append({'id':binding.source_id,'name':binding.display_name or binding.source_id,'source':'backend'})
-        link=await SkillDebugRun.filter(skill_id=skill.id,skill_version_id=version.id).order_by('-created_time').first()
+        link=await SkillDebugRun.filter(skill_id=skill.id,skill_version_id=version.id,
+            create_user_login_name=user_login_name(user)).order_by('-created_time').first()
         debug=None
         if link:
             result=await self.sandbox.get(link.run_id,skill.id)

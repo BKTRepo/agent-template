@@ -113,33 +113,33 @@ async def create_knowledge(request: Request, background: BackgroundTasks, source
 
 
 @knowledge.post("/save", summary="知识库-保存修改并递增版本")
-async def update_knowledge(request: Request, background: BackgroundTasks, kb_id: str = Form(...), source: str = Form(...),
+async def update_knowledge(request: Request, background: BackgroundTasks, kb_id: int = Form(..., ge=1), source: str = Form(...),
                            files: list[UploadFile] = File(default=[]), current_user: User = DependAuth,
                            service=Depends(get_knowledge_service)):
     return await save_form(request, background, source, files, current_user, service, kb_id)
 
 
 @knowledge.get("/detail", summary="知识库-查询详情、文件状态及版本历史")
-async def detail(kb_id: str, current_user: User = DependAuth, service=Depends(get_knowledge_service)):
+async def detail(kb_id: int, current_user: User = DependAuth, service=Depends(get_knowledge_service)):
     return await respond(service.detail(kb_id, current_user))
 
 
 @knowledge.get("/documents", summary="知识库-查询文件列表")
-async def list_documents(kb_id: str, current_user: User = DependAuth, service=Depends(get_knowledge_service)):
+async def list_documents(kb_id: int, current_user: User = DependAuth, service=Depends(get_knowledge_service)):
     async def operation():
         return (await service.detail(kb_id, current_user))["documents"]
     return await respond(operation())
 
 
 @knowledge.get("/history", summary="知识库-查询编辑历史")
-async def history(kb_id: str, current_user: User = DependAuth, service=Depends(get_knowledge_service)):
+async def history(kb_id: int, current_user: User = DependAuth, service=Depends(get_knowledge_service)):
     async def operation():
         return (await service.detail(kb_id, current_user))["history"]
     return await respond(operation())
 
 
 @knowledge.get("/documents/preview", summary="知识库-查询文件解析内容预览")
-async def preview(kb_id: str, doc_id: str, current_user: User = DependAuth, service=Depends(get_knowledge_service)):
+async def preview(kb_id: int, doc_id: int, current_user: User = DependAuth, service=Depends(get_knowledge_service)):
     async def operation():
         doc = await service.require_document(kb_id, doc_id, current_user)
         return {**service.document_out(doc), "markdown": doc.markdown or ""}
@@ -147,7 +147,7 @@ async def preview(kb_id: str, doc_id: str, current_user: User = DependAuth, serv
 
 
 @knowledge.get("/documents/download", summary="知识库-下载原文件")
-async def download(kb_id: str, doc_id: str, current_user: User = DependAuth, service=Depends(get_knowledge_service)):
+async def download(kb_id: int, doc_id: int, current_user: User = DependAuth, service=Depends(get_knowledge_service)):
     try:
         doc = await service.require_document(kb_id, doc_id, current_user)
         path = Path(doc.file_path).resolve()
@@ -181,7 +181,7 @@ async def retry(data: KnowledgeRetry, background: BackgroundTasks,
 
 
 @knowledge.get("/chunks", summary="知识库-查询文档分块")
-async def chunks(kb_id: str, document_id: str | None = None, offset: int = Query(0, ge=0),
+async def chunks(kb_id: int, document_id: int | None = None, offset: int = Query(0, ge=0),
                   limit: int = Query(50, ge=1, le=100), current_user: User = DependAuth,
                   service=Depends(get_knowledge_service)):
     async def operation():

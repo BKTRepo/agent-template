@@ -97,5 +97,5 @@ async def debug(data:RegisterDebugRunRequest,current_user=DependAuth):
     return SuccessResponse(data=await crud.output(await crud.record_debug_result(data.skill_id,current_user,business_payload(data,DeveloperDebugResult)),current_user))
 
 @developer_skills.get('/developer/get-debug-run',summary='开发者中心-查询调试任务与技能版本关联')
-async def debug_link(skill_id:str=Query(...,min_length=1,max_length=64),run_id:str=Query(...,min_length=1,max_length=128),current_user=DependAuth):
+async def debug_link(skill_id:int=Query(...,ge=1),run_id:str=Query(...,min_length=1,max_length=128),current_user=DependAuth):
     return SuccessResponse(data=await crud.debug_link(skill_id,run_id,current_user))

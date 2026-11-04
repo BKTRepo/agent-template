@@ -182,7 +182,7 @@ def test_environment_and_platform_metadata_are_serialized_as_strings(tmp_path):
     assert set(header) == {"name", "description", "compatibility", "metadata"}
     assert header["metadata"] == {
         "version": "0.1.0", "skill_id": "s", "creator_id": "7", "display_name": form.display_name,
-        "skill_class_id": "SKILL-CASE-001", "application": "核心系统", "model_tier": "standard"}
+        "skill_class_id": "SKILL-CASE-001", "application_paso": "核心系统", "model_tier": "standard"}
     assert built["source"]["compatibility"] == environment
 
 

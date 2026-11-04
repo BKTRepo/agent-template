@@ -25,6 +25,7 @@ class RagPipelineState(ScaffoldModel):
     表内约定至多一行, 由 CRUD 层 get-or-create 维护。
     """
 
+    id = fields.IntField(pk=True, description="流水线状态自增整数主键")
     start_time = fields.DatetimeField(null=True, description="流水线启动时间（空闲为 NULL）")
     updated_time = fields.DatetimeField(auto_now=True, description="更新时间")
 
@@ -36,6 +37,7 @@ class RagPipelineState(ScaffoldModel):
 class RagPipelineHistory(ScaffoldModel):
     """流水线历史消息表（只追加, 读取取最近 N 条）。"""
 
+    id = fields.IntField(pk=True, description="流水线历史自增整数主键")
     message = fields.TextField(description="历史消息内容")
     # created_time 不用 auto_now_add: 历史数据迁移需保留原始时分秒, 由 CRUD/
     # 迁移脚本显式写入（与 RagConversationMessage 同口径）

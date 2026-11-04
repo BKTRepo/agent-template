@@ -83,6 +83,10 @@ Content-Type: application/json
 
 ## 迁移说明
 
+2026-11-04：以实际库为准，技能主键和关联编号使用正整数；GET `?skill_id=...`、POST请求体中的skill_id由整数模型校验。新增 `POST /skills/catalog/create-test-run`，multipart的source为JSON：skill_id、build_id、request_id（32位小写十六进制）、conversation_input，另有可选documents。任务、关联和计数同事务，重复request_id返回原任务。技能统计及大类字段已通过SSL显式加列，详细口径见 docs/skill-catalog-integration.md。
+
+技能中心新增 `/skills/catalog/get-metadata`、`get-class`、`list-skills`、`get-skill`、`get-build`、`download-skill`、`download-resource`，均为 GET 查询参数接口。参数、发布权限和 `keenrobot_skill_classes` 四个新增字段的显式迁移见 [技能中心接入](../../docs/skill-catalog-integration.md)。
+
 - 原带 `{skill_id}`、`{file_id}`、`{build_id}` 的 WRQ 路由及 PUT / DELETE 路由已替换，不保留旧方法别名。调用方应同步更新。
 - 后端生成的 downloadUrl 已变更；当前前端会把缓存中的旧资源下载地址转换为新查询参数地址。
 - 前后端应同步部署；历史文档和旧验收脚本不能代替本文件的当前契约。
@@ -95,3 +99,5 @@ Content-Type: application/json
 ```powershell
 .\.venv\Scripts\python.exe -m pytest applications/wrq/tests/test_api_conventions.py -q
 ```
+
+技能中心调用入口：POST `/skills/catalog/create-test-run`，form-data source JSON包含整数skill_id、build_id、request_id、conversation_input，可选documents；固定发布定义和资源由服务端读取。相同request_id仅创建/累计一次。

@@ -8,6 +8,10 @@ class DeveloperSkillClass(models.Model):
     id = fields.IntField(pk=True, description="技能大类自增主键")
     name = fields.CharField(max_length=128, unique=True, description="技能大类名称")
     is_enabled = fields.BooleanField(default=True, description="是否启用")
+    description = fields.TextField(default="", null=True, description="大类能力描述")
+    input_schema = fields.JSONField(null=True, description="统一输入JSON Schema")
+    output_schema = fields.JSONField(null=True, description="统一输出JSON Schema")
+    template = fields.TextField(null=True, description="可下载的Skill模板原文")
     class Meta:
         table = "keenrobot_skill_classes"
 
@@ -22,7 +26,8 @@ class SkillDisplayStatus(str, Enum):
     OFFLINE = "OFFLINE"
 
 class Skill(models.Model):
-    id = fields.CharField(max_length=64, pk=True, default=unique_identify, description="技能唯一编号")
+    id = fields.IntField(pk=True, description="数据库自增技能编号")
+    legacy_id = fields.CharField(max_length=64, null=True, unique=True, description="迁移前技能编号，兼容历史构建")
     name = fields.CharField(max_length=128, description="技能名称；仅未删除记录唯一")
     create_user_login_name = fields.CharField(max_length=10, description="创建人工号")
     update_user_login_name = fields.CharField(max_length=10, null=True, description="最近修改人工号")
@@ -37,6 +42,8 @@ class Skill(models.Model):
     current_version_id = fields.IntField(null=True, description="当前技能版本整数编号")
     published_version_id = fields.IntField(null=True, description="最近一次成功上线的技能版本整数编号")
     current_revision = fields.IntField(default=1, description="当前修订次数")
+    call_count = fields.BigIntField(default=0, description="技能中心累计接受的在线测试任务数")
+    download_count = fields.BigIntField(default=0, description="累计成功生成并返回的技能ZIP下载次数")
     last_debug_run_id = fields.CharField(max_length=128, null=True, description="最近登记的当前版本任务编号")
     published_at = fields.DatetimeField(null=True, description="最近已记录的上线时间")
     offline_at = fields.DatetimeField(null=True, description="最近已记录的下线时间")
@@ -45,6 +52,13 @@ class Skill(models.Model):
     updated_time = fields.DatetimeField(auto_now=True, description="更新时间")
     class Meta:
         table = "keenrobot_skills"
+
+    async def save(self, using_db=None, update_fields=None, force_create=False, force_update=False):
+        # 兼容旧整行save；旧对象不能回写统计值，统计由数据库原子UPDATE维护。
+        if self._saved_in_db and not force_create and update_fields is None:
+            update_fields = self._meta.db_fields - {'id', 'call_count', 'download_count'}
+        return await super().save(using_db=using_db, update_fields=update_fields,
+                                  force_create=force_create, force_update=force_update)
     # 只供平台旧接口序列化兼容，不在 SQL 中重复保存表单。
     @property
     def config(self):
@@ -63,7 +77,7 @@ class Skill(models.Model):
 
 class SkillVersion(models.Model):
     id = fields.IntField(pk=True, description="技能版本整数主键")
-    skill_id = fields.CharField(max_length=64, index=True, description="所属技能编号")
+    skill_id = fields.IntField(index=True, description="所属技能编号")
     version = fields.CharField(max_length=32, null=True, description="对外显示版本号；首次成功上线前为空")
     revision = fields.IntField(description="技能内修订次数")
     build_id = fields.CharField(max_length=64, null=True, description="本版不可变构建编号")
@@ -128,10 +142,10 @@ class Source(models.Model):
 
 class SkillResourceBinding(models.Model):
     id = fields.IntField(pk=True, description="关联主键")
-    skill_id = fields.CharField(max_length=64, description="技能编号")
+    skill_id = fields.IntField(description="技能编号")
     skill_version_id = fields.IntField(index=True, description="技能表单版本编号")
     source_type = fields.CharField(max_length=32, description="来源：upload knowledge_base knowledge_document")
-    source_id = fields.CharField(max_length=64, null=True, description="来源对象编号；知识库和文档使用字符串编号")
+    source_id = fields.IntField(null=True, description="来源对象整数编号")
     file_id = fields.IntField(null=True, description="上传文件编号；整库挂载为空")
     display_name = fields.CharField(max_length=255, default="", description="挂载时展示名称")
     usage_text = fields.TextField(null=True, description="单项资源使用说明")
@@ -147,7 +161,7 @@ class SkillResourceBinding(models.Model):
 class SkillDebugRun(models.Model):
     id = fields.IntField(pk=True, description="我方任务关联自增主键")
     run_id = fields.CharField(max_length=128, unique=True, description="同事沙箱任务编号")
-    skill_id = fields.CharField(max_length=64, description="关联技能编号")
+    skill_id = fields.IntField(description="关联技能编号")
     skill_version_id = fields.IntField(index=True, description="实际执行的表单版本编号")
     build_id = fields.CharField(max_length=64, null=True, description="实际使用的构建编号")
     conversation_input = fields.TextField(default="", description="本次调试输入，不保存临时文档原件")
@@ -163,7 +177,7 @@ class SkillDebugRun(models.Model):
 
 class SkillPublication(models.Model):
     id = fields.IntField(pk=True, description="上下线操作自增主键")
-    skill_id = fields.CharField(max_length=64, description="技能编号")
+    skill_id = fields.IntField(description="技能编号")
     skill_version_id = fields.IntField(description="操作的技能版本")
     action = fields.CharField(max_length=16, description="PUBLISH上线 OFFLINE下线")
     version = fields.CharField(max_length=32, null=True, description="操作时的对外版本号")
@@ -171,6 +185,8 @@ class SkillPublication(models.Model):
     reason_code = fields.CharField(max_length=32, null=True, description="下线原因枚举")
     reason_text = fields.CharField(max_length=500, null=True, description="选择其他时填写的具体原因")
     reason = fields.CharField(max_length=500, null=True, description="旧接口兼容原因文本")
+    update_user_login_name = fields.CharField(max_length=10, null=True, description="最后修改人工号")
+    updated_time = fields.DatetimeField(auto_now=True)
     created_time = fields.DatetimeField(auto_now_add=True, description="操作时间")
     update_user_login_name = fields.CharField(max_length=10, null=True, description="最后修改人工号")
     updated_time = fields.DatetimeField(auto_now=True, description="最后修改时间")

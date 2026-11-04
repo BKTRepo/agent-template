@@ -13,7 +13,7 @@ from configure import PROJECT_CONFIG
 from enums import DocumentStatus
 
 
-async def stage_conversions(user, job_ids, kb_id):
+async def stage_conversions(user, job_ids, kb_id, *, storage_key=None):
     from .platform_service import KnowledgeError, KnowledgeService
     from .file_type import validate_file_type
 
@@ -31,7 +31,7 @@ async def stage_conversions(user, job_ids, kb_id):
             if not source.is_relative_to(Path(PROJECT_CONFIG.RAG_INPUT_DIR).resolve()) or not source.is_file():
                 raise KnowledgeError("转换任务原文件不存在，请重新上传", "conversion_job_ids", 409)
             suffix = validate_file_type(job.filename)
-            directory = PROJECT_CONFIG.upload_path / kb_id
+            directory = PROJECT_CONFIG.upload_path / str(storage_key or kb_id)
             directory.mkdir(parents=True, exist_ok=True)
             target = directory / f"{uuid.uuid4().hex}.{suffix}"
             staged.append({"filename": job.filename, "file_type": suffix, "file_path": str(target),

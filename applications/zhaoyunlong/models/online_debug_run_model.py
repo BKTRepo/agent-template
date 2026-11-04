@@ -9,8 +9,9 @@ from applications.base.services.scaffold import ScaffoldModel
 class OnlineDebugRun(ScaffoldModel):
     """记录一次在线调试从提交、执行到生成结果文档的完整状态。"""
 
-    # 前端或上游技能服务传入的技能标识；当前项目尚未建立独立技能表。
-    skill_id = fields.CharField(max_length=128, index=True, description="被调试技能的标识")
+    id = fields.IntField(pk=True, description="数据库自增任务编号")
+    # 按用户要求同步实际列类型，执行器及既有接口契约不变。
+    skill_id = fields.IntField(index=True, description="被调试技能的整数编号")
     # 对外返回的随机任务编号，用于查询状态和下载对应结果文件。
     run_id = fields.CharField(max_length=32, unique=True, index=True, description="在线调试任务编号")
     # 状态仅允许由服务端按 queued、running、completed、failed 四种值写入。

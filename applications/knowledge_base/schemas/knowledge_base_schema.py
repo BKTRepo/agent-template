@@ -37,7 +37,7 @@ class KnowledgeBaseCreate(KnowledgeBaseBase):
 
 
 class KnowledgeBaseOut(BaseModel):
-    id: str = Field(..., description="知识库ID")
+    id: int = Field(..., description="知识库ID")
     knowledge_name: str = Field(..., description="知识库名称")
     description: Optional[str] = Field(default=None, description="知识库描述")
     user_id: int = Field(..., description="所属用户ID")
@@ -54,7 +54,7 @@ class KnowledgeBaseOut(BaseModel):
 
 class DocumentCreate(BaseModel):
     """文档创建（CRUD 层）"""
-    knowledge_base_id: str = Field(..., description="所属知识库ID")
+    knowledge_base_id: int = Field(..., description="所属知识库ID")
     filename: str = Field(..., description="文件名")
     file_type: str = Field(..., description="文件类型")
     file_path: str = Field(..., description="文件路径")
@@ -75,15 +75,15 @@ class DocumentUpdate(BaseModel):
 
 class DocumentChunkCreate(BaseModel):
     """文档分块创建（CRUD 层）"""
-    document_id: str = Field(..., description="所属文档ID")
+    document_id: int = Field(..., description="所属文档ID")
     content: str = Field(..., description="分块内容")
     chunk_index: int = Field(..., description="分块序号")
     page_number: Optional[int] = Field(default=None, description="PDF页码(从1开始)")
 
 
 class DocumentOut(BaseModel):
-    id: str = Field(..., description="文档ID")
-    knowledge_base_id: str = Field(..., description="所属知识库ID")
+    id: int = Field(..., description="文档ID")
+    knowledge_base_id: int = Field(..., description="所属知识库ID")
     filename: str = Field(..., description="文件名")
     file_type: str = Field(..., description="文件类型")
     file_size: int = Field(..., description="文件大小(字节)")
@@ -99,8 +99,8 @@ class DocumentOut(BaseModel):
 
 
 class DocumentChunkOut(BaseModel):
-    id: str = Field(..., description="分块ID")
-    document_id: str = Field(..., description="所属文档ID")
+    id: int = Field(..., description="分块ID")
+    document_id: int = Field(..., description="所属文档ID")
     content: str = Field(..., description="分块内容")
     chunk_index: int = Field(..., description="分块序号")
     page_number: Optional[int] = Field(default=None, description="PDF页码(从1开始)")

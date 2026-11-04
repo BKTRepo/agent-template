@@ -83,7 +83,7 @@ async def create_skill(
 
 @skills.get("/get-skill", summary="技能管理-按编号查询技能详情")
 async def get_skill(
-        skill_id: str = Query(..., min_length=1, max_length=64),
+        skill_id: int = Query(..., ge=1),
         current_user: User = DependAuth,
         skill_crud: SkillCrud = Depends(get_skill_crud),
 ):

@@ -40,3 +40,5 @@ workspace/*
 !workspace/.claude/**
 
 .env
+.tmp/skill-counter-backups/
+.tmp/knowledge-id-backups/

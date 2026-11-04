@@ -377,7 +377,7 @@ class KnowledgeBaseCrud(ScaffoldCrud[KnowledgeBase, KnowledgeBaseCreate, Knowled
                     )
                 )
 
-        kb_upload_dir = PROJECT_CONFIG.upload_path / kb_id
+        kb_upload_dir = PROJECT_CONFIG.upload_path / str(kb_id)
         kb_upload_dir.mkdir(parents=True, exist_ok=True)
         file_path = kb_upload_dir / file.filename
         with open(file_path, "wb") as f:

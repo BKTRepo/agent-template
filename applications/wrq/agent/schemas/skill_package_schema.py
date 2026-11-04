@@ -73,7 +73,7 @@ class SkillDeveloperForm(BaseModel):
     """八项表单及页面携带的技能 ID；拒绝客户端指定身份和内部生成参数。"""
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    skill_id: str = Field(default="", max_length=64)
+    skill_id: int = Field(ge=1)
     skill_name: str = Field(default="", max_length=128)
     description: str = Field(default="", max_length=1024)
     version: str = Field(default="", max_length=64)

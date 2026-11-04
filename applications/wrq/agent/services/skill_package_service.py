@@ -257,7 +257,7 @@ class SkillPackageService(LegacySkillPackageService):
                 if skill.display_status in ('DRAFT','DEBUGGING'):
                     skill.display_status = 'DEBUGGING'
                 skill.update_user_login_name = user_login_name(user)
-                await skill.save(using_db=db)
+                await skill.save(using_db=db, update_fields=['display_status','update_user_login_name','updated_time'])
             return {**built, 'skill_version_id': saved.id, 'current_revision': saved.revision}
         except BaseException:
             if built:
@@ -267,7 +267,7 @@ class SkillPackageService(LegacySkillPackageService):
 
     async def get(self, skill_id, build_id, user, *, verify=False):
         from applications.wrq.agent.models.agent_model import SkillVersion
-        await self.require_skill(skill_id, user)
+        skill = await self.require_skill(skill_id, user)
         version = await SkillVersion.filter(skill_id=skill_id, build_id=build_id).first()
         if version and version.package_storage_key:
             package = Path(version.package_storage_key).resolve()
@@ -276,9 +276,12 @@ class SkillPackageService(LegacySkillPackageService):
             manifest = package.parent/'manifest.json'
             try:
                 info = json.loads(manifest.read_bytes().decode('utf8'))
+                manifest_skill = info.get('skill_id')
+                if str(manifest_skill) not in {str(skill.id), skill.legacy_id}:
+                    raise SkillBuildNotFound('构建清单不属于该技能')
                 owner = info.get('user_login_name', info.get('user_id'))
                 built = await asyncio.to_thread(self.builder.read, user_id=owner,
-                    skill_id=skill_id, build_id=build_id, verify=verify)
+                    skill_id=manifest_skill, build_id=build_id, verify=verify)
             except (FileNotFoundError, KeyError, json.JSONDecodeError) as exc:
                 raise SkillBuildNotFound('构建记录不存在') from exc
             if Path(built['workspace_dir']).resolve() != package.parent:

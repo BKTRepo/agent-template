@@ -12,7 +12,7 @@ from enums.chat_session_enum import DocumentStatus
 
 class KnowledgeBase(ScaffoldModel, StateModel, TimestampMixin):
     """知识库模型"""
-    id = fields.CharField(default=unique_identify, max_length=64, pk=True, description="知识库ID")
+    id = fields.IntField(pk=True, description="知识库自增整数编号")
     knowledge_name = fields.CharField(max_length=128, description="知识库名称")
     name_key = fields.CharField(max_length=64, null=True, unique=True)
     tag = fields.CharField(max_length=32, default="custom")
@@ -38,7 +38,7 @@ class KnowledgeBase(ScaffoldModel, StateModel, TimestampMixin):
 
 class Document(ScaffoldModel, TimestampMixin):
     """文档模型"""
-    id = fields.CharField(default=unique_identify, max_length=64, pk=True, description="文档ID")
+    id = fields.IntField(pk=True, description="文档自增整数编号")
     knowledge_base = fields.ForeignKeyField(
         "models.KnowledgeBase",
         related_name="documents",
@@ -81,7 +81,7 @@ class Document(ScaffoldModel, TimestampMixin):
 
 class DocumentChunk(ScaffoldModel, TimestampMixin):
     """文档分块模型"""
-    id = fields.CharField(default=unique_identify, max_length=64, pk=True, description="分块ID")
+    id = fields.IntField(pk=True, description="分块自增整数编号")
     document = fields.ForeignKeyField(
         "models.Document",
         related_name="document_chunks",

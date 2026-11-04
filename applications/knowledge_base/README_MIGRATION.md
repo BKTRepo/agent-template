@@ -1,5 +1,7 @@
 # dev-knowledge 知识库迁移
 
+2026-11-04：用户确认其他任务已创建七张知识库/处理表，并授权将代码和库的主键/关联编号统一为INT。已通过SSL对七张空表执行 align_empty_integer_ids_20261104 --apply 并复核；原有文档外键恢复，job_id仍为字符串。变更前DDL和逐步日志位于忽略目录 .tmp/knowledge-id-backups/。该脚本默认只预览，遇到非空表、知识库技能绑定或额外外键会拒绝，不隐式转换旧UUID。完整新建表参考SQL为 docs/migrations/20261104-knowledge-integer-schema.sql，生成器plan_integer_schema本身不连接数据库、不执行DDL。
+
 源分支：dev-knowledge，来源提交：891b0c5。
 目标：当前 dev-wrq 的 applications/knowledge_base。本地迁移清单与备份不随业务代码发布。
 源项目与源 .env 未修改；没有复制聊天、会话、工单、前端、原数据库或输出数据。
@@ -43,3 +45,7 @@ Markdown、术语、分块通过 GET /api/documents/markdown、terminology、chu
 
 迁移测试包括真实本地五种格式转换、术语阶段重试、向量替换失败保护、连接池、模型重试，以及平台 ORM 适配。
 隔离测试的模型和 Milvus 写入使用显式替身；这不等于真实外部模型、Redis Worker、Milvus 全链路验收。
+
+## 2026-11-04 整数编号方案（尚未建表）
+
+知识库/文档/分块及rag_document.knowledge_document_id均已同步为INT；其余RAG表主键也为INT自增。用户已进一步授权现有空表编号迁移并通过SSL执行。新环境参考整数建表SQL；有历史数据的环境不能直接套用本空表迁移，必须制定映射。列表字段合同见 docs/knowledge-list-contract.md（若该文件在当前交付目录中可用）。

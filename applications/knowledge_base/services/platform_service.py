@@ -66,13 +66,16 @@ class KnowledgeService:
     async def check_name(self, value, exclude_id=None):
         key = name_key(value)
         # 兼容尚未回填规范化名称键的历史记录。
-        for row in await KnowledgeBase.filter(state__not=1).exclude(id=exclude_id or "").all():
+        query = KnowledgeBase.filter(state__not=1)
+        if exclude_id is not None:
+            query = query.exclude(id=exclude_id)
+        for row in await query.all():
             if (row.name_key or name_key(row.knowledge_name)) == key:
                 raise KnowledgeError("知识库名称已存在", "knowledge_name")
 
     async def stage(self, kb_id, files):
         saved = []
-        directory = PROJECT_CONFIG.upload_path / kb_id
+        directory = PROJECT_CONFIG.upload_path / str(kb_id)
         directory.mkdir(parents=True, exist_ok=True)
         try:
             names = set()
@@ -149,18 +152,18 @@ class KnowledgeService:
             raise KnowledgeError("请使用上传文件或已提交转换任务中的一种方式", "conversion_job_ids")
         if not creating:
             await self.require(kb_id, user, write=True)
-        kb_id = kb_id or str(uuid.uuid4())
+        storage_key = str(kb_id) if kb_id else uuid.uuid4().hex
         if form.conversion_job_ids:
             from .conversion_links import stage_conversions
-            staged = await stage_conversions(user, form.conversion_job_ids, kb_id)
+            staged = await stage_conversions(user, form.conversion_job_ids, kb_id, storage_key=storage_key)
         else:
-            staged = await self.stage(kb_id, files)
+            staged = await self.stage(storage_key, files)
         jobs = []
         try:
             async with in_transaction() as conn:
                 await self.check_name(form.knowledge_name, kb_id)
                 if creating:
-                    kb = KnowledgeBase(id=kb_id, user_id=user.id)
+                    kb = KnowledgeBase(user_id=user.id)
                 else:
                     kb = await self.require(kb_id, user, write=True, connection=conn)
                     if form.expected_version and form.expected_version != next_version(kb.revision):
@@ -170,6 +173,7 @@ class KnowledgeService:
                 kb.is_public = form.is_public
                 _history(kb, user, "创建知识库" if creating else form.change_summary, initial=creating)
                 await kb.save(using_db=conn)
+                kb_id = kb.id
                 docs = await Document.filter(knowledge_base_id=kb_id, is_deleted=False).using_db(conn).all()
                 if expected_document:
                     doc_id, generation = expected_document
@@ -288,7 +292,7 @@ class KnowledgeService:
             source_type='knowledge_base',source_id=kb_id).count()
         return {"id": kb.id, "knowledge_name": kb.knowledge_name, "description": kb.description,
             "tag": kb.tag, "application": kb.application, "version": next_version(kb.revision),
-            "user_id": kb.user_id, "creator_login_name": creator.username,
+            "user_id": kb.user_id, "creator_login_name": creator.username, "creator_name": creator.alias or creator.username,
             "maintainer": (kb.history or [{}])[-1].get("maintainer") or creator.alias or creator.username,
             "is_public": kb.is_public, "can_edit": can_edit,
             "status": status, "document_count": len(visible_docs), "reference_count": count,

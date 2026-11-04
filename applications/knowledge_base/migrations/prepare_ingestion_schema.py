@@ -31,7 +31,7 @@ async def main(apply=False):
         if connection.capabilities.dialect=='mysql':
             _,rows=await connection.execute_query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='rag_document'")
             names={row['COLUMN_NAME'] for row in rows}
-            for name,definition in [('owner_id','BIGINT NULL'),('knowledge_document_id','VARCHAR(64) NULL')]:
+            for name,definition in [('owner_id','BIGINT NULL'),('knowledge_document_id','INT NULL')]:
                 if names and name not in names:
                     ddl=f'ALTER TABLE `rag_document` ADD COLUMN `{name}` {definition};'
                     print(ddl)

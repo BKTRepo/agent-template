@@ -117,6 +117,7 @@ class SkillPackageBuilder:
             raise self._issue(field, f"单个文件不能超过 {self.max_file_bytes / (1024 * 1024):g}MiB")
 
     def _parent(self, user_id: int, skill_id: str) -> Path:
+        skill_id = str(skill_id)
         valid_owner = (isinstance(user_id, int) and not isinstance(user_id, bool) and user_id > 0) or (isinstance(user_id, str) and 0 < len(user_id) <= 10)
         if not valid_owner or not ID_RE.fullmatch(skill_id):
             raise ValueError("无效的用户或技能 ID")
@@ -134,7 +135,7 @@ class SkillPackageBuilder:
         """读取旧版按完整工号/技能 ID 保存的构建，新增构建不再使用该布局。"""
         folder = ('login-' + hashlib.sha256(user_id.encode()).hexdigest()[:24]
                   if isinstance(user_id, str) else str(user_id))
-        parent = self.root / folder / skill_id
+        parent = self.root / folder / str(skill_id)
         if not parent.resolve().is_relative_to(self.root):
             raise ValueError("构建目录越界")
         return parent
@@ -302,7 +303,7 @@ class SkillPackageBuilder:
         if not directory.resolve().is_relative_to(self.root):
             raise FileNotFoundError("构建记录不存在")
         manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
-        if (manifest.get("user_login_name", manifest.get("user_id")), manifest.get("skill_id"), manifest.get("build_id")) != (user_id, skill_id, build_id):
+        if (manifest.get("user_login_name", manifest.get("user_id")), str(manifest.get("skill_id")), manifest.get("build_id")) != (user_id, str(skill_id), build_id):
             raise FileNotFoundError("构建记录不存在")
         name = manifest.get("name", "")
         if not NAME_RE.fullmatch(name):

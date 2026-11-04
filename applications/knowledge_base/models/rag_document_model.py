@@ -24,8 +24,9 @@ class RagDocument(ScaffoldModel, TimestampMixin):
     services/rag_service.py::delete_files_and_docs）。
     """
 
+    id = fields.IntField(pk=True, description="文档任务自增整数主键")
     owner_id = fields.BigIntField(null=True, index=True, description="平台调用者编号")
-    knowledge_document_id = fields.CharField(max_length=64, null=True, index=True)
+    knowledge_document_id = fields.IntField(null=True, index=True)
 
     # ---- 身份与基础信息 ----
     job_id = fields.CharField(max_length=64, unique=True, description="任务ID(doc-<md5前16位>)")

@@ -19,6 +19,7 @@ class LLMCallLog(ScaffoldModel):
     两者按时间轴对照即可定位瓶颈。
     """
 
+    id = fields.IntField(pk=True, description="模型调用日志自增整数主键")
     # ---- 调用身份 ----
     model = fields.CharField(max_length=128, description="模型名")
     scene = fields.CharField(
