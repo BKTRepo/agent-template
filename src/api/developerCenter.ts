@@ -5,11 +5,11 @@ import type { Implementation, ImplementationForm, SkillUploads } from '@/types/d
 
 interface ApiResponse<T> { status: string; message?: string; data: T }
 interface ServerSkill {
-  id: string; name: string; class_id: string | number; application_ids?: string[]; application_paso?: string; description: string
+  id: number; name: string; class_id: string | number; application_ids?: string[]; application_paso?: string; description: string
   instructions: string; resource_ids: string[]; resource_usage: string; compatibility: string
   technical_name: string; uploaded_resources: Implementation['uploadedResources']; knowledge_bases: Implementation['knowledgeBases']
   current_revision: number; skill_version_id: number; skill_markdown?: string; version: string | null; status: Implementation['status']; creator_id?: string; creator_login_name?: string; creator_name: string; updated_at: string
-  backend_skill_id?: string; build_id?: string; build_origin?: 'backend'
+  backend_skill_id?: number; build_id?: string; build_origin?: 'backend'
   debug?: { id: string; runId: string; buildId?: string; skillVersionId?: number; status: 'queued' | 'running' | 'passed' | 'failed' | 'timeout'; output: string; origin: 'backend' }
 }
 export interface DeveloperCatalogOption { id: string; name: string }
@@ -26,21 +26,21 @@ export interface DeveloperSkillPage {
   pages: number
 }
 export interface DeveloperDebugLink {
-  run_id: string; skill_id: string; skill_version_id: number; version: string
+  run_id: string; skill_id: number; skill_version_id: number; version: string
   build_id: string; is_current_version: boolean; task: Record<string, unknown> | null
 }
 
 function toImplementation(row: ServerSkill): Implementation {
   const applicationIds = row.application_ids ?? (row.application_paso ? [row.application_paso] : [])
   return {
-    id: row.id, revision: row.current_revision, skillVersionId: row.skill_version_id, backendVersion: row.version ?? undefined, name: row.name, classId: String(row.class_id), applicationIds,
+    id: String(row.id), revision: row.current_revision, skillVersionId: row.skill_version_id, backendVersion: row.version ?? undefined, name: row.name, classId: String(row.class_id), applicationIds,
     system: applicationIds.includes('*') ? '全应用适用' : applicationIds[0] || '', team: '',
     technicalName: row.technical_name, description: row.description, instructions: row.instructions,
     resourceIds: row.resource_ids, resourceUsage: row.resource_usage, compatibility: row.compatibility,
     uploadedResources: row.uploaded_resources ?? [], knowledgeBases: row.knowledge_bases ?? [], skillMarkdown: row.skill_markdown,
     version: row.version ?? '', modelTier: 'standard', status: row.status, creatorId: row.creator_id,
     creatorName: row.creator_name, updatedAt: row.updated_at,
-    backendSkillId: row.backend_skill_id ?? row.id, buildId: row.build_id,
+    backendSkillId: String(row.backend_skill_id ?? row.id), buildId: row.build_id,
     buildOrigin: row.build_origin, debug: row.debug ? { ...row.debug, buildId: row.debug.buildId ?? '', input: '',
       versionRegistered: !!row.debug.buildId, isCurrentVersion: !!row.debug.buildId && row.debug.buildId === row.build_id,
     } : undefined,
@@ -88,19 +88,19 @@ export async function getDeveloperMetadata() {
   return { ...metadata, skill_classes: metadata.skill_classes.map(row => ({ ...row, id: String(row.id) })) }
 }
 export async function createDeveloperSkill(form: ImplementationForm) { return toImplementation(await request<ServerSkill>('/skills/developer/create-skill-draft', { method: 'POST', body: JSON.stringify(body(form)) })) }
-export async function updateDeveloperSkill(id: string, form: ImplementationForm) { return toImplementation(await request<ServerSkill>('/skills/developer/save-skill', { method: 'POST', body: JSON.stringify({ ...body(form), skill_id: id }) })) }
-export async function deleteDeveloperSkill(id: string) { await request<unknown>('/skills/developer/delete-skill-draft', { method: 'POST', body: JSON.stringify({ skill_id: id }) }) }
+export async function updateDeveloperSkill(id: string, form: ImplementationForm) { return toImplementation(await request<ServerSkill>('/skills/developer/save-skill', { method: 'POST', body: JSON.stringify({ ...body(form), skill_id: Number(id) }) })) }
+export async function deleteDeveloperSkill(id: string) { await request<unknown>('/skills/developer/delete-skill-draft', { method: 'POST', body: JSON.stringify({ skill_id: Number(id) }) }) }
 export async function offlineDeveloperSkill(id: string, reasonCode = 'ABILITY_DEFECT', reasonText?: string) {
-  return toImplementation(await request<ServerSkill>('/skills/developer/offline-skill', { method: 'POST', body: JSON.stringify({ skill_id: id, reason_code: reasonCode, reason_text: reasonText || null }) }))
+  return toImplementation(await request<ServerSkill>('/skills/developer/offline-skill', { method: 'POST', body: JSON.stringify({ skill_id: Number(id), reason_code: reasonCode, reason_text: reasonText || null }) }))
 }
-export async function publishDeveloperSkill(id: string) { return toImplementation(await request<ServerSkill>('/skills/developer/publish-skill', { method: 'POST', body: JSON.stringify({ skill_id: id }) })) }
+export async function publishDeveloperSkill(id: string) { return toImplementation(await request<ServerSkill>('/skills/developer/publish-skill', { method: 'POST', body: JSON.stringify({ skill_id: Number(id) }) })) }
 export async function recordDeveloperDebugResult(id: string, debug: NonNullable<Implementation['debug']>) {
   if (!debug.runId || debug.status === 'idle') return
   if (!debug.buildId && !debug.skillVersionId) throw new DeveloperCenterError('缺少本次任务实际使用的技能版本，不能登记。')
   const conversation = typeof debug.input === 'string' ? debug.input : debug.input.conversation
   const documents = typeof debug.input === 'string' ? [] : debug.input.documents
   return toImplementation(await request<ServerSkill>('/skills/developer/register-debug-run', {
-    method: 'POST', body: JSON.stringify({ skill_id: id, run_id: debug.runId, build_id: debug.buildId || null,
+    method: 'POST', body: JSON.stringify({ skill_id: Number(id), run_id: debug.runId, build_id: debug.buildId || null,
       skill_version_id: debug.skillVersionId, conversation_input: debug.conversationInput ?? conversation,
       request_document_count: debug.requestDocumentCount ?? documents.length })
   }))
