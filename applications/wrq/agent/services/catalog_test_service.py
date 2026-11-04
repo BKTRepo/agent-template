@@ -65,7 +65,7 @@ async def create_catalog_test(data, documents, user):
                 resources.append(await asyncio.to_thread(extract_mounted_resource, name, content))
     except FileParseError as exc:
         raise DeveloperError(str(exc), 422) from exc
-    payload = {'skill_id': str(data.skill_id), 'skill_definition': markdown,
+    payload = {'skill_id': data.skill_id, 'build_id': data.build_id, 'skill_version_id': version.id, 'skill_definition': markdown,
                'conversation_input': data.conversation_input, 'documents': document_entries, 'mounted_resources': resources}
     if len(markdown) > 100000:
         raise DeveloperError('发布定义超过沙箱长度限制', 422)
@@ -82,6 +82,11 @@ async def create_catalog_test(data, documents, user):
             previous = await existing_run(data, user, db)
             if previous:
                 return await OnlineDebugRunService.as_response(previous)
+            # 新MCP链路也适用于目录已发布版本；上下文、任务、关联及计数同事务。
+            from applications.wrq.knowledge import prepare_execution
+            token = await prepare_execution(payload, user, data.request_id, published=True)
+            if token:
+                payload['_knowledge_token'] = token
             task = await OnlineDebugRun.create(using_db=db, skill_id=str(skill.id), run_id=data.request_id,
                                                status='queued', debugger=(user.alias or user.username)[:64])
             await SkillDebugRun.create(using_db=db, run_id=data.request_id, skill_id=skill.id,

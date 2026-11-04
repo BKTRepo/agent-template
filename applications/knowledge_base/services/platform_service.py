@@ -50,9 +50,11 @@ class KnowledgeService:
         if connection:
             query = query.using_db(connection).select_for_update()
         kb = await query.first()
-        if not kb:
+        from applications.wrq.knowledge import knowledge_permissions
+        permissions = knowledge_permissions(user.id, kb)
+        if not permissions['can_view']:
             raise KnowledgeError("知识库不存在或无访问权限", status_code=404)
-        if write and not await KnowledgeBase.filter(resolve_isolation_rule(user, action="write"), id=kb.id).using_db(connection).exists():
+        if write and not permissions['can_edit']:
             raise KnowledgeError("只有创建者可以修改知识库", status_code=403)
         return kb
 
@@ -275,6 +277,7 @@ class KnowledgeService:
         return await self.detail(kb_id, user), jobs
 
     async def detail(self, kb_id, user):
+        from applications.wrq.knowledge import knowledge_permissions
         kb = await self.require(kb_id, user)
         from .conversion_links import sync_knowledge_conversions
         conversions = await sync_knowledge_conversions(kb_id)
@@ -320,7 +323,8 @@ class KnowledgeService:
             "has_markdown": bool(doc.markdown), "updated_time": doc.updated_time.isoformat()}
 
     async def list(self, user, search="", *, offset=0, limit=50):
-        qs = KnowledgeBase.filter(resolve_isolation_rule(user), state__not=1)
+        from applications.wrq.knowledge import knowledge_permissions
+        qs = KnowledgeBase.filter(knowledge_permissions(user.id,None)['visible_filter'], state__not=1)
         if search.strip():
             qs = qs.filter(knowledge_name__icontains=search.strip())
         total = await qs.count()

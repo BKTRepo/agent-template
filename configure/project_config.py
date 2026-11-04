@@ -377,6 +377,8 @@ class ProjectConfig(BaseSettings):
                 exclude_endswith="__.py"
             )
         ]
+        if "applications.wrq.models.knowledge_execution_model" not in models:
+            models.append("applications.wrq.models.knowledge_execution_model")
         models.append("aerich.models")
         return models
 

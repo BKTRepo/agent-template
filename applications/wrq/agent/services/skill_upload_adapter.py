@@ -53,7 +53,7 @@ def source_from_developer_form(form: SkillDeveloperForm, filenames: list[str], *
     if not report.finish().valid:
         raise SkillPackageError(report)
     return SkillPackageSource(
-        name=technical_name or "skill-" + hashlib.sha256(form.skill_id.encode()).hexdigest()[:24],
+        name=technical_name or "skill-" + hashlib.sha256(str(form.skill_id).encode()).hexdigest()[:24],
         display_name=form.skill_name, description=form.description, instructions=form.instructions,
         # 草稿/首次创建时数据库版本允许为 NULL；构建合同要求字符串，
         # 因此在适配层统一归一化为空字符串，避免空版本触发 Pydantic 类型错误。

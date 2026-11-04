@@ -22,6 +22,8 @@ async def lifespan(app):
 
 app=FastAPI(title='WRQ 开发者中心',lifespan=lifespan)
 app.include_router(skills_router,prefix='/skills')
+from applications.wrq.agent.views.knowledge_view import search_router
+app.include_router(search_router,prefix='/skills')
 
 @app.get('/health')
 async def health():

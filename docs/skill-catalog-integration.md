@@ -6,6 +6,8 @@ last_updated: 2026-11-04
 
 # 技能中心
 
+2026-11-04后续合并dev-wrq：新构建中的知识库改为运行时MCP检索，不再打包原文件，直接上传资源仍打包。目录已发布版本测试接入同一MCP授权及执行证据校验；上下文与原有任务/关联/计数同事务，保留重复提交保护。权限策略统一到knowledge_permissions，原隔离函数作为兼容入口。部署要求及63项后端/55项前端合并回归见 [MCP接入](../applications/wrq/KNOWLEDGE_MCP.md)。历史构建仍按原件校验读取，不重写旧ZIP。
+
 技能中心与开发者中心共用 `keenrobot_skill_classes`、`keenrobot_skills`、`keenrobot_skill_versions`、`keenrobot_skill_forms`、`keenrobot_skill_resource_bindings`。不创建另一套技能实现、版本或资源关系表。大类的字段直接加在现有分类表，不新建大类详情表。
 
 ## 数据与可见性

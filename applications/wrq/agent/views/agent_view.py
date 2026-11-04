@@ -34,7 +34,7 @@ def name_error(exc):
 
 
 @skills.get("/check-skill-name", summary="开发者中心-检查技能名称是否重复或可用")
-async def check_skill_name(name: str = Query(..., max_length=128), exclude_id: str = None,
+async def check_skill_name(name: str = Query(..., max_length=128), exclude_id: int | None = Query(default=None, ge=1, le=2147483647),
                            current_user: User = DependAuth,
                            skill_crud: SkillCrud = Depends(get_skill_crud)):
     try:
@@ -83,7 +83,7 @@ async def create_skill(
 
 @skills.get("/get-skill", summary="技能管理-按编号查询技能详情")
 async def get_skill(
-        skill_id: int = Query(..., ge=1),
+        skill_id: int = Query(..., ge=1, le=2147483647),
         current_user: User = DependAuth,
         skill_crud: SkillCrud = Depends(get_skill_crud),
 ):

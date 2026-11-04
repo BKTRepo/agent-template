@@ -52,8 +52,11 @@ class LegacySkillPackageService:
         return skill
 
     async def _knowledge_base(self, kb_id, user):
-        from services.resource_isolation import resolve_isolation_rule
-        return await KnowledgeBase.filter(resolve_isolation_rule(user), id=kb_id, state__not=1).first()
+        kb = await KnowledgeBase.filter(id=kb_id, state__not=1).first()
+        from applications.wrq.knowledge import knowledge_permissions
+        if not knowledge_permissions(user.id, kb)['can_view']:
+            return None
+        return kb
 
     async def resolve(self, source: SkillPackageSource, user):
         """返回有效源、可用文件及报告；原文件内容在复制时再校验固定哈希。"""
@@ -61,39 +64,9 @@ class LegacySkillPackageService:
         source_error_count = len(report.errors)
         bindings = list(source.resources)
         selected = {binding.document_id for binding in bindings if binding.document_id}
-        for index, kb_id in enumerate(dict.fromkeys(source.knowledge_base_ids)):
-            kb = await self._knowledge_base(kb_id, user)
-            if not kb:
-                report.errors.append(ValidationIssue(field=f"knowledge_base_ids[{index}]",
-                                                     reason="知识库不存在或无访问权限"))
-                continue
-            documents = await Document.filter(knowledge_base_id=kb.id, is_deleted=False).order_by("id").limit(101)
-            if not documents:
-                issues = report.errors if source.resource_usage is not None else report.warnings
-                issues.append(ValidationIssue(field=f"knowledge_base_ids[{index}]",
-                                               reason="知识库没有原文件，未生成资源快照"))
-            for document in documents:
-                if document.id in selected:
-                    continue
-                selected.add(document.id)
-                # 原 ID 和哈希仍完整写入清单；短文件前缀避免 Windows 路径过长。
-                prefix = hashlib.sha256(document.id.encode()).hexdigest()[:12]
-                role = "reference"
-                if source.resource_usage is not None:
-                    try:
-                        role = resource_role(document.filename)
-                    except ValueError:
-                        # 知识库支持 PDF、旧版 Word 和 Excel 等参考文档。
-                        from applications.knowledge_base.services.file_type import validate_file_type
-                        try:
-                            validate_file_type(document.filename)
-                        except ValueError as exc:
-                            report.errors.append(ValidationIssue(field=f"knowledge_base_ids[{index}]", reason=str(exc)))
-                            continue
-                bindings.append(SkillResourceBinding(document_id=document.id, role=role,
-                                target_path=f"{prefix}-{document.filename}",
-                                usage=source.resource_usage or "",
-                                content_hash=document.content_hash))
+        from applications.wrq.knowledge import document_scope
+        if source.knowledge_base_ids:
+            await document_scope(user.id, source.knowledge_base_ids)
         if len(bindings) > 100:
             report.errors.append(ValidationIssue(field="resources", reason="展开知识库后资源总数超过 100"))
             return source, [], report.finish()
@@ -222,6 +195,9 @@ class SkillPackageService(LegacySkillPackageService):
                 if saved.build_id:
                     return await self.get(skill.id, saved.build_id, user, verify=True)
                 links = await SkillResourceBinding.filter(skill_version_id=saved.id).exclude(file_id=None).using_db(db).order_by('sort_order','id')
+                knowledge_links = await SkillResourceBinding.filter(skill_version_id=saved.id,source_type='knowledge_base').using_db(db)
+                if set(map(str,form.knowledge_base_ids)) != {row.source_id for row in knowledge_links}:
+                    raise DeveloperError('知识库挂载与保存版本不一致，请先保存修改',409)
                 files = [await Source.filter(id=r.file_id).using_db(db).select_for_update().first() for r in links]
                 if any(f is None or f.state == 'DELETED' or f.create_user_login_name != user_login_name(user) for f in files):
                     raise DeveloperError('挂载文件不存在或无访问权限',409)
@@ -254,10 +230,12 @@ class SkillPackageService(LegacySkillPackageService):
                 await content.save(using_db=db, update_fields=['skill_markdown_path'])
                 saved.update_user_login_name = user_login_name(user)
                 await saved.save(using_db=db, update_fields=['build_id', 'package_storage_key', 'manifest_hash', 'update_user_login_name', 'updated_time'])
+                update_fields = ['update_user_login_name', 'updated_time']
                 if skill.display_status in ('DRAFT','DEBUGGING'):
                     skill.display_status = 'DEBUGGING'
+                    update_fields.append('display_status')
                 skill.update_user_login_name = user_login_name(user)
-                await skill.save(using_db=db, update_fields=['display_status','update_user_login_name','updated_time'])
+                await skill.save(using_db=db, update_fields=update_fields)
             return {**built, 'skill_version_id': saved.id, 'current_revision': saved.revision}
         except BaseException:
             if built:
@@ -282,6 +260,7 @@ class SkillPackageService(LegacySkillPackageService):
                 owner = info.get('user_login_name', info.get('user_id'))
                 built = await asyncio.to_thread(self.builder.read, user_id=owner,
                     skill_id=manifest_skill, build_id=build_id, verify=verify)
+                built['skill_id'] = skill.id
             except (FileNotFoundError, KeyError, json.JSONDecodeError) as exc:
                 raise SkillBuildNotFound('构建记录不存在') from exc
             if Path(built['workspace_dir']).resolve() != package.parent:

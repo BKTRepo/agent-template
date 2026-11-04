@@ -33,8 +33,15 @@ class OnlineDebugRunService:
     ) -> dict[str, Any]:
         """创建 queued 任务并立即调度后台沙箱执行。"""
         run_id = uuid.uuid4().hex
+        from applications.wrq.knowledge import prepare_execution
+        identity = payload.pop('_identity', None)
+        if identity is None:
+            raise OnlineDebugError('缺少可信调试身份')
+        token = await prepare_execution(payload, identity, run_id)
+        if token:
+            payload['_knowledge_token'] = token
         record = await OnlineDebugRunModel.create(
-            skill_id=str(payload["skill_id"]),
+            skill_id=int(payload["skill_id"]),
             run_id=run_id,
             status="queued",
             debugger=debugger[:64],
@@ -65,6 +72,8 @@ class OnlineDebugRunService:
         try:
             sandbox = OnlineDebugService()
             result = await asyncio.to_thread(sandbox.run, payload, owner_id, run_id)
+            from applications.wrq.knowledge import verify_evidence
+            await verify_evidence(run_id, payload.get('_knowledge_receipts', []), required=bool(payload.get('_knowledge_token')))
             finished_at = datetime.now()
             expires_at = finished_at + timedelta(seconds=sandbox.retention_seconds)
             await OnlineDebugRunModel.filter(id=record_id).update(
@@ -86,6 +95,10 @@ class OnlineDebugRunService:
                 error_message=cls._get_public_error_message(exc),
             )
 
+        finally:
+            from applications.wrq.models.knowledge_execution_model import KnowledgeExecution
+            await KnowledgeExecution.filter(run_id=run_id).update(active=False)
+
     @classmethod
     async def get_run(
         cls,
@@ -100,7 +113,7 @@ class OnlineDebugRunService:
     @classmethod
     async def get_latest_run(
         cls,
-        skill_id: str,
+        skill_id: int,
     ) -> OnlineDebugRunModel:
         """读取某个技能最近创建的一次调试任务。"""
         query = OnlineDebugRunModel.filter(skill_id=skill_id)

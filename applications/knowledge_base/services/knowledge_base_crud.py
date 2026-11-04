@@ -149,8 +149,9 @@ class KnowledgeBaseCrud(ScaffoldCrud[KnowledgeBase, KnowledgeBaseCreate, Knowled
             self, user_id: int, search: str = None
     ) -> List[KnowledgeBase]:
         """获取用户可见的知识库列表"""
+        from applications.wrq.knowledge import knowledge_permissions
         qs = self.model.filter(
-            Q(user_id=user_id) | Q(is_public=True),
+            knowledge_permissions(user_id,None)['visible_filter'],
             state__not=1,
         )
         if search:
@@ -161,12 +162,14 @@ class KnowledgeBaseCrud(ScaffoldCrud[KnowledgeBase, KnowledgeBaseCreate, Knowled
 
     def check_access(self, kb: KnowledgeBase, user: User) -> None:
         """校验知识库访问权限"""
-        if not kb.is_public and kb.user_id != user.id and not user.is_superuser:
+        from applications.wrq.knowledge import knowledge_permissions
+        if not knowledge_permissions(user.id,kb)['can_view']:
             raise NoPermissionException(message="没有权限访问该知识库")
 
     def check_write(self, kb: KnowledgeBase, user: User) -> None:
         """校验知识库写权限"""
-        if kb.user_id != user.id and not user.is_superuser:
+        from applications.wrq.knowledge import knowledge_permissions
+        if not knowledge_permissions(user.id,kb)['can_edit']:
             raise NoPermissionException(message="没有权限操作该知识库")
 
     @staticmethod

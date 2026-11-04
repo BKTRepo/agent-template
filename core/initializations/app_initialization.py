@@ -183,6 +183,8 @@ def register_routers(app: FastAPI) -> None:
     # 开发者中心在线调试：同步运行 Docker 沙箱并生成 Excel 测试用例文档。
     app.include_router(router=realtime_test_case_router, prefix="/realtime-test-case-gen",tags=["开发者中心-在线调试"], )
 
+    from applications.wrq.agent.views.knowledge_view import search_router
+    app.include_router(search_router, prefix="/skills", tags=["知识库MCP"])
     app.include_router(router=skills_router, prefix="/skills", tags=["开发者中心-Agent技能"], dependencies=[DependAuth])
     app.include_router(router=knowledge_router, prefix="/knowledge-bases", tags=["知识库与文件管理"], dependencies=[DependAuth])
     from applications.knowledge_base.views.conversion_view import conversion_router

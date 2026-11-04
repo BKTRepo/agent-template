@@ -31,6 +31,7 @@ async def database():
     await Tortoise.init(db_url="sqlite://:memory:", modules={"models": [
         "applications.user.models.user_model",
         "applications.wrq.agent.models.agent_model",
+        "applications.wrq.models.knowledge_execution_model",
         "applications.zhaoyunlong.models.online_debug_run_model",
         "applications.knowledge_base.models.knowledge_base_model",
         "applications.knowledge_base.models.rag_document_model",

@@ -28,7 +28,7 @@ class SkillCreate(SkillBase):
 
 
 class SkillUpdate(SkillBase):
-    skill_id: Optional[int] = Field(default=None, description="技能ID")
+    skill_id: Optional[int] = Field(default=None, ge=1, le=2147483647, description="技能ID")
 
 
 class SkillOut(BaseModel):
