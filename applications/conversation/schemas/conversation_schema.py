@@ -209,6 +209,9 @@ class MessageOut(BaseModel):
 
 
 class ChatRequest(BaseModel):
+    query_mode: str = Field(default='hybrid', pattern='^(naive|hybrid|bypass)$', description='知识库查询模式')
+    enable_rerank: bool = Field(default=True, description='是否启用模型重排')
+    max_total_tokens: Optional[int] = Field(default=None, ge=1, description='上下文token预算')
     question: str = Field(..., min_length=1, max_length=2000, description="用户问题")
     conversation_id: Optional[str] = Field(default=None, description="对话ID")
     knowledge_base_ids: Optional[List[str]] = Field(

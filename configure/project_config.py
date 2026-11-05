@@ -380,6 +380,11 @@ class ProjectConfig(BaseSettings):
         if "applications.wrq.models.knowledge_execution_model" not in models:
             models.append("applications.wrq.models.knowledge_execution_model")
         models.append("aerich.models")
+        models.extend([
+            'applications.wrq.knowledge_base.models.query_model',
+            'applications.wrq.knowledge_base.models.term_mapping_model',
+            'applications.wrq.knowledge_base.models.feedback_model',
+        ])
         return models
 
     # 常用的用户代理字符串列表
