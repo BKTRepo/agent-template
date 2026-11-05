@@ -5,10 +5,15 @@ import { hasSkillSession, skillAccount } from './skillSession'
 import type { KnowledgeBase, KnowledgeBaseOption } from '@/types/developer'
 
 export interface KnowledgeUpload { id: string; file: File }
+export interface KnowledgeTagOption { id: number; code: string; name: string; is_enabled: boolean; sort_order: number }
+export interface KnowledgeMetadata { applications: { id: string; name: string }[]; tags: KnowledgeTagOption[] }
+export async function getKnowledgeMetadata(signal?: AbortSignal): Promise<KnowledgeMetadata> {
+  return (await knowledgeRequest<KnowledgeMetadata>('/knowledge-bases/get-form-metadata', { signal })).data
+}
 export interface ConversionJob { job_id?: string; id?: string; status: string; summary?: string; error_msg?: string }
 interface ServerDocument { id: string | number; filename: string; file_size: number; status: string; updated_time: string; conversion_job_id?: string; conversion_status?: string; error_message?: string }
 interface ServerKnowledge {
-  id: string | number; knowledge_name: string; description: string; tag: string; application: string; version: string
+  id: string | number; knowledge_name: string; description: string; tag: string; tag_name?: string; application: string; version: string
   user_id: number; creator_login_name?: string; creator_name?: string; maintainer: string; is_public: boolean; can_edit: boolean
   status: string; reference_count: number; updated_time: string; documents: ServerDocument[]
   history: { version: string; maintainer: string; change_summary: string; created_at: string }[]
@@ -27,7 +32,7 @@ export async function knowledgeRequest<T>(path: string, options: RequestInit = {
 }
 export function toKnowledge(row: ServerKnowledge): KnowledgeBase {
   return { id: String(row.id), name: row.knowledge_name, description: row.description || '', version: row.version,
-    tag: ({ general: '通识类', custom: '自定义', dependency: '依赖类' } as Record<string, string>)[row.tag] || '',
+    tag: row.tag || '', tagName: row.tag_name || row.tag || '',
     team: '', scope: row.is_public ? 'public' : 'team', applicationIds: row.application ? [row.application] : [],
     source: 'backend', creatorId: row.creator_login_name || String(row.user_id), creatorName: row.creator_name || row.creator_login_name || String(row.user_id),
     canEdit: row.can_edit, referenceCount: row.reference_count, maintainer: row.maintainer, updatedAt: row.updated_time,
@@ -83,7 +88,7 @@ export async function saveKnowledgeBase(form: Omit<KnowledgeBase, 'id' | 'update
   const data = new FormData()
   if (id) for (const upload of uploads.filter(row => form.files.some(file => file.id === row.id))) data.append('files', upload.file, upload.file.name)
   data.append('source', JSON.stringify({ knowledge_name: form.name.trim(), description: form.description,
-    tag: ({ '通识类': 'general', '依赖类': 'dependency', '自定义': 'custom' } as Record<string, string>)[form.tag] || '',
+    tag: form.tag || '',
     application: form.applicationIds?.[0] || '', is_public: form.scope === 'public',
     change_summary: form.changeSummary || '', ...(id ? { expected_version: form.version,
       retained_document_ids: form.files.filter(file => !newIds.has(file.id)).map(file => file.id) } : {}),

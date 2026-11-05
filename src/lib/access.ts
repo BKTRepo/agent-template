@@ -12,7 +12,7 @@ export const demoActors: Actor[] = [
 export const actorApplications = (_actor: Actor) => applications
 export function applicationText(item: { applicationIds?: string[]; system?: string }) {
   const ids = item.applicationIds ?? (item.system ? [item.system] : [])
-  return ids.includes(ALL_APPLICATIONS) ? '全应用适用' : ids.join('、') || '未关联应用'
+  return ids.includes(ALL_APPLICATIONS) ? '全应用适用' : ids.map(id => applications.find(row => row.id === id)?.name || id).join('、') || '未关联应用'
 }
 export function assertApplications(ids: string[] | undefined, _actor?: Actor) {
   if (!ids?.length) return

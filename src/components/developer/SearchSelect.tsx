@@ -1,5 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
 import { Check, ChevronDown, Search, X } from 'lucide-react'
 
 type Props = {
@@ -40,36 +41,47 @@ export default function SearchSelect({ label, value, options, onChange, disabled
   }
 
   useLayoutEffect(() => {
-    if (!expanded || !input.current) return
-    const rect = input.current.getBoundingClientRect()
-    const boundary = root.current?.closest('dialog')?.getBoundingClientRect()
-    const bottom = Math.min(window.innerHeight, boundary?.bottom ?? window.innerHeight) - 8
-    const top = Math.max(0, boundary?.top ?? 0) + 8
-    const below = bottom - rect.bottom - 6
-    const above = rect.top - top - 6
-    const upward = below < 220 && above > below
-    setPosition({ left: rect.left, width: rect.width, maxHeight: Math.max(80, Math.min(280, upward ? above : below)), ...(upward ? { bottom: window.innerHeight - rect.top + 6 } : { top: rect.bottom + 6 }) })
+    if (!expanded) return
+    function place(event?: Event) {
+      if (!input.current || (event?.target instanceof Node && list.current?.contains(event.target))) return
+      const rect = input.current.getBoundingClientRect()
+      const boundary = root.current?.closest('dialog')?.getBoundingClientRect()
+      const bottom = Math.min(window.innerHeight, boundary?.bottom ?? window.innerHeight) - 8
+      const top = Math.max(0, boundary?.top ?? 0) + 8
+      if (rect.bottom < top || rect.top > bottom) { setOpen(false); return }
+      const below = bottom - rect.bottom - 6
+      const above = rect.top - top - 6
+      const upward = below < 220 && above > below
+      setPosition({ left: rect.left, width: rect.width, maxHeight: Math.max(80, Math.min(280, upward ? above : below)), ...(upward ? { bottom: window.innerHeight - rect.top + 6 } : { top: rect.bottom + 6 }) })
+    }
+    place()
+    document.addEventListener('scroll', place, true)
+    window.addEventListener('resize', place)
+    return () => { document.removeEventListener('scroll', place, true); window.removeEventListener('resize', place) }
   }, [expanded])
 
   useEffect(() => {
     if (!expanded) return
     function dismiss(event: Event) {
-      if (event.target instanceof Node && root.current?.contains(event.target)) return
+      if (event.target instanceof Node && (root.current?.contains(event.target) || list.current?.contains(event.target))) return
       setOpen(false)
     }
-    function close() { setOpen(false) }
     document.addEventListener('pointerdown', dismiss)
-    document.addEventListener('scroll', dismiss, true)
-    window.addEventListener('resize', close)
     return () => {
       document.removeEventListener('pointerdown', dismiss)
-      document.removeEventListener('scroll', dismiss, true)
-      window.removeEventListener('resize', close)
     }
   }, [expanded])
 
   useEffect(() => {
-    if (expanded && active >= 0) list.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: 'nearest' })
+    if (!expanded || active < 0 || !list.current) return
+    const container = list.current
+    const option = container.querySelector<HTMLElement>(`[data-index="${active}"]`)
+    if (!option) return
+    // Only scroll the option list; scrollIntoView can move the enclosing dialog
+    // and dismiss this fixed-position menu during pointer selection.
+    const top = option.offsetTop, bottom = top + option.offsetHeight
+    if (top < container.scrollTop) container.scrollTop = top
+    else if (bottom > container.scrollTop + container.clientHeight) container.scrollTop = bottom - container.clientHeight
   }, [expanded, active])
 
   return <div ref={root} className={`search-select${expanded ? ' is-open' : ''}`} onBlur={event => {
@@ -97,10 +109,10 @@ export default function SearchSelect({ label, value, options, onChange, disabled
         <ChevronDown size={16} className="search-select-chevron" aria-hidden="true" />
       </div>
     </div>
-    {expanded && <div ref={list} id={listId} role="listbox" aria-label={`${label}选项`} className="search-select-options" style={position} onMouseDown={event => event.preventDefault()}>
+    {expanded && createPortal(<div ref={list} id={listId} role="listbox" aria-label={`${label}选项`} className="search-select-options" style={position} onMouseDown={event => event.preventDefault()}>
       {choices.length ? choices.map((option, index) => <div key={option.id} id={`${listId}-${index}`} role="option" aria-selected={value === option.id} data-index={index} className={`search-select-option${index === active ? ' is-active' : ''}${option.id === value ? ' is-selected' : ''}`} onMouseEnter={() => setActive(index)} onClick={() => choose(option.id)}>
         <span>{option.name}</span>{option.id === value && <Check size={16} aria-hidden="true" />}
       </div>) : <div className="search-select-empty" role="status">未找到匹配项，请更换关键词</div>}
-    </div>}
+    </div>, root.current?.closest('dialog') || document.body)}
   </div>
 }

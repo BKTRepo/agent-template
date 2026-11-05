@@ -83,7 +83,7 @@ export interface DebugInput { conversation: string; documentText: string; docume
 export interface KnowledgeFile extends UploadedResource { sampleContent?: string; conversionJobId?: string; conversionStatus?: string; errorMessage?: string }
 export interface KnowledgeBase {
   source?: 'backend'; canEdit?: boolean; referenceCount?: number
-  id: string; name: string; version: string; description: string; tag: string
+  id: string; name: string; version: string; description: string; tag: string; tagName?: string
   team: string; scope: 'public' | 'team'; vectorized: boolean; model: string
   files: KnowledgeFile[]; updatedAt: string
   applicationIds?: string[]
