@@ -22,101 +22,34 @@ from services import DependAuth
 chat = APIRouter()
 
 
-@chat.post("/stream", summary="对话-流式问答")
-async def chat_stream(
-        req: ChatRequest,
-        current_user: User = DependAuth,
-        conversation_crud: ConversationCrud = Depends(get_conversation_crud),
-):
-    # 1. 准备阶段：同步操作，阻塞等待
-    conv, model_config, chat_history, knowledge_base_ids = (
-        await conversation_crud.prepare_for_chat(req, current_user)
-    )
-    conversation_id = conv.id
+@chat.post("/stream", summary="知识库问答-完整检索链路流式回答")
+async def chat_stream(req: ChatRequest, current_user: User = DependAuth,
+                      conversation_crud: ConversationCrud = Depends(get_conversation_crud)):
+    from applications.wrq.knowledge_base.services.query_service import start_query, replay
+    turn = await start_query(req, current_user, conversation_crud)
+    return EventSourceResponse(replay(turn.id, current_user.id))
 
-    # 2. 定义异步生成器：惰性执行，不立即运行
-    async def event_generator():
-        full_response = ""
-        full_reasoning = ""
-        usage_data = None
 
-        # 2.1 发送元数据事件（第一个事件）
-        yield {
-            "event": "meta",
-            "data": json.dumps({"type": "meta", "conversation_id": conversation_id}),
-        }
+@chat.get("/resume-query", summary="知识库问答-按任务编号恢复流式回答")
+async def resume_query(run_id: str = Query(..., min_length=1, max_length=32),
+                       after: int = Query(default=0, ge=0), current_user: User = DependAuth):
+    from applications.wrq.knowledge_base.models.query_model import KnowledgeQueryTurn
+    from applications.wrq.knowledge_base.services.query_service import replay
+    from fastapi import HTTPException
+    if not await KnowledgeQueryTurn.filter(id=run_id, owner_id=current_user.id).exists():
+        raise HTTPException(404, "问答任务不存在或无权限")
+    return EventSourceResponse(replay(run_id, current_user.id, after))
 
-        try:
-            # 2.2 流式生成内容（核心）
-            async for chunk in conversation_crud.stream_response(
-                    req.question,
-                    knowledge_base_ids,
-                    chat_history,
-                    model_config,
-                    enable_thinking=req.enable_thinking,
-            ):
-                if chunk.get("type") == "reasoning":
-                    token = chunk.get("content", "")
-                    full_reasoning += token
-                    yield {
-                        "event": "reasoning",
-                        "data": json.dumps({"type": "reasoning", "content": token}),
-                    }
-                elif chunk.get("type") == "content":
-                    token = chunk.get("content", "")
-                    full_response += token
-                    yield {
-                        "event": "token",
-                        "data": json.dumps({"type": "token", "content": token}),
-                    }
-                elif chunk.get("type") == "usage":
-                    usage_data = {
-                        "prompt_tokens": chunk.get("prompt_tokens"),
-                        "completion_tokens": chunk.get("completion_tokens"),
-                        "reasoning_tokens": chunk.get("reasoning_tokens"),
-                    }
-        except Exception as e:
-            print(f"[chat_stream] 错误: {e}")
-            # 2.3 错误处理
-            yield {
-                "event": "error",
-                "data": json.dumps({"type": "error", "message": str(e)}),
-            }
-            return
 
-        process_trace = []
-        if full_reasoning.strip():
-            process_trace.append(
-                ReasoningStep(content=full_reasoning, status="done").model_dump()
-            )
-
-        # 2.4 保存完整回复到数据库
-        try:
-            await conversation_crud.save_assistant_message(
-                conversation_id,
-                full_response,
-                prompt_tokens=usage_data.get("prompt_tokens") if usage_data else None,
-                completion_tokens=usage_data.get("completion_tokens") if usage_data else None,
-                reasoning_tokens=usage_data.get("reasoning_tokens") if usage_data else None,
-                process_trace=process_trace or None,
-            )
-        except Exception as e:
-            print(f"[chat_stream] 保存消息失败: {e}")
-
-        # 2.5 发送完成事件
-        done_payload = {"type": "done", "content": full_response}
-        if process_trace:
-            done_payload["process_trace"] = process_trace
-        if usage_data:
-            done_payload["usage"] = usage_data
-        yield {
-            "event": "done",
-            "data": json.dumps(done_payload),
-        }
-
-    # 3. 返回 SSE 响应
-    # EventSourceResponse 接收异步生成器，开始流式传输
-    return EventSourceResponse(event_generator())
+@chat.get("/get-query-detail", summary="知识库问答-查询本人检索证据和执行状态")
+async def query_detail(run_id: str = Query(..., min_length=1, max_length=32), current_user: User = DependAuth):
+    from applications.wrq.knowledge_base.models.query_model import KnowledgeQueryTurn
+    from fastapi import HTTPException
+    turn = await KnowledgeQueryTurn.get_or_none(id=run_id, owner_id=current_user.id)
+    if turn is None:
+        raise HTTPException(404, "问答任务不存在或无权限")
+    return SuccessResponse(data=dict(run_id=turn.id, status=turn.status, answer=turn.answer,
+                                    retrieval=turn.retrieval, error=turn.error))
 
 
 @chat.get("/users/{user_id}/conversation-stats", summary="对话-按用户分页查询统计详情")

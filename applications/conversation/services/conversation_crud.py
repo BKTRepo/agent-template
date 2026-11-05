@@ -4,7 +4,6 @@ from typing import AsyncIterator, List, Optional, Dict, Any
 from tortoise.query_utils import Prefetch
 
 from applications.agent.services.agent_crud import McpServerCrud, SkillCrud
-from applications.base.rag.chain import rag_stream
 from applications.base.services.scaffold import ScaffoldCrud
 from applications.conversation.models.conversation_model import Conversation, Message
 from applications.conversation.schemas.conversation_schema import (
@@ -287,23 +286,29 @@ class ConversationCrud(ScaffoldCrud[Conversation, ConversationCreate, Conversati
             chat_history: List[dict],
             model_config: Optional[ModelConfig],
             enable_thinking: bool = False,
+            current_user: Optional[User] = None,
     ) -> AsyncIterator[Dict[str, Any]]:
         """流式生成聊天回复"""
         llm_params = resolve_chat_llm_params(model_config)
-        effective_thinking = (
-                enable_thinking
-                and model_config is not None
-                and model_config.model_thinking
-        )
-
-        async for chunk in rag_stream(
-                question=question,
-                knowledge_base_ids=knowledge_base_ids,
-                chat_history=chat_history,
-                enable_thinking=effective_thinking,
-                **llm_params,
-        ):
-            yield chunk
+        from applications.wrq.knowledge import document_scope
+        from applications.wrq.knowledge_base.rag.scope import query_scope, model_connection
+        from applications.wrq.knowledge_base.rag.query import run_query, QueryParam
+        if current_user is None:
+            raise ValueError('知识库问答必须提供当前用户身份')
+        scope = await document_scope(current_user.id, knowledge_base_ids) if knowledge_base_ids else []
+        token = model_connection.set(llm_params)
+        try:
+            with query_scope(j for d in scope for j in d['jobs']):
+                result = await run_query(question, QueryParam(mode='hybrid' if scope else 'bypass',
+                    stream=True, conversation_history=chat_history, model=llm_params.get('model_name')))
+            yield dict(type='retrieval', data=result.raw_data)
+            if result.is_streaming and result.response_iterator:
+                async for chunk in result.response_iterator:
+                    yield dict(type='content', content=chunk)
+            else:
+                yield dict(type='content', content=result.content or '')
+        finally:
+            model_connection.reset(token)
 
     async def save_assistant_message(
             self,

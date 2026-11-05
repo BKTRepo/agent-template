@@ -1,0 +1,2212 @@
+# -*- coding: utf-8 -*-
+"""查询逻辑 — naive RAG 检索与 bypass 直通模式, 实现移植自 LightRAG 的 naive_query()。
+
+naive 模式流程:
+    1. 查询向量化 → 检索向量库 → 取 top_k 个分块
+    2. 计算动态 token 预算
+    3. 由分块生成引用列表
+    4. 按 token 预算截断分块
+    5. 构建上下文字符串 (JSON 分块 + 引用列表)
+    6. 构建系统提示词 (RAG_PROMPTS["naive_rag_response"])
+    7. 调用 LLM → 返回响应 (流式或非流式)
+
+bypass 模式完全跳过检索 — 直接与 LLM 对话。
+"""
+
+import asyncio
+import hashlib
+import json
+import math
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional, Set, Tuple, Union
+
+from configure import LOGGER
+from applications.wrq.knowledge_base.config import PROJECT_CONFIG
+from applications.wrq.knowledge_base.prompts import RAG_PROMPTS
+
+from applications.wrq.knowledge_base.rag.embedding import embed_texts
+from applications.wrq.knowledge_base.rag.llm import LLMTruncatedError, chat_completion
+from applications.wrq.knowledge_base.rag.rerank import rerank_chunks
+from applications.wrq.knowledge_base.rag.doc_recall import recall_doc_chunks
+from applications.wrq.knowledge_base.rag.memory import estimate_tokens, history_token_count
+from applications.wrq.knowledge_base.rag.query_rewriter import (
+    BilingualQuery,
+    resolve_query_with_history,
+    rewrite_query_bilingual,
+)
+from applications.wrq.knowledge_base.rag.subquery import DecomposeResult, decompose_query
+from applications.wrq.knowledge_base.rag.milvus_store import (
+    get_collection_stats,
+    hybrid_query_chunks,
+    query_neighbor_chunks,
+    query_chunks,
+)
+from applications.wrq.knowledge_base.rag.query_guidance import (
+    build_doc_filter,
+    recall_query_guidance,
+)
+from applications.wrq.knowledge_base.services.term_mapping_service import term_mapping_service
+from applications.wrq.knowledge_base.rag.scope import current_scope
+from .trace import stages, observed
+resolve_query_with_history = observed('history_resolution', resolve_query_with_history)
+rewrite_query_bilingual = observed('query_rewrite', rewrite_query_bilingual)
+decompose_query = observed('subquery', decompose_query)
+recall_doc_chunks = observed('document_recall', recall_doc_chunks)
+rerank_chunks = observed('rerank', rerank_chunks)
+
+# ==================== 数据结构 ====================
+
+
+@dataclass
+class QueryParam:
+    """查询参数, 与 LightRAG 的 QueryParam 保持兼容。"""
+
+    mode: str = "naive"  # "naive" | "bypass"
+    response_type: str = "Multiple Paragraphs"
+    stream: bool = False
+    chunk_top_k: Optional[int] = PROJECT_CONFIG.CHUNK_TOP_K  # naive 模式稠密检索条数
+    rrf_top_k: Optional[int] = PROJECT_CONFIG.RRF_TOP_K  # hybrid 模式 RRF 融合保留条数（重排候选池）
+    dense_top_k: Optional[int] = None  # 混合模式下单独的 dense top-k
+    bm25_top_k: Optional[int] = None  # 混合模式下单独的 bm25 top-k
+    max_total_tokens: int = PROJECT_CONFIG.MAX_TOTAL_TOKENS
+    conversation_history: List[Dict[str, str]] = field(default_factory=list)
+    # 滚动摘要（早期轮次压缩后的背景上下文）, 三模式统一注入 system 提示词
+    conversation_summary: str = ""
+    # L4 向量回忆: 按当前问题召回的本会话旧轮次（Q/A 文本）, 注入 system 提示词
+    conversation_recall: str = ""
+    user_prompt: Optional[str] = None
+    enable_cot: bool = True  # 思维链推理 (简单事实类查询可置 False)
+    enable_rerank: bool = True  # 默认开启重排: RRF 只融合排名不判相关性, 重排是精度闸门
+    only_need_context: bool = False
+    only_need_prompt: bool = False
+    temperature: Optional[float] = None
+    model: Optional[str] = None  # 指定生成模型（None 时用配置的 LLM_MODEL）
+
+
+@dataclass
+class QueryResult:
+    """统一查询结果, 与 LightRAG 的 QueryResult 保持兼容。"""
+
+    content: Optional[str] = None
+    response_iterator: Optional[AsyncIterator[str]] = None
+    raw_data: Optional[Dict[str, Any]] = None
+    is_streaming: bool = False
+
+
+@dataclass(frozen=True)
+class TechnicalConstraint:
+    """从问题中确定性抽取的技术字段约束。"""
+
+    field_no: str
+    code_value: str = ""
+    concept: str = "response"
+
+
+def _coerce_decompose_result(value: Any) -> DecomposeResult:
+    """兼容旧测试/插件返回 ``list[str]`` 的分解实现。"""
+    if isinstance(value, DecomposeResult):
+        return value
+    if isinstance(value, (list, tuple)):
+        items = [str(item).strip() for item in value if str(item).strip()]
+        return DecomposeResult(items, "compound" if items else "single", "legacy")
+    return DecomposeResult()
+
+
+_CN_FIELD_CODE_RE = re.compile(
+    r"(?P<field>\d{1,3}(?:\.\d+)?)\s*域.{0,36}?"
+    r"(?:返回(?:码)?|响应码|代码|取值|值|=|为)\s*"
+    r"(?P<code>[A-Z0-9]{1,6})",
+    re.IGNORECASE,
+)
+
+
+# Milvus 的 hybrid_search 在同一连接服务上并发执行多路中文/英文/子查询时，
+# 某些版本会偶发返回 ``unsupported ID type``。保留上层多路 embedding 并行，
+# 只把实际 hybrid_search 串行化，避免一条子查询失败吞掉整道题的候选池。
+_MILVUS_HYBRID_SEARCH_LOCK = asyncio.Lock()
+_EN_FIELD_CODE_RE = re.compile(
+    r"\b(?:field|de|f)\s*(?P<field>\d{1,3}(?:\.\d+)?)\b.{0,48}?"
+    r"\b(?:response\s+code|reason\s+code|processing\s+code|code|value)\s*[:=]?\s*"
+    r"(?P<code>[A-Z0-9]{1,6})\b",
+    re.IGNORECASE,
+)
+
+
+def _technical_concept(text: str) -> str:
+    lowered = text.casefold()
+    if "处理码" in text or "processing code" in lowered:
+        return "processing"
+    if "原因码" in text or "reason code" in lowered:
+        return "reason"
+    return "response"
+
+
+def _extract_technical_constraints(*texts: str) -> List[TechnicalConstraint]:
+    """抽取 Field/域号与代码值；处理码缺字段时按 ISO 8583 的 Field 3 展开。"""
+    combined = " ".join(text for text in texts if text)
+    concept = _technical_concept(combined)
+    found: List[TechnicalConstraint] = []
+    seen: Set[Tuple[str, str, str]] = set()
+    for pattern in (_CN_FIELD_CODE_RE, _EN_FIELD_CODE_RE):
+        for match in pattern.finditer(combined):
+            item = TechnicalConstraint(
+                field_no=match.group("field"),
+                code_value=match.group("code").upper(),
+                concept=concept,
+            )
+            identity = (item.field_no, item.code_value, item.concept)
+            if identity not in seen:
+                seen.add(identity)
+                found.append(item)
+    if not found and concept == "processing":
+        found.append(TechnicalConstraint(field_no="3", concept="processing"))
+    return found
+
+
+def _technical_retrieval_queries(
+        constraints: List[TechnicalConstraint],
+        original_query: str,
+) -> List[str]:
+    """构造不依赖 LLM 的字段精确查询分路。"""
+    labels = {
+        "processing": "Processing Code Transaction Type Code",
+        "reason": "Message Reason Code",
+        "response": "Response Code",
+    }
+    queries: List[str] = []
+    for item in constraints:
+        parts = [f"Field {item.field_no}", labels[item.concept]]
+        if item.code_value:
+            parts.append(item.code_value)
+        # 保留原问题中的业务词（例如 Balance Inquiry），但字段和代码不再依赖改写。
+        parts.append(original_query)
+        query = " ".join(parts)
+        if query not in queries:
+            queries.append(query)
+    return queries
+
+
+def _field_in_text(text: str, field_no: str) -> bool:
+    escaped = re.escape(field_no)
+    return bool(re.search(
+        rf"(?:\b(?:field|de|f)\s*{escaped}\b|\b{escaped}\s*域)",
+        text,
+        re.IGNORECASE,
+    ))
+
+
+def _code_in_text(text: str, code_value: str) -> bool:
+    if not code_value:
+        return False
+    return bool(re.search(
+        rf"(?<![A-Z0-9]){re.escape(code_value)}(?![A-Z0-9])",
+        text,
+        re.IGNORECASE,
+    ))
+
+
+def _technical_evidence_score(
+        text: str,
+        constraint: TechnicalConstraint,
+) -> int:
+    """只对可解释的字段/代码/概念共现加分，避免单独数字造成误提升。"""
+    lowered = text.casefold()
+    field_match = _field_in_text(text, constraint.field_no)
+    code_match = _code_in_text(text, constraint.code_value)
+    if constraint.concept == "processing":
+        concept_match = any(term in lowered for term in (
+            "processing code", "transaction type code", "处理码",
+        ))
+    elif constraint.concept == "reason":
+        concept_match = "reason code" in lowered or "原因码" in text
+    else:
+        concept_match = "response code" in lowered or "响应码" in text
+    table_match = "table" in lowered or "[表格" in text or "[代码表行]" in text
+    score = (4 if field_match else 0) + (5 if code_match else 0)
+    score += 2 if concept_match else 0
+    score += 1 if table_match else 0
+    # 有明确代码时必须同块/同窗口同时出现字段和代码，单独数字不算精确证据。
+    if constraint.code_value and not (field_match and code_match):
+        return 0
+    if not constraint.code_value and not (field_match and concept_match):
+        return 0
+    return score
+
+
+async def _augment_technical_candidates(
+        chunks: List[Dict[str, Any]],
+        constraints: List[TechnicalConstraint],
+) -> List[Dict[str, Any]]:
+    """为技术代码查询加入相邻上下文窗口，解决表头与代码行跨块。"""
+    if not chunks or not constraints:
+        return chunks
+    ranked_anchors: List[Tuple[int, int, Dict[str, Any]]] = []
+    for rank, chunk in enumerate(chunks):
+        content = str(chunk.get("content") or "")
+        anchor_score = 0
+        for constraint in constraints:
+            field_match = _field_in_text(content, constraint.field_no)
+            code_match = _code_in_text(content, constraint.code_value)
+            table_match = "table" in content.casefold() or "[表格" in content
+            anchor_score = max(
+                anchor_score,
+                (4 if field_match else 0) + (3 if code_match else 0) + (2 if table_match else 0),
+            )
+        if anchor_score:
+            ranked_anchors.append((anchor_score, -rank, chunk))
+    ranked_anchors.sort(key=lambda item: (-item[0], -item[1]))
+    anchors = [item[2] for item in ranked_anchors[:16]]
+    if not anchors:
+        return chunks
+    neighbors = await asyncio.to_thread(query_neighbor_chunks, anchors, 1, 16)
+    if not neighbors:
+        return chunks
+
+    by_position: Dict[Tuple[str, int], Dict[str, Any]] = {}
+    for chunk in [*chunks, *neighbors]:
+        doc_id = str(chunk.get("doc_id") or "")
+        try:
+            order = int(chunk.get("order", chunk.get("chunk_order_index")))
+        except (TypeError, ValueError):
+            continue
+        if doc_id:
+            by_position[(doc_id, order)] = chunk
+
+    existing_ids = {str(chunk.get("id") or chunk.get("chunk_id") or "") for chunk in chunks}
+    windows: List[Dict[str, Any]] = []
+    for anchor in anchors:
+        doc_id = str(anchor.get("doc_id") or "")
+        try:
+            order = int(anchor.get("order", anchor.get("chunk_order_index")))
+        except (TypeError, ValueError):
+            continue
+        parts = [
+            by_position[(doc_id, candidate_order)]
+            for candidate_order in range(max(0, order - 1), order + 2)
+            if (doc_id, candidate_order) in by_position
+        ]
+        if len(parts) < 2:
+            continue
+        from applications.wrq.knowledge_base.rag.section_context import section_label, SECTION_METADATA_KEYS
+        combined = "\n\n".join(
+            f"[源分块 {part.get('order', '')}；所属章节：{section_label(part)}]\n"
+            + str(part.get("content") or "") for part in parts
+        )
+        best_score = max(
+            (_technical_evidence_score(combined, constraint) for constraint in constraints),
+            default=0,
+        )
+        if best_score <= 0:
+            continue
+        first_order = min(int(part.get("order", order)) for part in parts)
+        last_order = max(int(part.get("order", order)) for part in parts)
+        window_id = f"{anchor.get('id') or anchor.get('chunk_id')}::context:{first_order}-{last_order}"
+        if window_id in existing_ids:
+            continue
+        existing_ids.add(window_id)
+        windows.append({
+            **anchor,
+            "id": window_id,
+            "chunk_id": window_id,
+            "content": f"[相邻分块上下文]\n{combined}",
+            "modality": "context_window",
+            "tokens": sum(int(part.get("tokens") or 0) for part in parts),
+            "_technical_evidence_score": best_score,
+            # A window can span multiple fields; never label all parts with the anchor's field.
+            **{key: ([] if key in ("section_path", "section_segments") else "")
+               for key in SECTION_METADATA_KEYS},
+            "section_status": "mixed",
+        })
+    return [*chunks, *windows]
+
+
+def _prioritize_technical_evidence(
+        chunks: List[Dict[str, Any]],
+        constraints: List[TechnicalConstraint],
+) -> List[Dict[str, Any]]:
+    """在 rerank 结果内把字段与代码同时命中的证据移到前面。"""
+    if not constraints:
+        return chunks
+    decorated = []
+    for rank, chunk in enumerate(chunks):
+        content = str(chunk.get("content") or "")
+        score = max(
+            [int(chunk.get("_technical_evidence_score") or 0)]
+            + [_technical_evidence_score(content, item) for item in constraints]
+        )
+        decorated.append((score, rank, chunk))
+    decorated.sort(key=lambda item: (-item[0], item[1]))
+    return [item[2] for item in decorated]
+
+
+async def _prepare_query_guidance(resolved_query: str) -> Tuple[Dict[str, Any], str, bool]:
+    """按开关准备查询经验指导，返回指导结果、过滤条件和影子模式标记。"""
+    should_recall = bool(
+        PROJECT_CONFIG.QUERY_MEMORY_ENABLED
+        and (
+            PROJECT_CONFIG.QUERY_MEMORY_SCOPED_SEARCH_ENABLED
+            or PROJECT_CONFIG.QUERY_MEMORY_SHADOW_MODE
+        )
+    )
+    guidance: Dict[str, Any] = {
+        "matched": False,
+        "matched_feedback_ids": [],
+        "feedback_scores": {},
+        "scope_doc_ids": [],
+        "fallback_reason": None,
+    }
+    if should_recall:
+        guidance = await recall_query_guidance(resolved_query)
+
+    candidate_filter = build_doc_filter(guidance.get("scope_doc_ids") or [])
+    guidance_shadow_mode = bool(
+        PROJECT_CONFIG.QUERY_MEMORY_SHADOW_MODE and candidate_filter
+    )
+    # 影子模式只保留观测数据，不把范围传给真实检索。
+    guidance_filter = (
+        candidate_filter
+        if PROJECT_CONFIG.QUERY_MEMORY_SCOPED_SEARCH_ENABLED and not guidance_shadow_mode
+        else ""
+    )
+    return guidance, guidance_filter, guidance_shadow_mode
+
+
+# ==================== Token 预算 (基于字符数估算 — 不依赖真实分词器) ====================
+
+_CHARS_PER_TOKEN = 1.8  # 中英文混合文本的保守估算 (每个 token 约 1.5-2.0 个汉字)
+
+
+def _estimate_tokens(text: str) -> int:
+    """粗略估算中英文混合文本的 token 数。"""
+    return max(1, int(len(text) / _CHARS_PER_TOKEN))
+
+
+def _compute_token_budget(
+        sys_prompt_template: str,
+        response_type: str,
+        user_prompt: Optional[str],
+        query: str,
+        max_total_tokens: int,
+        history_tokens: int = 0,
+        summary_tokens: int = 0,
+) -> int:
+    """扣除固定开销后, 返回可供分块使用的 token 数。
+
+    与 LightRAG 的做法一致:
+    1. 用空内容占位符格式化系统提示词
+    2. 从总预算中减去 系统提示词 + 查询 + 历史窗口 + 滚动摘要 + 200 token 缓冲
+
+    历史窗口与滚动摘要都会注入 LLM、同样消耗上下文, 必须计入预算,
+    否则长对话会让"系统提示 + 分块 + 摘要 + 历史 + 查询"总和超出上下文窗口。
+    """
+    user_prompt_str = f"\n\n{user_prompt}" if user_prompt else "n/a"
+    pre_sys_prompt = sys_prompt_template.format(
+        response_type=response_type,
+        user_prompt=user_prompt_str,
+        content_data="",  # 计算开销时置空
+    )
+    sys_prompt_tokens = _estimate_tokens(pre_sys_prompt)
+    query_tokens = _estimate_tokens(query)
+    buffer_tokens = 200
+    available = max_total_tokens - (
+        sys_prompt_tokens + query_tokens + history_tokens + summary_tokens + buffer_tokens
+    )
+    return max(available, 1200)  # 保底预算
+
+
+# ==================== 向量上下文检索 ====================
+
+
+async def _get_vector_context(
+        query: str,
+        top_k: int,
+        query_vecs: Optional[List[List[float]]] = None,
+) -> List[Dict[str, Any]]:
+    """从向量库检索文本分块 (仅稠密向量)。
+
+    :param query_vecs: 预计算的查询向量（多路召回共享主查询嵌入, 避免重复
+        嵌入调用）; 缺省时当场嵌入。
+    """
+    if query_vecs is None:
+        # quick 模式: 查询与文档嵌入共享同一 API Key, 大文档嵌入打满 TPM
+        # 配额时查询嵌入会撞 429——快速失败（3 次短等待）而非挂死数分钟
+        query_vecs = await embed_texts([query], quick=True)
+    # 同步检索移交线程池（见后端导入处注释）
+    return await asyncio.to_thread(query_chunks, query_vecs, top_k=top_k)
+
+
+async def _warn_if_store_unreachable(context: str) -> None:
+    """检索零命中但向量库非空 → 判定为存储层故障并告警。
+
+    稠密检索对非空库必然返回 top_k 个最近邻（无相似度阈值过滤）,
+    因此"库非空却零命中"只会发生在存储层异常（RPC 失败/超时被
+    query_chunks 内部吞为空列表）时——与"查询确实不相关"区分开,
+    避免检索静默退化为无上下文问答而无人察觉。
+    """
+    try:
+        stats = await asyncio.to_thread(get_collection_stats)
+        count = stats.get("chunk_count", 0)
+        if count > 0:
+            LOGGER.warning(
+                f"{context}: 向量库存在 {count} 个分块但检索零命中, "
+                f"疑似向量库访问故障（RPC 失败/超时）, 请检查 Worker 与 Milvus 状态"
+            )
+    except Exception:
+        pass  # 诊断逻辑自身失败不得影响主流程
+
+
+# ==================== 混合检索 (Milvus Dense + 内置 BM25 → RRF) ====================
+
+
+def _rrf_merge(
+        ranked_lists: List[List[Dict[str, Any]]],
+        top_k: int,
+        k: int = 60,
+) -> List[Dict[str, Any]]:
+    """倒数排名融合 (RRF) — 将任意数量的排名列表合并为一个。
+
+    RRF score(d) = Σ 1/(k + rank_i(d))
+
+    双通道召回下同一分块可能同时被 dense 与 BM25 命中,
+    多列表命中时分数累加——双通道一致的块排名更高、更可信。
+    """
+    scores: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+
+    for list_idx, ranked in enumerate(ranked_lists):
+        for rank, c in enumerate(ranked):
+            cid = c.get("id") or f"noid-{list_idx}-{rank}"
+            rrf = 1.0 / (k + rank + 1)
+            if cid in scores:
+                old_rrf, old_c = scores[cid]
+                old_c["_rrf_score"] = old_rrf + rrf
+                scores[cid] = (old_rrf + rrf, old_c)
+            else:
+                c_copy = dict(c)
+                c_copy["_rrf_score"] = rrf
+                scores[cid] = (rrf, c_copy)
+
+    merged = sorted(scores.values(), key=lambda x: -x[0])
+
+    # 去重: 优先用 chunk ID（dense 与 BM25 来自同一向量库, ID 一致）,
+    # ID 不可用时回退到内容前 200 字符哈希
+    seen_ids: Set[str] = set()
+    seen_hashes: Set[str] = set()
+    deduped: List[Dict[str, Any]] = []
+    for item in merged[:top_k * 2]:  # 多取一些以补偿去重造成的缺口
+        c = item[1]
+        cid = c.get("id", "")
+        if cid:
+            if cid in seen_ids:
+                continue
+            seen_ids.add(cid)
+            deduped.append(c)
+        else:
+            content_hash = hashlib.md5(
+                c.get("content", "")[:200].encode()
+            ).hexdigest()
+            if content_hash not in seen_hashes:
+                seen_hashes.add(content_hash)
+                deduped.append(c)
+        if len(deduped) >= top_k:
+            break
+
+    return deduped
+
+
+def _blend_guided_candidates(
+        global_chunks: List[Dict[str, Any]],
+        guided_chunks: List[Dict[str, Any]],
+        guided_doc_ids: List[str],
+        top_k: int,
+) -> List[Dict[str, Any]]:
+    """历史范围适度加权，同时预留全库其他文档进入统一重排的机会。"""
+    scores: Dict[str, float] = {}
+    chunks: Dict[str, Dict[str, Any]] = {}
+    guided_docs = set(guided_doc_ids)
+
+    def key(chunk: Dict[str, Any]) -> str:
+        chunk_id = chunk.get("id") or chunk.get("chunk_id")
+        if chunk_id is not None:
+            return str(chunk_id)
+        content = str(chunk.get("content") or "")
+        return f"{chunk.get('doc_id', '')}:{hashlib.sha256(content.encode()).hexdigest()}"
+
+    for ranked, weight in (
+        (global_chunks, 1.0),
+        (guided_chunks, PROJECT_CONFIG.QUERY_MEMORY_GUIDED_WEIGHT),
+    ):
+        for rank, chunk in enumerate(ranked, start=1):
+            identity = key(chunk)
+            scores[identity] = scores.get(identity, 0.0) + weight / (60 + rank)
+            chunks.setdefault(identity, chunk)
+
+    ordered = sorted(scores, key=lambda identity: (-scores[identity], identity))
+    selected = ordered[:top_k]
+    # 只对全库召回中、历史范围之外的文档保留名额。若全库没有这类
+    # 文档，不强塞无关结果；重排仍可按当前问题过滤所有候选。
+    outside = [
+        key(chunk) for chunk in global_chunks
+        if chunk.get("doc_id") and chunk["doc_id"] not in guided_docs
+    ]
+    reserved = list(dict.fromkeys(outside))[:min(
+        len(outside), max(0, min(top_k - 1, math.ceil(
+            top_k * PROJECT_CONFIG.QUERY_MEMORY_GLOBAL_MIN_RATIO
+        ))),
+    )]
+    for identity in reserved:
+        if identity in selected:
+            continue
+        if len(selected) < top_k:
+            selected.append(identity)
+        else:
+            replace = next(
+                (candidate for candidate in reversed(selected) if candidate not in reserved),
+                None,
+            )
+            if replace is not None:
+                selected.remove(replace)
+                selected.append(identity)
+    selected.sort(key=lambda identity: (-scores[identity], identity))
+    return [dict(chunks[identity], _rrf_score=scores[identity]) for identity in selected]
+
+
+async def _retrieve_with_guidance(
+        retrieve: Callable[[str], Awaitable[List[Dict[str, Any]]]],
+        *,
+        guidance_filter: str,
+        guided_doc_ids: List[str],
+        top_k: int,
+) -> Tuple[List[Dict[str, Any]], bool, Optional[str], int, int]:
+    """全库和历史范围都召回候选，合并后交给同一次 Rerank。"""
+    if not guidance_filter:
+        global_chunks = await retrieve("")
+        return global_chunks, False, None, 0, len(global_chunks)
+
+    global_result, guided_result = await asyncio.gather(
+        retrieve(""), retrieve(guidance_filter), return_exceptions=True,
+    )
+    if isinstance(global_result, BaseException):
+        LOGGER.warning("全库检索失败，使用历史范围候选: %s", global_result)
+        global_chunks = []
+    else:
+        global_chunks = global_result
+    if isinstance(guided_result, BaseException):
+        LOGGER.warning("历史范围检索失败，使用全库候选: %s", guided_result)
+        guided_chunks = []
+        fallback_reason = "guided_search_failed"
+    else:
+        guided_chunks = guided_result
+        fallback_reason = "no_scoped_chunks" if not guided_chunks else None
+
+    if global_chunks and guided_chunks:
+        chunks = _blend_guided_candidates(
+            global_chunks, guided_chunks, guided_doc_ids, top_k,
+        )
+    else:
+        chunks = global_chunks or guided_chunks
+    return chunks, bool(guided_chunks), fallback_reason, len(guided_chunks), len(global_chunks)
+
+
+async def _retrieve_ranked_lists(
+        queries: List[str],
+        *,
+        english_query: str = "",
+        fusion_top_k: int,
+        dense_top_k: int,
+        bm25_top_k: int,
+        enable_doc_recall: bool = False,
+        filter_expr: str = "",
+) -> List[List[Dict[str, Any]]]:
+    """多查询并行调用 Milvus Dense + 双语 BM25 + RRF 混合检索。
+
+    主查询同时走中文/英文 BM25，子查询走 Dense + 自身词项 BM25；文档级
+    召回仍用主查询向量匹配摘要，并作为独立候选列表参与外层 RRF。
+
+    :param queries: 检索查询集合, ``queries[0]`` 为主查询（改写后原句）,
+        其余为子查询分解产物。
+    """
+    ranked_lists: List[List[Dict[str, Any]]] = []
+
+    # 主查询嵌入只算一次: Dense 召回与文档级召回（摘要余弦）共享
+    main_vecs = await embed_texts([queries[0]], quick=True)
+
+    async def _hybrid_and_collect(
+            q: str,
+            vecs: List[List[float]],
+            english: str = "",
+            retrieval_query: str = "",
+    ) -> None:
+        async with _MILVUS_HYBRID_SEARCH_LOCK:
+            chunks = await asyncio.to_thread(
+                hybrid_query_chunks,
+                vecs,
+                q,
+                english,
+                top_k=fusion_top_k,
+                dense_top_k=dense_top_k,
+                bm25_top_k=bm25_top_k,
+                filter_expr=filter_expr,
+            )
+        if chunks:
+            ranked_lists.append([
+                {**chunk, "_retrieval_query": retrieval_query or q}
+                for chunk in chunks
+            ])
+
+    async def _embed_and_hybrid(q: str) -> None:
+        vecs = await embed_texts([q], quick=True)
+        await _hybrid_and_collect(q, vecs)
+
+    async def _doc_recall_and_collect() -> None:
+        chunks = await recall_doc_chunks(main_vecs)
+        if chunks:
+            ranked_lists.append([
+                {**chunk, "_retrieval_query": "__doc_recall__"}
+                for chunk in chunks
+            ])
+
+    tasks: List[asyncio.Task[None]] = [
+        asyncio.create_task(_hybrid_and_collect(queries[0], main_vecs, english_query, queries[0])),
+    ]
+    for q in queries[1:]:
+        tasks.append(asyncio.create_task(_embed_and_hybrid(q)))
+    if enable_doc_recall:
+        tasks.append(asyncio.create_task(_doc_recall_and_collect()))
+    await asyncio.gather(*tasks)
+
+    return ranked_lists
+
+
+def _merge_retrieval_queries(main_query: str, sub_queries: List[str]) -> List[str]:
+    """检索查询集合 = 主查询 + 子查询（去重、去空）。
+
+    保留主查询是对分解质量的兜底: 分解不当也不会丢失原始召回面。
+    """
+    queries = [main_query]
+    for s in sub_queries or []:
+        s = (s or "").strip()
+        if s and s not in queries:
+            queries.append(s)
+    return queries
+
+
+def _subquery_terms(text: str) -> Set[str]:
+    terms = {
+        item.casefold()
+        for item in re.findall(r"[A-Za-z][A-Za-z0-9_.-]{1,}|\d+(?:\.\d+)?", text or "")
+        if item.casefold() not in {"field", "code"}
+    }
+    cleaned = re.sub(
+        r"如何|怎么|是什么|哪些|分别|说明|作用|关系|规则|机制|条件|处理|识别|查询|使用|是否|参与|相关|问题",
+        " ",
+        text or "",
+    )
+    terms.update(item for item in re.findall(r"[\u4e00-\u9fff]{2,}", cleaned))
+    return terms
+
+
+def _candidate_identity(chunk: Dict[str, Any]) -> str:
+    return str(chunk.get("id") or chunk.get("reference_id") or chunk.get("content", "")[:80])
+
+
+def _subquery_anchor_count(subquery: str, content: str) -> int:
+    haystack = (content or "").casefold()
+    return sum(1 for term in _subquery_terms(subquery) if term and term in haystack)
+
+
+def _subquery_qualifier_compatible(subquery: str, content: str) -> bool:
+    """避免 CPS/非CPS 等互斥限定词仅因共享主体而被误判为同一证据。"""
+    query_text = (subquery or "").casefold()
+    content_text = (content or "").casefold()
+    query_non_cps = bool(re.search(r"(?:非|non[-\s]?)cps", query_text))
+    content_non_cps = bool(re.search(r"(?:非|non[-\s]?)cps", content_text))
+    if "cps" in query_text and "cps" in content_text and query_non_cps != content_non_cps:
+        return False
+    return True
+
+
+def _candidate_score(chunk: Dict[str, Any]) -> float:
+    for key in ("rerank_score", "_subquery_score", "score", "_rrf_score"):
+        value = chunk.get(key)
+        if value is not None:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+    return 0.0
+
+
+def _store_per_query_candidates(
+        target: Dict[str, List[Dict[str, Any]]],
+        ranked_lists: List[List[Dict[str, Any]]],
+        sub_queries: List[str],
+) -> None:
+    """在全局融合/过滤前，按子问题保存各自 top 候选。"""
+    top_k = int(getattr(PROJECT_CONFIG, "SUBQUERY_CANDIDATE_TOP_K", 3))
+    query_ids = {query: f"q{i + 1}" for i, query in enumerate(sub_queries)}
+    for ranked in ranked_lists:
+        if not ranked:
+            continue
+        retrieval_query = str(ranked[0].get("_retrieval_query") or "")
+        query_id = query_ids.get(retrieval_query)
+        if not query_id:
+            continue
+        bucket = target.setdefault(query_id, [])
+        existing = {_candidate_identity(item) for item in bucket}
+        for rank, item in enumerate(ranked[:top_k], 1):
+            identity = _candidate_identity(item)
+            if identity in existing:
+                continue
+            clone = dict(item)
+            clone.update({
+                "_subquery_id": query_id,
+                "_subquery_query": retrieval_query,
+                "_subquery_rank": rank,
+                "_subquery_score": _candidate_score(item),
+            })
+            bucket.append(clone)
+            existing.add(identity)
+        bucket.sort(key=lambda item: (int(item.get("_subquery_rank", 999)), -_candidate_score(item)))
+        del bucket[top_k:]
+
+
+def _subquery_supporting_chunks(
+        subquery: str,
+        chunks: List[Dict[str, Any]],
+        candidates: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """标记子问题对应的最终证据。
+
+    子问题自己的召回候选已经经过向量/BM25/RRF/rerank，不能再要求单个
+    分块同时包含字段、代码和完整业务含义。表格正文可能跨相邻分块，
+    因此这里采用软判断：候选属于该子问题即可计入覆盖；字段/代码和
+    关键词只作为额外的可解释信号。仅保留 CPS/非 CPS 这类明确互斥
+    条件的保护，避免把相反限定词的证据混用。
+    """
+    constraints = _extract_technical_constraints(subquery)
+    candidate_ids = {_candidate_identity(item) for item in candidates}
+    supported: List[Dict[str, Any]] = []
+    for chunk in chunks:
+        content = chunk.get("content", "") or ""
+        if not _subquery_qualifier_compatible(subquery, content):
+            continue
+        # 子问题自己的候选已由检索链路排序，直接计入覆盖，不再用单块
+        # 字段+代码硬门槛把跨块表格证据挡掉。
+        if _candidate_identity(chunk) in candidate_ids:
+            supported.append(chunk)
+            continue
+        if constraints and any(
+            _field_in_text(content, item.field_no)
+            and (not item.code_value or _code_in_text(content, item.code_value))
+            for item in constraints
+        ):
+            supported.append(chunk)
+            continue
+        # 非子问题候选仍允许通过关键词提供软覆盖；不再要求两个锚点。
+        if _subquery_anchor_count(subquery, content) >= 1:
+            supported.append(chunk)
+    return supported
+
+
+def _backfill_subquery_candidates(
+        chunks: List[Dict[str, Any]],
+        per_query_candidates: Dict[str, List[Dict[str, Any]]],
+        sub_queries: List[str],
+        max_total: int,
+        top_k: int,
+        technical_constraints: Optional[List[TechnicalConstraint]] = None,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """为未覆盖子问题有限回填候选，且不绕过独立安全门槛。"""
+    min_required = int(getattr(PROJECT_CONFIG, "SUBQUERY_MIN_FINAL_CHUNKS", 1))
+    support: Dict[str, List[Dict[str, Any]]] = {
+        f"q{i + 1}": _subquery_supporting_chunks(
+            q, chunks, per_query_candidates.get(f"q{i + 1}", []),
+        )
+        for i, q in enumerate(sub_queries)
+    }
+    coverage = {query_id: len(items) >= min_required for query_id, items in support.items()}
+    states: Dict[str, Dict[str, Any]] = {
+        f"q{i + 1}": {
+            "query": query,
+            "status": "direct" if coverage.get(f"q{i + 1}") else "evidence_insufficient",
+            "evidence_count": len(support.get(f"q{i + 1}", [])),
+            "evidence_ids": [_candidate_identity(item) for item in support.get(f"q{i + 1}", [])],
+        }
+        for i, query in enumerate(sub_queries)
+    }
+    added: List[Dict[str, Any]] = []
+    if not PROJECT_CONFIG.SUBQUERY_QUOTA_BACKFILL_ENABLED or not sub_queries:
+        return chunks, {"coverage": coverage, "states": states, "count": 0}
+    identities = {_candidate_identity(item) for item in chunks}
+    for index, subquery in enumerate(sub_queries):
+        query_id = f"q{index + 1}"
+        if coverage[query_id] or len(added) >= min(max_total, PROJECT_CONFIG.SUBQUERY_BACKFILL_MAX_TOTAL):
+            continue
+        candidates = [
+            item for item in per_query_candidates.get(query_id, [])
+            if _candidate_identity(item) not in identities
+        ]
+        if not candidates:
+            states[query_id]["reason"] = "no_subquery_candidate"
+            continue
+        candidates.sort(key=lambda item: (int(item.get("_subquery_rank", 999)), -_candidate_score(item)))
+        selected = candidates[0]
+        content = selected.get("content", "") or ""
+        if not _subquery_qualifier_compatible(subquery, content):
+            states[query_id]["reason"] = "conflicting_business_qualifier"
+            continue
+        # 候选来自该子问题自己的检索结果，已经经过统一排序；不要再以
+        # 单分块字段/代码共现作为硬门槛，否则表格跨块证据无法回填。
+        # SUBQUERY_BACKFILL_REQUIRE_ANCHOR / MIN_SCORE 保留配置字段仅为兼容
+        # 旧 .env，但不再阻止子问题候选进入上下文。
+        clone = dict(selected)
+        clone.update({
+            "quota_backfill": True,
+            "backfill_query_id": query_id,
+            "backfill_reason": "subquery_not_covered",
+            "passed_global_threshold": False,
+            "passed_backfill_guard": True,
+            "_matched_query_ids": [query_id],
+        })
+        added.append(clone)
+        identities.add(_candidate_identity(clone))
+        coverage[query_id] = True
+        states[query_id].update({
+            "status": "backfilled",
+            "evidence_count": 1,
+            "evidence_ids": [_candidate_identity(clone)],
+            "reason": "subquery_not_covered",
+        })
+    # 正常重排结果优先；窗口已满时只替换末尾普通块，绝不挤掉精确字段/代码块。
+    result = list(chunks)
+    for item in added:
+        if len(result) < top_k:
+            result.append(item)
+            continue
+        replace_at = next(
+            (
+                i for i in range(len(result) - 1, -1, -1)
+                if not any(
+                    _technical_evidence_score(result[i].get("content", ""), constraint) > 0
+                    for constraint in (technical_constraints or [])
+                )
+            ),
+            None,
+        )
+        if replace_at is not None:
+            result[replace_at] = item
+    return result, {"coverage": coverage, "states": states, "count": len(added)}
+
+
+def _annotate_subquery_matches(
+        chunks: List[Dict[str, Any]],
+        per_query_candidates: Dict[str, List[Dict[str, Any]]],
+        sub_queries: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    identity_queries: Dict[str, Set[str]] = {}
+    for query_id, candidates in per_query_candidates.items():
+        for candidate in candidates:
+            identity_queries.setdefault(_candidate_identity(candidate), set()).add(query_id)
+    annotated: List[Dict[str, Any]] = []
+    for chunk in chunks:
+        clone = dict(chunk)
+        matched = set(clone.get("_matched_query_ids") or [])
+        matched.update(identity_queries.get(_candidate_identity(clone), set()))
+        for index, subquery in enumerate(sub_queries or []):
+            query_id = f"q{index + 1}"
+            if _subquery_supporting_chunks(
+                subquery, [clone], per_query_candidates.get(query_id, []),
+            ):
+                matched.add(query_id)
+        if matched:
+            clone["_matched_query_ids"] = sorted(matched)
+        annotated.append(clone)
+    return annotated
+
+
+def _refresh_subquery_info(
+        chunks: List[Dict[str, Any]],
+        per_query_candidates: Dict[str, List[Dict[str, Any]]],
+        sub_queries: List[str],
+        previous: Dict[str, Any],
+) -> Dict[str, Any]:
+    """token 截断后重新核验，避免已回填证据又被预算删除。"""
+    min_required = int(getattr(PROJECT_CONFIG, "SUBQUERY_MIN_FINAL_CHUNKS", 1))
+    coverage: Dict[str, bool] = {}
+    states: Dict[str, Dict[str, Any]] = {}
+    for index, subquery in enumerate(sub_queries):
+        query_id = f"q{index + 1}"
+        supporting = _subquery_supporting_chunks(
+            subquery, chunks, per_query_candidates.get(query_id, []),
+        )
+        covered = len(supporting) >= min_required
+        coverage[query_id] = covered
+        is_backfill = any(
+            item.get("quota_backfill") and item.get("backfill_query_id") == query_id
+            for item in supporting
+        )
+        old_state = (previous.get("states") or {}).get(query_id, {})
+        states[query_id] = {
+            "query": subquery,
+            "status": (
+                "backfilled" if covered and is_backfill
+                else "direct" if covered
+                else "evidence_insufficient"
+            ),
+            "evidence_count": len(supporting),
+            "evidence_ids": [_candidate_identity(item) for item in supporting],
+        }
+        if not covered:
+            states[query_id]["reason"] = old_state.get("reason") or "removed_by_context_budget"
+    return {"coverage": coverage, "states": states, "count": previous.get("count", 0)}
+
+
+def _per_query_candidate_snapshot(
+        per_query_candidates: Dict[str, List[Dict[str, Any]]],
+        final_chunks: List[Dict[str, Any]],
+) -> Dict[str, List[Dict[str, Any]]]:
+    """保留足以区分“未召回/被淘汰/已入上下文”的轻量诊断轨迹。"""
+    final_ids = {_candidate_identity(item) for item in final_chunks}
+    return {
+        query_id: [
+            {
+                "id": _candidate_identity(item),
+                "rank": item.get("_subquery_rank"),
+                "score": round(_candidate_score(item), 6),
+                "doc_id": item.get("doc_id", ""),
+                "content_excerpt": (item.get("content", "") or "")[:2000],
+                "entered_final_context": _candidate_identity(item) in final_ids,
+            }
+            for item in candidates
+        ]
+        for query_id, candidates in per_query_candidates.items()
+    }
+
+
+async def _get_hybrid_context(
+        query: BilingualQuery,
+        merge_top_k: int,
+        *,
+        dense_top_k: Optional[int] = None,
+        bm25_top_k: Optional[int] = None,
+        sub_queries: Optional[List[str]] = None,
+        quota_sub_queries: Optional[List[str]] = None,
+        filter_expr: str = "",
+        candidate_pool: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+) -> List[Dict[str, Any]]:
+    """混合检索: 多查询 × 双通道（Dense + BM25）+ 文档级召回 → RRF 融合。
+
+    只用改写后的查询检索（口语原文与文档词汇脱节, 召回会引入噪声）;
+    Dense 擅长语义泛化, BM25 擅长精确关键词, 文档级召回补位被 top-k
+    稀释掉的涉及文档, 全部候选经 RRF 融合为统一候选池。
+
+    :param query: 主查询（含中文/英文分路检索词）。
+    :param merge_top_k: RRF 融合后返回的分块数。
+    :param dense_top_k: 每路稠密检索取多少分块。
+    :param bm25_top_k: 每路 BM25 检索取多少分块。
+    :param sub_queries: 子查询分解产物; 每面独立走双通道召回。
+    """
+    dk = dense_top_k or PROJECT_CONFIG.HYBRID_DENSE_TOP_K
+    bk = bm25_top_k or PROJECT_CONFIG.HYBRID_BM25_TOP_K
+
+    queries = _merge_retrieval_queries(query.primary_query, sub_queries or [])
+    ranked_lists = await _retrieve_ranked_lists(
+        queries,
+        english_query=query.english_query,
+        fusion_top_k=merge_top_k,
+        dense_top_k=dk,
+        bm25_top_k=bk,
+        enable_doc_recall=PROJECT_CONFIG.DOC_RECALL_ENABLED and not filter_expr,
+        filter_expr=filter_expr,
+    )
+
+    # 至少有一路命中
+    if not ranked_lists:
+        return []
+
+    if candidate_pool is not None:
+        _store_per_query_candidates(
+            candidate_pool, ranked_lists,
+            quota_sub_queries if quota_sub_queries is not None else (sub_queries or []),
+        )
+
+    # RRF 融合全部候选列表（dense/bm25/定向注入一视同仁）
+    return _rrf_merge(ranked_lists, merge_top_k)
+
+
+# ==================== 分块截断 ====================
+
+
+def _truncate_chunks_by_tokens(
+        chunks: List[Dict[str, Any]],
+        max_tokens: int,
+        doc_max_share: float = 1.0,
+) -> List[Dict[str, Any]]:
+    """按 token 预算保留分块, 累计超出 max_tokens 时停止。
+
+    每个分块按 JSON 序列化后估算, 与 LLM 上下文字符串中的实际格式一致。
+
+    单文档预算封顶（多文档联合检索保障）: 单个文档占用不得超过
+    ``max_tokens × doc_max_share``, 超限分块进入延迟队列, 待其余文档分块
+    按序消耗后以剩余预算按原序回填——
+    - 单文档查询: 无其他文档竞争, 回填后结果与无封顶的顺序截断完全一致;
+    - 多文档查询: 主导文档不再霸占窗口, 问题涉及的其他文档分块得以进入
+      上下文。被延迟的分块均已通过重排相关性闸门, 回填不引入新噪声,
+      只在已验证的证据之间重新分配预算。
+    doc_max_share ≥ 1.0 时关闭封顶, 退化为纯顺序截断（旧行为）。
+    """
+    doc_budget: Optional[int] = (
+        None if doc_max_share >= 1.0 else max(int(max_tokens * doc_max_share), 0)
+    )
+
+    def _chunk_tokens(c: Dict[str, Any]) -> int:
+        serialized = json.dumps(
+            {"reference_id": c.get("reference_id", ""), "content": c["content"]},
+            ensure_ascii=False,
+        )
+        return _estimate_tokens(serialized)
+
+    kept: List[Dict[str, Any]] = []
+    deferred: List[Dict[str, Any]] = []
+    doc_spent: Dict[str, int] = {}
+    total = 0
+    for c in chunks:
+        chunk_tokens = _chunk_tokens(c)
+        if total + chunk_tokens > max_tokens:
+            break
+        fp = _chunk_doc_key(c)
+        if (
+            doc_budget is not None
+            and fp
+            and doc_spent.get(fp, 0) + chunk_tokens > doc_budget
+        ):
+            deferred.append(c)  # 超出本文档预算上限, 待剩余预算回填
+            continue
+        kept.append(c)
+        total += chunk_tokens
+        if fp:
+            doc_spent[fp] = doc_spent.get(fp, 0) + chunk_tokens
+
+    # 回填: 被封顶延迟的分块按原相关性序消耗剩余预算
+    for c in deferred:
+        chunk_tokens = _chunk_tokens(c)
+        if total + chunk_tokens > max_tokens:
+            break
+        kept.append(c)
+        total += chunk_tokens
+
+    return kept
+
+
+# ==================== 文档级相关性聚合（动态加权的基础） ====================
+
+# 相关性档位阈值（doc_score → 提示词级权重提示, 仅达标档位注入引用列表）
+_DOC_TIER_HIGH = 0.8
+_DOC_TIER_MID = 0.6
+
+
+def _chunk_doc_key(chunk: Dict[str, Any]) -> str:
+    """分块的文档身份键（引用分组 / 预算封顶核算 / 上下文排序共用）。"""
+    fp = chunk.get("file_path", "") or chunk.get("file_name", "")
+    return "" if fp == "unknown_source" else fp
+
+
+def _aggregate_doc_scores(chunks: List[Dict[str, Any]]) -> Dict[str, float]:
+    """将分块级 rerank 分数聚合为文档级相关性（查询条件下的动态权重）。
+
+    doc_score = 0.7 × 该文档最高分块 + 0.3 × top-3 均值: 最高分捕捉"强命中",
+    top-3 均值奖励"证据一致"（单块擦边与多块相关应当区分开）。仅统计带
+    rerank_score 的分块——重排关闭/失败回退时全部无分, 引用排序退化为
+    传统频次排序（行为与旧版一致）。
+    """
+    per_doc: Dict[str, List[float]] = {}
+    for c in chunks:
+        s = c.get("rerank_score")
+        if s is None:
+            continue
+        fp = _chunk_doc_key(c)
+        if fp:
+            per_doc.setdefault(fp, []).append(float(s))
+
+    scores: Dict[str, float] = {}
+    for fp, ss in per_doc.items():
+        ss.sort(reverse=True)
+        top3 = ss[:3]
+        scores[fp] = 0.7 * ss[0] + 0.3 * (sum(top3) / len(top3))
+    return scores
+
+
+def _relevance_tier(score: Optional[float]) -> Optional[str]:
+    """doc_score → 相关性档位标签（未达标返回 None, 不标注）。"""
+    if score is None:
+        return None
+    if score >= _DOC_TIER_HIGH:
+        return "高度相关"
+    if score >= _DOC_TIER_MID:
+        return "相关"
+    return None
+
+
+# ==================== 引用列表生成 ====================
+
+
+def _generate_reference_list(
+        chunks: List[Dict[str, Any]],
+        doc_scores: Optional[Dict[str, float]] = None,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """由分块生成引用列表（按文档相关性降序）, 并为分块标注 reference_id。
+
+    排序依据: 有 doc_score 的文档按分数降序（动态权重决定来源展示与上下文
+    排位）, 无分数的（重排关闭/失败回退）退回频次降序且整体排在有分数文档
+    之后; 稳定排序保证同档内保持首次出现顺序。
+
+    注意: 此处刻意不做"低占比文档剔除"——能走到这里的分块均已通过重排
+    相关性闸门（RERANK_MIN_SCORE）与 token 预算截断, 噪声在检索侧重排环节
+    控制, 引用层不再二次过滤。多文档联合检索场景下问题涉及的每份文档占比
+    天然偏低（3 份文档各约 33%, 4 份各约 25%）, 占比阈值会把它们整体抹掉,
+    导致文档明明被检索到、用户却看不到来源。
+
+    :return: (reference_list, chunks_with_ref_ids)
+        - reference_list: ``[{"reference_id", "file_path", "file_name",
+          "relevance", "doc_score"}, ...]``（relevance/doc_score 供前端展示
+          相关度, 旧前端忽略多余字段不受影响）
+        - chunks_with_ref_ids: 附加了 ``reference_id`` 字段的分块
+    """
+    if not chunks:
+        return [], []
+    doc_scores = doc_scores or {}
+
+    # 统计各 file_path 的出现次数
+    file_path_counts: Dict[str, int] = {}
+    for c in chunks:
+        fp = _chunk_doc_key(c)
+        if fp:
+            file_path_counts[fp] = file_path_counts.get(fp, 0) + 1
+
+    # 构建去重且保持出现顺序的文件路径列表
+    seen: Set[str] = set()
+    unique_paths: List[str] = []
+    for c in chunks:
+        fp = _chunk_doc_key(c)
+        if fp and fp not in seen:
+            unique_paths.append(fp)
+            seen.add(fp)
+
+    def _doc_sort_key(fp: str) -> Tuple[int, float, int]:
+        s = doc_scores.get(fp)
+        if s is not None:
+            return (0, -s, -file_path_counts.get(fp, 0))
+        return (1, 0.0, -file_path_counts.get(fp, 0))
+
+    unique_paths.sort(key=_doc_sort_key)
+
+    # 分配引用 ID: 排序后的 file_path 依次编号 1..N
+    fp_to_ref_id: Dict[str, str] = {
+        fp: str(i + 1) for i, fp in enumerate(unique_paths)
+    }
+
+    # 为分块标注 reference_id
+    updated_chunks: List[Dict[str, Any]] = []
+    for c in chunks:
+        cc = dict(c)
+        fp = _chunk_doc_key(cc)
+        cc["reference_id"] = fp_to_ref_id.get(fp, "") if fp else ""
+        updated_chunks.append(cc)
+
+    reference_list: List[Dict[str, Any]] = []
+    for i, fp in enumerate(unique_paths):
+        s = doc_scores.get(fp)
+        reference_list.append({
+            "reference_id": str(i + 1),
+            "file_path": fp,
+            "file_name": Path(fp).name or fp,
+            "relevance": _relevance_tier(s),
+            "doc_score": round(s, 3) if s is not None else None,
+        })
+    return reference_list, updated_chunks
+
+
+# ==================== LLM 上下文构建 ====================
+
+
+def _build_llm_context(
+        chunks: List[Dict[str, Any]],
+        reference_list: List[Dict[str, Any]],
+) -> str:
+    """由分块与引用列表构建 LLM 提示词上下文字符串。
+
+    保留上游重排的相关性顺序。旧实现会按“文档 + 原文顺序”重新排序，
+    导致精确命中的高分块被同文档中较早但无关的分块挤到上下文后部。
+    原文位置仍通过 chunk_order 提供，引用列表单独按文档相关性展示。
+    """
+    chunks_context: List[Dict[str, str]] = []
+    from applications.wrq.knowledge_base.rag.section_context import SECTION_METADATA_KEYS
+    for c in chunks:
+        entry: Dict[str, Any] = {
+            "reference_id": c.get("reference_id", ""),
+            "content": c["content"],
+            "chunk_order": str(c.get("order", "")),
+        }
+        entry.update({key: c[key] for key in SECTION_METADATA_KEYS if key in c})
+        if c.get("modality", "text") == "text" and "section_status" not in entry:
+            entry["section_status"] = "unknown"
+        if c.get("_matched_query_ids"):
+            entry["matched_query_ids"] = list(c.get("_matched_query_ids") or [])
+        if c.get("quota_backfill"):
+            entry.update({
+                "quota_backfill": True,
+                "backfill_query_id": c.get("backfill_query_id"),
+                "evidence_role": "仅用于对应子问题的直接核对",
+            })
+        chunks_context.append(entry)
+
+    text_units_str = "\n".join(
+        json.dumps(tu, ensure_ascii=False) for tu in chunks_context
+    )
+
+    def _ref_line(r: Dict[str, Any]) -> str:
+        line = f"[{r['reference_id']}] {r.get('file_name', r['file_path'])}"
+        if r.get("relevance"):
+            line += f"（{r['relevance']}）"
+        return line
+
+    reference_list_str = "\n".join(
+        _ref_line(r) for r in reference_list if r["reference_id"]
+    )
+
+    return RAG_PROMPTS["naive_query_context"].format(
+        text_chunks_str=text_units_str,
+        reference_list_str=reference_list_str,
+    )
+
+
+_CONCISE_RETRY_INSTRUCTION = """
+---精简重生成约束---
+这是同一批检索证据的精简重生成。不得重新检索、补充资料之外的判断或引入新事实。
+先给结论，再按用户问题的要点分条；只保留关键字段、代码、条件和处理规则，不重复背景。
+回答控制在 {max_chars} 字以内。资料不能直接支持的要点，明确写“当前资料未充分涵盖”。
+"""
+
+
+def _partial_answer_with_notice(partial: str) -> str:
+    text = (partial or "").rstrip()
+    notice = (
+        "回答达到长度上限，以上为已生成的部分内容。"
+        "问题过于复杂，建议拆分成几个子问题后分别提问。"
+    )
+    return f"{text}\n\n{notice}" if text else notice
+
+
+def _evidence_completeness_instruction(
+        sub_queries: List[str],
+        states: Dict[str, Dict[str, Any]],
+        reference_list: Optional[List[Dict[str, Any]]] = None,
+) -> str:
+    if not sub_queries:
+        return ""
+    status_labels = {
+        "direct": "已有直接证据",
+        "backfilled": "已有受控回填证据",
+        "evidence_insufficient": "当前没有对应候选",
+    }
+    lines: List[str] = []
+    for index, subquery in enumerate(sub_queries):
+        query_id = f"q{index + 1}"
+        state = states.get(query_id, {})
+        label = status_labels.get(state.get("status"), "当前证据不足")
+        lines.append(f"{index + 1}. [{query_id}] {subquery}——{label}")
+    scope_names = [
+        str(item.get("file_name") or item.get("file_path") or "").strip()
+        for item in (reference_list or [])
+        if str(item.get("file_name") or item.get("file_path") or "").strip()
+    ]
+    scope_line = "、".join(dict.fromkeys(scope_names)) or "当前检索到的知识库文档"
+    return (
+        "\n\n---证据覆盖约束---\n"
+        f"当前知识库范围：{scope_line}。\n"
+        "需要逐项覆盖以下子问题：\n"
+        + "\n".join(lines)
+        + "\n回答时按上述顺序逐项核对；同一子问题的多个候选分块可以合并理解，尤其是表头、代码行和相邻说明。\n"
+        "只有最终上下文确实没有对应候选时，才说明“当前资料未充分涵盖”。不要借用其他卡组织的资料补齐。\n"
+        "字段号、代码、时限必须以检索到的对应分块为依据；标记 quota_backfill=true 的分块仅用于其 backfill_query_id 对应的子问题。\n"
+    )
+
+
+async def _generate_answer_reusing_evidence(
+        query: str,
+        query_param: QueryParam,
+        system_prompt: str,
+        raw_data: Dict[str, Any],
+) -> Union[str, AsyncIterator[str]]:
+    """生成答案；截断或空内容时仅用同一 system/context 做一次重生成。"""
+    metadata = raw_data.setdefault("metadata", {})
+    metadata.setdefault("answer_truncated", False)
+    metadata.setdefault("answer_retry_count", 0)
+    metadata.setdefault("answer_finish_reason", "stop")
+    metadata.setdefault("answer_fallback", None)
+    if query_param.stream:
+        return await chat_completion(
+            messages=query,
+            system_prompt=system_prompt,
+            history_messages=query_param.conversation_history,
+            conversation_summary=query_param.conversation_summary,
+            conversation_recall=query_param.conversation_recall,
+            stream=True,
+            enable_cot=query_param.enable_cot,
+            temperature=query_param.temperature,
+            model=query_param.model,
+        )
+    try:
+        first = await chat_completion(
+            messages=query,
+            system_prompt=system_prompt,
+            history_messages=query_param.conversation_history,
+            conversation_summary=query_param.conversation_summary,
+            conversation_recall=query_param.conversation_recall,
+            stream=False,
+            enable_cot=query_param.enable_cot,
+            temperature=query_param.temperature,
+            model=query_param.model,
+        )
+        if first and first.strip():
+            return first
+
+        # 上游偶尔会以 stop/空 content 返回成功响应。不能把它当作正常答案
+        # 落盘；复用同一批证据做一次精简重试，不重新检索、不增加固定检索调用。
+        metadata["answer_retry_count"] = 1
+        metadata["answer_fallback"] = "empty_retry"
+        concise_prompt = system_prompt + _CONCISE_RETRY_INSTRUCTION.format(
+            max_chars=PROJECT_CONFIG.ANSWER_CONCISE_RETRY_MAX_CHARS,
+        )
+        try:
+            second = await chat_completion(
+                messages=query,
+                system_prompt=concise_prompt,
+                history_messages=query_param.conversation_history,
+                conversation_summary=query_param.conversation_summary,
+                conversation_recall=query_param.conversation_recall,
+                stream=False,
+                enable_cot=query_param.enable_cot,
+                temperature=query_param.temperature,
+                model=query_param.model,
+            )
+        except LLMTruncatedError as empty_retry_error:
+            metadata["answer_truncated"] = True
+            metadata["answer_finish_reason"] = empty_retry_error.finish_reason
+            metadata["answer_fallback"] = "partial"
+            return (
+                _partial_answer_with_notice(empty_retry_error.partial)
+                if PROJECT_CONFIG.ANSWER_PARTIAL_FALLBACK_ENABLED else ""
+            )
+        if second and second.strip():
+            metadata["answer_finish_reason"] = "stop"
+            return second
+        metadata["answer_fallback"] = "empty"
+        return ""
+    except LLMTruncatedError as first_error:
+        metadata["answer_truncated"] = True
+        metadata["answer_finish_reason"] = first_error.finish_reason
+        metadata["answer_retry_count"] = 1
+        if not PROJECT_CONFIG.ANSWER_TRUNCATION_RETRY_ENABLED:
+            metadata["answer_fallback"] = "partial"
+            return (
+                _partial_answer_with_notice(first_error.partial)
+                if PROJECT_CONFIG.ANSWER_PARTIAL_FALLBACK_ENABLED else ""
+            )
+        concise_prompt = system_prompt + _CONCISE_RETRY_INSTRUCTION.format(
+            max_chars=PROJECT_CONFIG.ANSWER_CONCISE_RETRY_MAX_CHARS,
+        )
+        try:
+            second = await chat_completion(
+                messages=query,
+                system_prompt=concise_prompt,
+                history_messages=query_param.conversation_history,
+                conversation_summary=query_param.conversation_summary,
+                conversation_recall=query_param.conversation_recall,
+                stream=False,
+                enable_cot=query_param.enable_cot,
+                temperature=query_param.temperature,
+                model=query_param.model,
+            )
+            metadata["answer_fallback"] = "concise_retry"
+            metadata["answer_finish_reason"] = "stop"
+            return second
+        except LLMTruncatedError as second_error:
+            metadata["answer_finish_reason"] = second_error.finish_reason
+            metadata["answer_fallback"] = "partial"
+            return (
+                _partial_answer_with_notice(second_error.partial or first_error.partial)
+                if PROJECT_CONFIG.ANSWER_PARTIAL_FALLBACK_ENABLED else ""
+            )
+
+
+# ==================== 检索为空兜底 ====================
+
+
+async def _no_context_fallback(
+        query: str,
+        query_param: QueryParam,
+        query_mode: str,
+        resolved_query: Optional[str] = None,
+        fallback_reason: str = "no_retrieval_results",
+        mapping_result: Optional[Dict[str, Any]] = None,
+) -> QueryResult:
+    """未检索到相关分块时的兜底通用对话（替代生硬拒绝）。
+
+    打招呼 / 闲聊等场景下, 直接回"未找到相关文档分块"并不自然, 故改用
+    兜底提示词调用 LLM: 闲聊自然回应; 询问知识库内容则温和提示暂无相关
+    文档。对话历史经 history_messages 注入。
+    """
+    response = await chat_completion(
+        messages=query,
+        system_prompt=RAG_PROMPTS["no_context_fallback"],
+        history_messages=query_param.conversation_history,
+        conversation_summary=query_param.conversation_summary,
+        conversation_recall=query_param.conversation_recall,
+        stream=query_param.stream,
+        temperature=query_param.temperature,
+        model=query_param.model,
+    )
+    mapping_result = mapping_result or {}
+    mapping_matches = mapping_result.get("matches") or []
+    raw_data: Dict[str, Any] = {
+        "data": {"entities": [], "relationships": [], "chunks": [], "references": []},
+        "metadata": {
+            "query_mode": query_mode,
+            "original_query": query,
+            "resolved_query": resolved_query or query,
+            "rewritten_query": None,
+            "english_query": "",
+            "sub_queries": [],
+            "matched_mapping_ids": [item.get("mapping_id") for item in mapping_matches],
+            "matched_mapping_source": [item.get("mapping_source") for item in mapping_matches],
+            "mapping_field_match_types": [item.get("field_match_type") for item in mapping_matches],
+            "mapping_field_keys": [item.get("field_keys") or [] for item in mapping_matches],
+            "mapping_status": mapping_result.get("status", "unmatched"),
+            "mapping_conflicts": mapping_result.get("conflicts") or [],
+            "retrieval_route": f"{query_mode}:fallback",
+            "matched_feedback_ids": [],
+            "feedback_scores": {},
+            "scope_doc_ids": [],
+            "fallback_reason": fallback_reason,
+            "total_chunks_found": 0,
+            "final_chunks_count": 0,
+        },
+    }
+    if isinstance(response, str):
+        return QueryResult(content=response, raw_data=raw_data)
+    return QueryResult(response_iterator=response, raw_data=raw_data, is_streaming=True)
+
+
+# ==================== 主查询函数 ====================
+
+
+async def naive_query(
+        query: str,
+        query_param: QueryParam,
+) -> Optional[QueryResult]:
+    """执行 naive 纯向量查询 (含术语改写)。
+
+    完整流程:
+        0. 基于术语索引改写查询 (指代消解 + 术语展开)
+        1. 子查询分解（复合问题）+ 多路召回（每查询 Dense + 文档级召回,
+           多路命中经 RRF 融合）→ 分块
+        2. token 预算 → available_chunk_tokens
+        3. 引用列表 → 为分块分配 reference_id
+        4. token 截断 → 分块控制在预算内
+        5. 构建上下文 → JSON 分块 + 引用列表字符串
+        6. 构建系统提示词 → RAG_PROMPTS["naive_rag_response"]
+        7. 调用 LLM → 流式或非流式
+
+    未检索到分块时返回 None (由调用方展示 "无上下文" 提示)。
+    """
+    if not query:
+        return QueryResult(content=RAG_PROMPTS["fail_response"])
+
+    # 阶段 0a: 历史感知改写（指代消解）——多轮时用最近历史把当前问题消解为
+    # 自包含查询, 仅用于检索（生成回答仍用原始问题 + 完整历史）
+    resolved_query = await resolve_query_with_history(query, query_param.conversation_history)
+    mapping_result = await term_mapping_service.resolve(resolved_query)
+    mapping_matches = mapping_result.get("matches") or []
+    # 阶段 0b: 术语改写 + 英文检索词扩展（无术语索引时也生成英文查询）
+    bilingual_query = await rewrite_query_bilingual(
+        resolved_query, doc_ids=current_scope.get(), mapping_matches=mapping_matches,
+    )
+    query_for_search = bilingual_query.primary_query
+    technical_constraints = _extract_technical_constraints(
+        resolved_query,
+        bilingual_query.primary_query,
+        bilingual_query.english_query,
+    )
+
+    search_top_k = query_param.chunk_top_k or PROJECT_CONFIG.CHUNK_TOP_K
+
+    # 阶段 1: 子查询分解——复合问题拆为单面查询, 每面独立召回;
+    # 原查询保留在检索集合中作为兜底（分解不当不丢原始召回面）
+    decompose_result = _coerce_decompose_result(await decompose_query(query_for_search))
+    sub_queries = decompose_result.sub_queries
+    queries = _merge_retrieval_queries(
+        query_for_search,
+        [*(sub_queries or []), *_technical_retrieval_queries(
+            technical_constraints, resolved_query,
+        )],
+    )
+
+    guidance, guidance_filter, guidance_shadow_mode = await _prepare_query_guidance(
+        resolved_query,
+    )
+
+    # 阶段 2: 历史范围与全库并行召回。两路各自融合后组成同一候选池，
+    # 旧文档获得适度权重，新问题涉及的其他文档仍能进入同一次重排。
+    per_query_candidates: Dict[str, List[Dict[str, Any]]] = {}
+    async def retrieve_candidates(filter_expr: str) -> List[Dict[str, Any]]:
+        ranked_lists = await _retrieve_ranked_lists(
+            queries,
+            english_query=bilingual_query.english_query,
+            fusion_top_k=search_top_k,
+            dense_top_k=search_top_k,
+            bm25_top_k=PROJECT_CONFIG.HYBRID_BM25_TOP_K,
+            enable_doc_recall=PROJECT_CONFIG.DOC_RECALL_ENABLED and not filter_expr,
+            filter_expr=filter_expr,
+        )
+        if not ranked_lists:
+            return []
+        combined = ranked_lists[0] if len(ranked_lists) == 1 else _rrf_merge(ranked_lists, search_top_k)
+        # 在全局 RRF/重排之前按 q1/q2/... 隔离保存自身 top-N。
+        _store_per_query_candidates(per_query_candidates, ranked_lists, sub_queries)
+        return combined
+
+    chunks, used_guidance, retrieval_fallback, guided_count, global_count = (
+        await _retrieve_with_guidance(
+            retrieve_candidates,
+            guidance_filter=guidance_filter,
+            guided_doc_ids=guidance.get("scope_doc_ids") or [],
+            top_k=search_top_k,
+        )
+    )
+    guidance_fallback_reason = retrieval_fallback or guidance.get("fallback_reason")
+
+    if not chunks:
+        await _warn_if_store_unreachable("naive 检索")
+        return await _no_context_fallback(
+            query, query_param, "naive", resolved_query=resolved_query,
+            mapping_result=mapping_result,
+        )
+
+    # 技术代码表常把表头、代码行拆到相邻分块；先补窗口，再统一进入重排。
+    chunks = await _augment_technical_candidates(chunks, technical_constraints)
+
+    # 重排: 按改写后查询的相关性对分块重新打分（从候选池精选出最终检索窗口）
+    if query_param.enable_rerank:
+        try:
+            reranked = await asyncio.wait_for(
+                rerank_chunks(query=bilingual_query.rerank_query, chunks=chunks, top_n=PROJECT_CONFIG.RERANK_TOP_K),
+                timeout=20.0,
+            )
+            if reranked:
+                chunks = reranked
+        except asyncio.TimeoutError:
+            LOGGER.warning("重排超时 (20 秒), 使用原始分块")
+        except Exception:
+            LOGGER.opt(exception=True).warning("重排失败, 使用原始分块")
+
+    chunks = _prioritize_technical_evidence(chunks, technical_constraints)
+
+    total_chunks_found = len(chunks)
+    chunks = chunks[:PROJECT_CONFIG.RAG_CONTEXT_TOP_K]
+    chunks, backfill_info = _backfill_subquery_candidates(
+        chunks,
+        per_query_candidates,
+        sub_queries,
+        max_total=PROJECT_CONFIG.SUBQUERY_BACKFILL_MAX_TOTAL,
+        top_k=PROJECT_CONFIG.RAG_CONTEXT_TOP_K,
+        technical_constraints=technical_constraints,
+    )
+    chunks = _annotate_subquery_matches(chunks, per_query_candidates, sub_queries)
+
+    # 计算动态 token 预算（历史窗口 + 滚动摘要计入预算）
+    available_tokens = _compute_token_budget(
+        RAG_PROMPTS["naive_rag_response"],
+        query_param.response_type,
+        query_param.user_prompt,
+        query,
+        query_param.max_total_tokens,
+        history_tokens=history_token_count(query_param.conversation_history),
+        summary_tokens=estimate_tokens(query_param.conversation_summary or ""),
+    )
+
+    # 聚合文档级相关性（查询条件下的动态权重）→ 引用列表按相关度降序
+    doc_scores = _aggregate_doc_scores(chunks)
+
+    # 生成引用列表并为分块标注
+    reference_list, chunks_with_refs = _generate_reference_list(chunks, doc_scores)
+
+    # 按 token 预算截断分块（单文档占比封顶, 防止主导文档独占检索窗口）
+    processed_chunks = _truncate_chunks_by_tokens(
+        chunks_with_refs, available_tokens, PROJECT_CONFIG.DOC_BUDGET_MAX_SHARE
+    )
+
+    if not processed_chunks:
+        return await _no_context_fallback(
+            query, query_param, "naive", resolved_query=resolved_query,
+            fallback_reason="context_budget_empty",
+            mapping_result=mapping_result,
+        )
+
+    backfill_info = _refresh_subquery_info(
+        processed_chunks, per_query_candidates, sub_queries, backfill_info,
+    )
+
+    # 构建响应的 raw_data
+    raw_data: Dict[str, Any] = {
+        "data": {
+            "entities": [],
+            "relationships": [],
+            "chunks": processed_chunks,
+            "references": reference_list,
+        },
+        "metadata": {
+            "query_mode": "naive",
+            "original_query": query,
+            "resolved_query": resolved_query,
+            "total_chunks_found": total_chunks_found,
+            "context_candidate_count": len(chunks),
+            "final_chunks_count": len(processed_chunks),
+            "rewritten_query": (
+                bilingual_query.primary_query
+                if bilingual_query.primary_query != query
+                else None
+            ),
+            "english_query": bilingual_query.english_query,
+            "sub_queries": sub_queries or None,
+            "subquery_status": decompose_result.status,
+            "subquery_method": decompose_result.method,
+            "subquery_failure_reason": decompose_result.failure_reason,
+            "subquery_retry_count": decompose_result.retry_count,
+            "subquery_coverage": backfill_info["coverage"],
+            "subquery_evidence": backfill_info["states"],
+            "per_query_candidate_counts": {
+                query_id: len(items) for query_id, items in per_query_candidates.items()
+            },
+            "per_query_candidates": _per_query_candidate_snapshot(
+                per_query_candidates, processed_chunks,
+            ),
+            "quota_backfill_count": backfill_info["count"],
+            "matched_mapping_ids": [item.get("mapping_id") for item in mapping_matches],
+            "matched_mapping_source": [item.get("mapping_source") for item in mapping_matches],
+            "mapping_field_match_types": [item.get("field_match_type") for item in mapping_matches],
+            "mapping_field_keys": [item.get("field_keys") or [] for item in mapping_matches],
+            "mapping_status": mapping_result.get("status", "unmatched"),
+            "mapping_conflicts": mapping_result.get("conflicts") or [],
+            "retrieval_route": (
+                "naive:dense+bm25+rrf"
+                + (":guided+global" if used_guidance and global_count else (":guided" if used_guidance else (":fallback" if guidance_filter else "")))
+                + ("+doc_recall" if PROJECT_CONFIG.DOC_RECALL_ENABLED else "")
+                + ("+rerank" if query_param.enable_rerank else "")
+            ),
+            "feedback_scores": guidance.get("feedback_scores") or {},
+            "scope_doc_ids": sorted({
+                c.get("doc_id", "") for c in processed_chunks if c.get("doc_id")
+            }),
+            "matched_feedback_ids": guidance.get("matched_feedback_ids") or [],
+            "guidance_scope_doc_ids": guidance.get("scope_doc_ids") or [],
+            "guidance_shadow_mode": guidance_shadow_mode,
+            "scoped_search_enabled": PROJECT_CONFIG.QUERY_MEMORY_SCOPED_SEARCH_ENABLED,
+            "guided_candidate_count": guided_count,
+            "global_candidate_count": global_count,
+            "guided_weight": PROJECT_CONFIG.QUERY_MEMORY_GUIDED_WEIGHT if used_guidance else None,
+            "fallback_reason": None if used_guidance else guidance_fallback_reason,
+            "guidance_fallback": bool(guidance_filter and not used_guidance),
+        },
+    }
+
+    # 构建上下文字符串 (JSON 分块 + 引用列表)
+    context_content = _build_llm_context(processed_chunks, reference_list)
+
+    # 仅需上下文 / 仅需提示词模式下提前返回
+    if query_param.only_need_context:
+        return QueryResult(content=context_content, raw_data=raw_data)
+
+    user_prompt_str = (
+        f"\n\n{query_param.user_prompt}" if query_param.user_prompt else "n/a"
+    )
+    sys_prompt = RAG_PROMPTS["naive_rag_response"].format(
+        response_type=query_param.response_type,
+        user_prompt=user_prompt_str,
+        content_data=context_content,
+    )
+    sys_prompt += _evidence_completeness_instruction(
+        sub_queries, backfill_info["states"], reference_list,
+    )
+
+    if query_param.only_need_prompt:
+        prompt_content = f"{sys_prompt}\n\n---User Query---\n{query}"
+        return QueryResult(content=prompt_content, raw_data=raw_data)
+
+    # 调用 LLM；若被截断，复用完全相同的最终证据精简重生成一次。
+    response = await _generate_answer_reusing_evidence(query, query_param, sys_prompt, raw_data)
+
+    if isinstance(response, str):
+        return QueryResult(content=response, raw_data=raw_data)
+    else:
+        return QueryResult(
+            response_iterator=response, raw_data=raw_data, is_streaming=True
+        )
+
+
+async def hybrid_query(
+        query: str,
+        query_param: QueryParam,
+) -> Optional[QueryResult]:
+    """执行混合查询 — 术语改写 → Dense + BM25 → RRF 融合 → LLM。
+
+    完整流程:
+        0. 基于术语索引改写查询 (LLM + 缓存 + 规则兜底)
+        1. 混合检索 (子查询分解 → 多查询 × Dense + BM25 + 文档级召回
+           → RRF 融合) → 分块
+        2. token 预算 → available_chunk_tokens
+        3. 引用列表 → 为分块分配 reference_id
+        4. token 截断 → 分块控制在预算内
+        5. 构建上下文 → JSON 分块 + 引用列表字符串
+        6. 构建系统提示词 → RAG_PROMPTS["naive_rag_response"]
+        7. 调用 LLM → 流式或非流式
+
+    未检索到分块时返回 None。
+    """
+    if not query:
+        return QueryResult(content=RAG_PROMPTS["fail_response"])
+
+    # 阶段 0a: 历史感知改写（指代消解）——多轮时用最近历史把当前问题消解为
+    # 自包含查询, 仅用于检索（生成回答仍用原始问题 + 完整历史）
+    resolved_query = await resolve_query_with_history(query, query_param.conversation_history)
+    mapping_result = await term_mapping_service.resolve(resolved_query)
+    mapping_matches = mapping_result.get("matches") or []
+    # 阶段 0b: 术语改写 + 英文检索词扩展
+    bilingual_query = await rewrite_query_bilingual(
+        resolved_query, doc_ids=current_scope.get(), mapping_matches=mapping_matches,
+    )
+    technical_constraints = _extract_technical_constraints(
+        resolved_query,
+        bilingual_query.primary_query,
+        bilingual_query.english_query,
+    )
+
+    # 阶段 1: 混合检索（仅改写查询 → Dense + BM25 → RRF 融合）。
+    # 刻意不用原文查询召回: 口语原文（如 "3域"）词项与文档词汇脱节,
+    # 并行召回会把无关块灌进候选池、稀释 RRF 排名; 改写查询已承载
+    # 术语桥接, 原文意图仍用于最终 LLM 作答（见阶段 6 的 query 传参）
+    merge_top_k = query_param.rrf_top_k or PROJECT_CONFIG.RRF_TOP_K
+    query_for_search = bilingual_query.primary_query
+
+    # 阶段 0c: 子查询分解——复合问题拆为单面查询, 每面独立走双通道召回;
+    # 原查询保留在检索集合中作为兜底（分解不当不丢原始召回面）
+    decompose_result = _coerce_decompose_result(await decompose_query(query_for_search))
+    sub_queries = list(decompose_result.sub_queries or [])
+    retrieval_sub_queries = [
+        *sub_queries,
+        *_technical_retrieval_queries(technical_constraints, resolved_query),
+    ]
+
+    guidance, guidance_filter, guidance_shadow_mode = await _prepare_query_guidance(
+        resolved_query,
+    )
+
+    per_query_candidates: Dict[str, List[Dict[str, Any]]] = {}
+    async def retrieve_candidates(filter_expr: str) -> List[Dict[str, Any]]:
+        result = await _get_hybrid_context(
+            bilingual_query,
+            merge_top_k=merge_top_k,
+            dense_top_k=query_param.dense_top_k,
+            bm25_top_k=query_param.bm25_top_k,
+            sub_queries=retrieval_sub_queries,
+            quota_sub_queries=sub_queries,
+            filter_expr=filter_expr,
+            candidate_pool=per_query_candidates,
+        )
+        return result
+
+    chunks, used_guidance, retrieval_fallback, guided_count, global_count = (
+        await _retrieve_with_guidance(
+            retrieve_candidates,
+            guidance_filter=guidance_filter,
+            guided_doc_ids=guidance.get("scope_doc_ids") or [],
+            top_k=merge_top_k,
+        )
+    )
+    guidance_fallback_reason = retrieval_fallback or guidance.get("fallback_reason")
+
+    if not chunks:
+        await _warn_if_store_unreachable("hybrid 检索")
+        return await _no_context_fallback(
+            query, query_param, "hybrid", resolved_query=resolved_query,
+            mapping_result=mapping_result,
+        )
+
+    chunks = await _augment_technical_candidates(chunks, technical_constraints)
+
+    # 重排: 按改写后查询的相关性对分块重新打分（从候选池精选出最终检索窗口）
+    if query_param.enable_rerank:
+        try:
+            reranked = await asyncio.wait_for(
+                rerank_chunks(query=bilingual_query.rerank_query, chunks=chunks, top_n=PROJECT_CONFIG.RERANK_TOP_K),
+                timeout=20.0,
+            )
+            if reranked:
+                chunks = reranked
+        except asyncio.TimeoutError:
+            LOGGER.warning("重排超时 (20 秒), 使用原始分块")
+        except Exception:
+            LOGGER.opt(exception=True).warning("重排失败, 使用原始分块")
+
+    chunks = _prioritize_technical_evidence(chunks, technical_constraints)
+
+    total_chunks_found = len(chunks)
+    chunks = chunks[:PROJECT_CONFIG.RAG_CONTEXT_TOP_K]
+    chunks, backfill_info = _backfill_subquery_candidates(
+        chunks,
+        per_query_candidates,
+        sub_queries,
+        max_total=PROJECT_CONFIG.SUBQUERY_BACKFILL_MAX_TOTAL,
+        top_k=PROJECT_CONFIG.RAG_CONTEXT_TOP_K,
+        technical_constraints=technical_constraints,
+    )
+    chunks = _annotate_subquery_matches(chunks, per_query_candidates, sub_queries)
+
+    # 计算动态 token 预算 (用户可见的提示词使用原始查询; 历史窗口 + 滚动摘要计入预算)
+    available_tokens = _compute_token_budget(
+        RAG_PROMPTS["naive_rag_response"],
+        query_param.response_type,
+        query_param.user_prompt,
+        query,  # LLM 提示词中使用原始查询
+        query_param.max_total_tokens,
+        history_tokens=history_token_count(query_param.conversation_history),
+        summary_tokens=estimate_tokens(query_param.conversation_summary or ""),
+    )
+
+    # 聚合文档级相关性（查询条件下的动态权重）→ 引用列表按相关度降序
+    doc_scores = _aggregate_doc_scores(chunks)
+
+    # 生成引用列表并为分块标注
+    reference_list, chunks_with_refs = _generate_reference_list(chunks, doc_scores)
+
+    # 按 token 预算截断分块（单文档占比封顶, 防止主导文档独占检索窗口）
+    processed_chunks = _truncate_chunks_by_tokens(
+        chunks_with_refs, available_tokens, PROJECT_CONFIG.DOC_BUDGET_MAX_SHARE
+    )
+
+    if not processed_chunks:
+        return await _no_context_fallback(
+            query, query_param, "hybrid", resolved_query=resolved_query,
+            fallback_reason="context_budget_empty",
+            mapping_result=mapping_result,
+        )
+
+    backfill_info = _refresh_subquery_info(
+        processed_chunks, per_query_candidates, sub_queries, backfill_info,
+    )
+
+    # 构建响应的 raw_data
+    raw_data: Dict[str, Any] = {
+        "data": {
+            "entities": [],
+            "relationships": [],
+            "chunks": processed_chunks,
+            "references": reference_list,
+        },
+        "metadata": {
+            "query_mode": "hybrid",
+            "original_query": query,
+            "resolved_query": resolved_query,
+            "total_chunks_found": total_chunks_found,
+            "context_candidate_count": len(chunks),
+            "final_chunks_count": len(processed_chunks),
+            "rewritten_query": (
+                bilingual_query.primary_query
+                if bilingual_query.primary_query != query
+                else None
+            ),
+            "english_query": bilingual_query.english_query,
+            "sub_queries": sub_queries or None,
+            "subquery_status": decompose_result.status,
+            "subquery_method": decompose_result.method,
+            "subquery_failure_reason": decompose_result.failure_reason,
+            "subquery_retry_count": decompose_result.retry_count,
+            "subquery_coverage": backfill_info["coverage"],
+            "subquery_evidence": backfill_info["states"],
+            "per_query_candidate_counts": {
+                query_id: len(items) for query_id, items in per_query_candidates.items()
+            },
+            "per_query_candidates": _per_query_candidate_snapshot(
+                per_query_candidates, processed_chunks,
+            ),
+            "quota_backfill_count": backfill_info["count"],
+            "matched_mapping_ids": [item.get("mapping_id") for item in mapping_matches],
+            "matched_mapping_source": [item.get("mapping_source") for item in mapping_matches],
+            "mapping_field_match_types": [item.get("field_match_type") for item in mapping_matches],
+            "mapping_field_keys": [item.get("field_keys") or [] for item in mapping_matches],
+            "mapping_status": mapping_result.get("status", "unmatched"),
+            "mapping_conflicts": mapping_result.get("conflicts") or [],
+            "retrieval_route": (
+                "hybrid:dense+bm25+rrf"
+                + (":guided+global" if used_guidance and global_count else (":guided" if used_guidance else (":fallback" if guidance_filter else "")))
+                + ("+doc_recall" if PROJECT_CONFIG.DOC_RECALL_ENABLED else "")
+                + ("+rerank" if query_param.enable_rerank else "")
+            ),
+            "matched_feedback_ids": guidance.get("matched_feedback_ids") or [],
+            "feedback_scores": guidance.get("feedback_scores") or {},
+            "scope_doc_ids": sorted({
+                c.get("doc_id", "") for c in processed_chunks if c.get("doc_id")
+            }),
+            "guidance_scope_doc_ids": guidance.get("scope_doc_ids") or [],
+            "guidance_shadow_mode": guidance_shadow_mode,
+            "scoped_search_enabled": PROJECT_CONFIG.QUERY_MEMORY_SCOPED_SEARCH_ENABLED,
+            "guided_candidate_count": guided_count,
+            "global_candidate_count": global_count,
+            "guided_weight": PROJECT_CONFIG.QUERY_MEMORY_GUIDED_WEIGHT if used_guidance else None,
+            "fallback_reason": None if used_guidance else guidance_fallback_reason,
+            "guidance_fallback": bool(guidance_filter and not used_guidance),
+        },
+    }
+
+    # 构建上下文字符串 (JSON 分块 + 引用列表)
+    context_content = _build_llm_context(processed_chunks, reference_list)
+
+    # 仅需上下文 / 仅需提示词模式下提前返回
+    if query_param.only_need_context:
+        return QueryResult(content=context_content, raw_data=raw_data)
+
+    user_prompt_str = (
+        f"\n\n{query_param.user_prompt}" if query_param.user_prompt else "n/a"
+    )
+    sys_prompt = RAG_PROMPTS["naive_rag_response"].format(
+        response_type=query_param.response_type,
+        user_prompt=user_prompt_str,
+        content_data=context_content,
+    )
+    sys_prompt += _evidence_completeness_instruction(
+        sub_queries, backfill_info["states"], reference_list,
+    )
+
+    if query_param.only_need_prompt:
+        prompt_content = f"{sys_prompt}\n\n---User Query---\n{query}"
+        return QueryResult(content=prompt_content, raw_data=raw_data)
+
+    # 调用 LLM；若被截断，复用完全相同的最终证据精简重生成一次。
+    response = await _generate_answer_reusing_evidence(query, query_param, sys_prompt, raw_data)
+
+    if isinstance(response, str):
+        return QueryResult(content=response, raw_data=raw_data)
+    else:
+        return QueryResult(
+            response_iterator=response, raw_data=raw_data, is_streaming=True
+        )
+
+
+async def bypass_query(
+        query: str,
+        query_param: QueryParam,
+) -> QueryResult:
+    """不经过知识检索, 直接调用 LLM 对话。
+
+    历史对话经 history_messages 注入（与 naive/hybrid 统一, 无 {history} 占位符）。
+    """
+    if not query:
+        return QueryResult(content=RAG_PROMPTS["fail_response"])
+
+    sys_prompt = RAG_PROMPTS["bypass_system"]
+
+    response = await chat_completion(
+        messages=query,
+        system_prompt=sys_prompt,
+        history_messages=query_param.conversation_history,
+        conversation_summary=query_param.conversation_summary,
+        conversation_recall=query_param.conversation_recall,
+        stream=query_param.stream,
+        temperature=query_param.temperature,
+        model=query_param.model,
+    )
+
+    raw_data: Dict[str, Any] = {
+        "data": {"entities": [], "relationships": [], "chunks": [], "references": []},
+        "metadata": {
+            "query_mode": "bypass",
+            "original_query": query,
+            "resolved_query": query,
+            "rewritten_query": None,
+            "english_query": "",
+            "sub_queries": [],
+            "matched_mapping_ids": [],
+            "matched_mapping_source": [],
+            "mapping_status": "not_applicable",
+            "mapping_conflicts": [],
+            "retrieval_route": "bypass",
+            "matched_feedback_ids": [],
+            "feedback_scores": {},
+            "scope_doc_ids": [],
+            "fallback_reason": "bypass_mode",
+            "total_chunks_found": 0,
+            "final_chunks_count": 0,
+        },
+    }
+    if isinstance(response, str):
+        return QueryResult(content=response, raw_data=raw_data)
+    else:
+        return QueryResult(response_iterator=response, raw_data=raw_data, is_streaming=True)
+
+
+# ==================== 元问题路由（知识库目录类提问） ====================
+
+# 元问题特征模式: 问的是"知识库里有什么文档", 而非任何文档的内容。
+# 这类问题的答案分散在全库元数据中, 与任何具体分块都不强相关,
+# 分块检索注定答不全（尤其文档体量悬殊时）, 应由文档表直接作答
+_META_QUERY_PATTERNS = [
+    re.compile(r"(知识库|资料库|文档库)[中里]?(?:都)?(有哪些|有什么|有些什么|都有什么|都有)"),
+    re.compile(r"(有哪些|有几个|有几份|有多少|列出|列举|列一下).{0,6}(文档|文件|资料)"),
+    re.compile(r"(文档|文件)(列表|清单)"),
+    re.compile(r"上传了(什么|哪些|几[个份篇]|多少)"),
+    re.compile(r"(有没有|有无|是否有).{0,16}(文档|文件|资料)"),
+    re.compile(r"(一共|总共|目前|现在)?(?:有|上传了)?(几[个份篇]|多少)(?:个|份|篇)?(文档|文件|资料)"),
+]
+
+# 内容谓词: 出现即说明是在问文档内容（"有哪些文档提到了X"）, 不是元问题。
+# 宁可漏路由（回退检索）, 不可误路由（拿目录答内容问题）
+_META_CONTENT_PREDICATE = re.compile(
+    r"提到|包含|涉及|关于|有关|描述|说明|介绍|规定|要求"
+)
+
+# 元问题长度上限: 目录类提问都是短句, 超长输入一律不路由
+_META_QUERY_MAX_CHARS = 60
+
+
+def _is_meta_query(query: str) -> bool:
+    """判断是否为"知识库有哪些文档"类元问题（问目录本身, 不问文档内容）。
+
+    带内容谓词的提问即便含"有哪些文档"字样也是在问内容, 不路由;
+    规则不命中时回退正常检索流程, 行为不劣于路由前。
+    """
+    q = (query or "").strip()
+    if not q or len(q) > _META_QUERY_MAX_CHARS:
+        return False
+    if _META_CONTENT_PREDICATE.search(q):
+        return False
+    return any(p.search(q) for p in _META_QUERY_PATTERNS)
+
+
+async def _meta_catalog_response() -> Optional[QueryResult]:
+    """由文档表直接生成知识库目录回答, 绕过向量检索。
+
+    只列解析完成（status == complete）的文档; 数据库异常时返回 None,
+    由调用方落回正常检索流程——路由失败不得劣于原行为。
+    """
+    try:
+        from applications.wrq.knowledge_base.services.rag_document_crud import RagDocumentCrud
+
+        docs = await RagDocumentCrud().list_all()
+    except Exception:
+        LOGGER.opt(exception=True).warning("元问题路由读取文档表失败, 回退正常检索")
+        return None
+
+    complete = [d for d in docs if d.status == "complete"]
+    if complete:
+        lines = ["当前知识库共有以下文档："]
+        for i, d in enumerate(complete, 1):
+            extras: List[str] = []
+            if d.page_count:
+                extras.append(f"{d.page_count} 页")
+            if d.chunks_count:
+                extras.append(f"{d.chunks_count} 个分块")
+            suffix = f"（{'、'.join(extras)}）" if extras else ""
+            lines.append(f"{i}. {d.filename}{suffix}")
+        content = "\n".join(lines)
+    else:
+        content = "当前知识库中暂无已完成解析的文档，请先上传文档。"
+
+    raw_data: Dict[str, Any] = {
+        "data": {"entities": [], "relationships": [], "chunks": [], "references": []},
+        "metadata": {
+            "query_mode": "meta_catalog",
+            "original_query": query,
+            "resolved_query": query,
+            "rewritten_query": None,
+            "english_query": "",
+            "sub_queries": [],
+            "matched_mapping_ids": [],
+            "matched_mapping_source": [],
+            "retrieval_route": "meta_catalog",
+            "matched_feedback_ids": [],
+            "feedback_scores": {},
+            "scope_doc_ids": [],
+            "fallback_reason": None,
+            "total_chunks_found": 0,
+            "final_chunks_count": 0,
+            "document_count": len(complete),
+        },
+    }
+    return QueryResult(content=content, raw_data=raw_data)
+
+
+async def _run_query(
+        query: str,
+        query_param: QueryParam,
+) -> QueryResult:
+    """按查询模式分发到对应处理函数。"""
+    # 元问题路由: "知识库有哪些文档"类提问直接由文档表作答, 不走检索。
+    # bypass 模式本身就是纯对话, 不路由; 路由失败（返回 None）落回正常检索
+    if query_param.mode != "bypass" and _is_meta_query(query):
+        meta_result = await _meta_catalog_response()
+        if meta_result is not None:
+            return meta_result
+
+    if query_param.mode == "bypass":
+        return await bypass_query(query, query_param)
+    elif query_param.mode == "hybrid":
+        result = await hybrid_query(query, query_param)
+        if result is None:
+            return QueryResult(
+                content="混合检索未找到相关的文档分块。请尝试更换提问方式，或先上传相关文档。",
+                raw_data={
+                    "data": {"entities": [], "relationships": [], "chunks": [], "references": []},
+                    "metadata": {
+                        "query_mode": "hybrid",
+                        "original_query": query,
+                        "resolved_query": query,
+                        "retrieval_route": "hybrid:fallback",
+                        "fallback_reason": "query_result_none",
+                    },
+                },
+            )
+        return result
+    elif query_param.mode in ("naive", "local", "global", "mix"):
+        # 暂无知识图谱后端, 所有 KG 模式回退到 naive
+        result = await naive_query(query, query_param)
+        if result is None:
+            return QueryResult(
+                content="知识库中未找到相关的文档分块。请尝试更换提问方式，或先上传相关文档。",
+                raw_data={
+                    "data": {"entities": [], "relationships": [], "chunks": [], "references": []},
+                    "metadata": {
+                        "query_mode": query_param.mode,
+                        "original_query": query,
+                        "resolved_query": query,
+                        "retrieval_route": f"{query_param.mode}:fallback",
+                        "fallback_reason": "query_result_none",
+                    },
+                },
+            )
+        return result
+    else:
+        raise ValueError(f"未知的查询模式: {query_param.mode}")
+
+
+async def run_query(query: str, query_param: QueryParam) -> QueryResult:
+    trace = []
+    token = stages.set(trace)
+    try:
+        result = await _run_query(query, query_param)
+        result.raw_data = result.raw_data or {}
+        result.raw_data.setdefault('metadata', {})['executed_stages'] = trace
+        return result
+    finally:
+        stages.reset(token)
