@@ -15,7 +15,7 @@ class SearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=4000)
     top_k: int = Field(default=5, ge=1, le=10)
 
-@search_router.post('/knowledge/search', summary='知识库MCP-执行本次任务授权范围内的检索')
+@search_router.post('/knowledge/search', summary='知识库MCP-原始查询混合检索及模型重排，返回原文与来源')
 async def search_for_mcp(data: SearchRequest, authorization: str = Header(default='')):
     scheme, _, token = authorization.partition(' ')
     if scheme.lower() != 'bearer' or not token:

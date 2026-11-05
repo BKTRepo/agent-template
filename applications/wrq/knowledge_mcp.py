@@ -12,7 +12,7 @@ mcp = FastMCP('knowledge')
 
 @mcp.tool()
 def knowledge_search(query: str, top_k: int = 5) -> dict:
-    """检索本次技能已挂载的知识库，返回原文及来源；无命中时调整关键词。"""
+    """用原始问题在本次技能挂载范围内混合检索并重排序，返回原文及来源；无命中时调整关键词。"""
     request = Request(os.environ['KNOWLEDGE_SEARCH_URL'],
         data=json.dumps(dict(query=query, top_k=top_k)).encode(),
         headers={'Content-Type':'application/json', 'Authorization':'Bearer '+os.environ['KNOWLEDGE_RUN_TOKEN']}, method='POST')

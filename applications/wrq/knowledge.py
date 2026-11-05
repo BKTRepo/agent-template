@@ -1,7 +1,5 @@
 """知识库运行范围与权限；本模块不接收模型提供的用户身份或知识库授权。"""
-import asyncio
 import hashlib
-import json
 import secrets
 import time
 from datetime import datetime, timedelta
@@ -11,8 +9,7 @@ from applications.wrq.agent.models.agent_model import Skill, SkillVersion, Skill
 from applications.wrq.agent.services.developer_skill_crud import DeveloperError
 from applications.wrq.models.knowledge_execution_model import KnowledgeExecution, KnowledgeToolCall
 from enums import DocumentStatus
-from applications.knowledge_base.rag.embedding import embed_texts
-from applications.knowledge_base.rag.milvus_store import hybrid_query_chunks
+from applications.wrq.agent.services.mcp_knowledge_retrieval import retrieve_mcp_chunks
 
 
 def knowledge_permissions(user_id, kb):
@@ -93,11 +90,7 @@ async def search(token, query, top_k=5):
     call = await KnowledgeToolCall.create(run_id=context.run_id, owner_id=context.owner_id, query=query)
     started = time.monotonic()
     try:
-        vectors = await embed_texts([query])
-        jobs = sorted({j for d in context.scope for j in d['jobs']})
-        expression = 'doc_id in ' + json.dumps(jobs)
-        chunks = await asyncio.to_thread(
-            hybrid_query_chunks, vectors, query, top_k=top_k, filter_expr=expression)
+        chunks, retrieval = await retrieve_mcp_chunks(query, context.scope, top_k)
         await authorized_execution(token)
         docs = {j: d for d in context.scope for j in d['jobs']}
         matches = []
@@ -105,12 +98,15 @@ async def search(token, query, top_k=5):
             doc = docs.get(chunk['doc_id'])
             if not doc or chunk['id'] not in doc['chunk_ids']:
                 raise DeveloperError('检索结果不属于授权索引', 409)
-            matches.append(dict(knowledge_base_id=doc['knowledge_base_id'], document_id=doc['document_id'],
-                chunk_id=chunk['id'], filename=doc['filename'], text=chunk['content']))
+            match = dict(knowledge_base_id=doc['knowledge_base_id'], document_id=doc['document_id'],
+                chunk_id=chunk['id'], filename=doc['filename'], text=chunk['content'])
+            if 'rerank_score' in chunk:
+                match['rerank_score'] = chunk['rerank_score']
+            matches.append(match)
         call.status, call.matches = 'success', matches
         call.duration_ms = int((time.monotonic()-started)*1000)
         await call.save()
-        return dict(search_id=call.id, trace_id=call.id, status='ok', matches=matches)
+        return dict(search_id=call.id, trace_id=call.id, status='ok', matches=matches, retrieval=retrieval)
     except Exception as exc:
         call.status, call.error_type = 'failed', type(exc).__name__
         call.duration_ms = int((time.monotonic()-started)*1000)
