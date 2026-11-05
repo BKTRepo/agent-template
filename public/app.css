@@ -12577,6 +12577,295 @@ button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):n
     --success-soft-foreground: color-mix(in oklab, var(--success) 92%, var(--foreground) 8%);
   }
 }
+.login-page:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  min-height: 100vh;
+  height: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(0,1.05fr) minmax(420px,1fr);
+  overflow: auto;
+  background: #f5f8fc;
+}
+.login-intro:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 50px;
+  padding: 48px clamp(32px,5vw,84px);
+  background: linear-gradient(145deg,#061a36,#123e72);
+  color: #fff;
+}
+.login-brand:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 20px;
+  font-weight: 700;
+}
+.login-brand:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) .platform-mark {
+  width: 42px;
+  height: 42px;
+}
+.login-eyebrow:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  color: #a8ceff;
+  font-size: 14px;
+  margin-bottom: 22px;
+  letter-spacing: 2px;
+}
+.login-intro:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) h1 {
+  font-size: clamp(32px,3.3vw,52px);
+  line-height: 1.45;
+  letter-spacing: 1px;
+  font-weight: 700;
+}
+.login-lead:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  margin-top: 24px;
+  color: #c6d8ed;
+  line-height: 1.9;
+  font-size: 16px;
+  max-width: 430px;
+}
+.login-features:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 40px;
+  color: #dbe9fb;
+  font-size: 15px;
+}
+.login-features:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) span {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.login-features:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) svg {
+  color: #8fc1ff;
+}
+.login-caption:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  color: #a7bed9;
+  font-size: 12px;
+}
+.login-panel:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 28px;
+}
+.login-card:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  width: 100%;
+  max-width: 410px;
+  background: #fff;
+  padding: 36px;
+  border: 1px solid #e4ebf4;
+  border-radius: 16px;
+  box-shadow: 0 12px 40px #102b5010;
+}
+.login-icon:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  color: #1665c5;
+  background: #eaf3ff;
+  margin-bottom: 24px;
+}
+.login-card:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) h2 {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+.login-subtitle:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  color: #65758d;
+  font-size: 14px;
+  margin-top: 9px;
+  margin-bottom: 30px;
+}
+.login-field:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #30425d;
+  margin-bottom: 22px;
+}
+.login-field:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) input {
+  width: 100%;
+  height: 48px;
+  padding: 0 13px;
+  border: 1px solid #cbd7e6;
+  border-radius: 8px;
+  background: #fff;
+  color: #17233d;
+  outline: none;
+  font-size: 15px;
+  font-weight: 400;
+}
+.login-field:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) input:focus {
+  border-color: #1677ff;
+  box-shadow: 0 0 0 3px #1677ff18;
+}
+.login-field:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) input::placeholder {
+  color: #7b879c;
+}
+.login-field:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) input:disabled {
+  background: #f5f7fa;
+}
+.login-password:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  display: block;
+  position: relative;
+}
+.login-password:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) input {
+  padding-right: 50px;
+}
+.login-password-toggle:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  position: absolute;
+  right: 2px;
+  top: 2px;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: #526783;
+}
+.login-password-toggle:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  color: #125cc0;
+  background: #edf4ff;
+}
+.login-submit:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  width: 100%;
+  min-height: 48px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 9px;
+  background: #166bdb;
+  color: #fff;
+  border: 0;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  margin-top: 8px;
+  transition: background 150ms;
+}
+.login-submit:hover:not(:disabled):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  background: #1056b5;
+}
+.login-error:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  color: #a32525;
+  background: #fff1f1;
+  border: 1px solid #f4cbcb;
+  padding: 11px 12px;
+  border-radius: 7px;
+  line-height: 1.6;
+  margin-bottom: 18px;
+  font-size: 14px;
+}
+.login-help:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  margin-top: 24px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #65758d;
+  text-align: center;
+}
+.platform-account:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.platform-account-name:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: 160px;
+}
+.platform-account-name:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) strong,.platform-account-name:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.platform-account-name:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) strong {
+  font-size: 14px;
+}
+.platform-account-name:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) span {
+  font-size: 12px;
+  color: #65758d;
+}
+.account-logout:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  margin-left: 8px;
+}
+.auth-loading:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #f5f8fc;
+}
+.auth-loading:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) .surface {
+  padding: 32px;
+  max-width: 540px;
+}
+.auth-loading:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) h1 {
+  font-size: 20px;
+  margin-bottom: 18px;
+}
+.auth-loading:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) p {
+  margin-bottom: 18px;
+  line-height: 1.7;
+}
+.auth-loading:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) button+button {
+  margin-left: 10px;
+}
+@media (max-width:800px) {
+  .login-page:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+    grid-template-columns: 1fr;
+  }
+  .login-intro:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+    padding: 26px;
+    gap: 30px;
+  }
+  .login-intro:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) h1 {
+    font-size: 30px;
+  }
+  .login-eyebrow:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+    margin-bottom: 10px;
+  }
+  .login-lead:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+    margin-top: 12px;
+    font-size: 14px;
+  }
+  .login-features:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),.login-caption:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+    display: none;
+  }
+  .login-panel:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+    padding: 28px 20px;
+  }
+  .login-card:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+    padding: 28px;
+  }
+}
+@media (max-width:480px) {
+  .platform-account-name:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+    max-width: 100px;
+  }
+  .account-logout {
+    font-size: 0 !important;
+    padding: 8px !important;
+  }
+  .account-logout:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+    min-width: 36px;
+  }
+  .account-logout:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) svg {
+    width: 18px;
+    height: 18px;
+  }
+  .login-intro:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+    gap: 24px;
+  }
+}
 :root:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   --platform-blue: #1677ff;
   --platform-blue-rgb: 22 119 255;

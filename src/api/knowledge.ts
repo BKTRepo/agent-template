@@ -1,3 +1,4 @@
+import { authFetch } from './authFetch'
 import { useAuthStore } from '@/stores/authStore'
 import { useAccessStore } from '@/stores/accessStore'
 import { hasSkillSession, skillAccount } from './skillSession'
@@ -15,11 +16,11 @@ interface ServerKnowledge {
 export async function knowledgeRequest<T>(path: string, options: RequestInit = {}): Promise<{ data: T; total?: number }> {
   if (!hasSkillSession()) throw new Error('请先登录平台后再使用知识库。')
   const token = useAuthStore.getState().session?.token
-  const response = await fetch(path, { ...options, cache: 'no-store', headers: {
+  const response = await authFetch(path, { ...options, cache: 'no-store', headers: {
     ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
     ...(token ? { token } : {}), ...options.headers,
   } })
-  if (response.status === 401) { useAuthStore.getState().setSession(null); throw new Error('登录已失效，请重新登录平台。') }
+  if (response.status === 401) throw new Error('登录已失效，请重新登录平台。')
   const result = await response.json().catch(() => null)
   if (!response.ok || result?.status !== 'success') throw new Error(result?.message || result?.detail || '知识库请求失败，请检查平台登录和服务连接。')
   return result
@@ -94,7 +95,7 @@ export async function saveKnowledgeBase(form: Omit<KnowledgeBase, 'id' | 'update
 }
 export async function downloadKnowledgeFile(kbId: string, documentId: string) {
   const token = useAuthStore.getState().session?.token
-  const response = await fetch(`/knowledge-bases/documents/download?${new URLSearchParams({ kb_id: kbId, doc_id: documentId })}`, { headers: token ? { token } : {}, cache: 'no-store' })
+  const response = await authFetch(`/knowledge-bases/documents/download?${new URLSearchParams({ kb_id: kbId, doc_id: documentId })}`, { headers: token ? { token } : {}, cache: 'no-store' })
   if (!response.ok || /json|text\/html/i.test(response.headers.get('Content-Type') || '')) throw new Error('原文件下载失败，请检查访问权限。')
   return response.blob()
 }

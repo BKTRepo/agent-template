@@ -65,8 +65,8 @@ function buildProxyHeaders(req, target, realtime) {
     if (!HOP_BY_HOP.has(key.toLowerCase())) headers[key] = value
   }
   headers.host = target.host
-  if (realtime && process.env.REALTIME_DEBUG_TOKEN) headers.token = process.env.REALTIME_DEBUG_TOKEN
-  if (!realtime && (process.env.SKILL_API_TOKEN || process.env.REALTIME_DEBUG_TOKEN)) {
+  if (!headers.token && realtime && process.env.REALTIME_DEBUG_TOKEN) headers.token = process.env.REALTIME_DEBUG_TOKEN
+  if (!headers.token && !realtime && (process.env.SKILL_API_TOKEN || process.env.REALTIME_DEBUG_TOKEN)) {
     headers.token = process.env.SKILL_API_TOKEN || process.env.REALTIME_DEBUG_TOKEN
   }
   return headers

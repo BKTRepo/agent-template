@@ -1,3 +1,4 @@
+import { authFetch } from './authFetch'
 import { useAuthStore } from '@/stores/authStore'
 import { readBlob, saveBlobs } from '@/lib/resourceStorage'
 import { debugDocumentLimits, documentExtensions, validateResourceFiles } from '@/lib/skillForm'
@@ -90,7 +91,7 @@ export async function mountedDebugFiles(item: Implementation): Promise<File[]> {
     let blob = await readBlob(`resource:${resource.id}`)
     const resourceUrl = skillResourceDownloadUrl(resource)
     if (!blob && resourceUrl) {
-      const response = await fetch(resourceUrl, { headers: authHeaders(), cache: 'no-store' })
+      const response = await authFetch(resourceUrl, { headers: authHeaders(), cache: 'no-store' })
       if (!response.ok) throw new Error(await errorMessage(response, `挂载资源“${resource.name}”下载失败。`))
       if (/json|text\/html/.test(response.headers.get('content-type') || '')) throw new Error(`挂载资源“${resource.name}”没有返回原文件。`)
       blob = await response.blob()
@@ -119,7 +120,7 @@ function resultDocumentUrl(runId: string, document: RealtimeDocument) {
 
 export async function downloadRealtimeDocument(runId: string, skillName: string, signal?: AbortSignal, document?: RealtimeDocument) {
   const path = document ? resultDocumentUrl(runId, document) : `${base}/runs/${encodeURIComponent(runId)}/document`
-  const response = await fetch(path, { headers: authHeaders(), signal, cache: 'no-store' })
+  const response = await authFetch(path, { headers: authHeaders(), signal, cache: 'no-store' })
   if (!response.ok) throw new Error(await errorMessage(response, '调试结果文档下载失败，请重试下载。'))
   const type = response.headers.get('content-type') ?? ''
   const name = document ? documentName(null, document.filename)
@@ -181,13 +182,13 @@ async function taskResponse(response: Response, skillId: string): Promise<Realti
 }
 
 export async function getRealtimeRun(skillId: string, runId: string, signal?: AbortSignal) {
-  const response = await fetch(`${base}/runs/${encodeURIComponent(runId)}`, { headers: authHeaders(), signal, cache: 'no-store' })
+  const response = await authFetch(`${base}/runs/${encodeURIComponent(runId)}`, { headers: authHeaders(), signal, cache: 'no-store' })
   const task = await taskResponse(response, skillId)
   if (task.run_id !== runId) throw new Error('调试接口返回了其他任务编号，已停止处理。')
   return task
 }
 export async function getLatestRealtimeRun(skillId: string, signal?: AbortSignal) {
-  const response = await fetch(`${base}/skills/${encodeURIComponent(skillId)}/latest-run`, { headers: authHeaders(), signal, cache: 'no-store' })
+  const response = await authFetch(`${base}/skills/${encodeURIComponent(skillId)}/latest-run`, { headers: authHeaders(), signal, cache: 'no-store' })
   if (response.status === 404) return null
   return taskResponse(response, skillId)
 }
@@ -316,7 +317,7 @@ async function createDebugTask(item: Implementation, input: DebugInput, markdown
     submission.append('source', JSON.stringify({ skill_id: Number(item.backendSkillId || item.id), build_id: item.buildId,
       request_id: requestId, conversation_input: input.conversation.trim() }))
     selected.forEach(file => submission.append('documents', file, file.name))
-    const response = await fetch('/skills/catalog/create-test-run', { method: 'POST', headers: authHeaders(), body: submission })
+    const response = await authFetch('/skills/catalog/create-test-run', { method: 'POST', headers: authHeaders(), body: submission })
     const task = await taskResponse(response, item.backendSkillId || item.id)
     pendingCatalogIds.delete(requestKey)
     const debug: DebugRun = { id: task.run_id, runId: task.run_id, buildId: item.buildId, skillVersionId: item.skillVersionId,
@@ -349,7 +350,7 @@ async function createDebugTask(item: Implementation, input: DebugInput, markdown
     // 沿用同事既定接口：filename 为原文件名，不新增目录传参要求。
     form.append('mounted_resources', file, file.name)
   }
-  const response = await fetch(`${base}/runs`, { method: 'POST', headers: authHeaders(), body: form })
+  const response = await authFetch(`${base}/runs`, { method: 'POST', headers: authHeaders(), body: form })
   const task = await taskResponse(response, item.backendSkillId || item.id)
   const debug: DebugRun = { id: task.run_id, runId: task.run_id, buildId: item.buildId,
     skillVersionId: item.skillVersionId, input, conversationInput: input.conversation.trim(), requestDocumentCount: input.documents.length,

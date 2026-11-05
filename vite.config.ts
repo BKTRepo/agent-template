@@ -39,9 +39,9 @@ export default defineConfig(({ mode }) => {
     changeOrigin: true,
     configure(proxy) {
       proxy.on('proxyReq', request => {
-        // 默认与实时调试共用同一个后端 token；拆分部署时可单独设置 SKILL_API_TOKEN 覆盖。
+        // 优先保留当前登录用户的 token，环境配置仅作未携带 token 时的兼容回退。
         const token = env.SKILL_API_TOKEN || env.REALTIME_DEBUG_TOKEN
-        if (token) request.setHeader('token', token)
+        if (token && !request.getHeader('token')) request.setHeader('token', token)
       })
     },
   }
@@ -53,7 +53,7 @@ export default defineConfig(({ mode }) => {
     configure(proxy) {
       proxy.on('proxyReq', request => {
         const token = env.REALTIME_DEBUG_USE_SKILL_TOKEN === 'true' ? env.SKILL_API_TOKEN : env.REALTIME_DEBUG_TOKEN
-        if (token) request.setHeader('token', token)
+        if (token && !request.getHeader('token')) request.setHeader('token', token)
       })
     },
   }

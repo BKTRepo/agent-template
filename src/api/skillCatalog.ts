@@ -1,3 +1,4 @@
+import { authFetch } from './authFetch'
 import { request, toImplementation, type ServerSkill, type DeveloperCatalogOption } from './developerCenter'
 import { useAuthStore } from '@/stores/authStore'
 import { downloadBlob } from '@/lib/resourceStorage'
@@ -36,7 +37,7 @@ export async function prepareCatalogTest(id: string, signal?: AbortSignal) {
 }
 async function binary(path: string, signal?: AbortSignal) {
   const token = useAuthStore.getState().session?.token
-  const response = await fetch(path, { headers: token ? { token } : {}, cache: 'no-store', signal })
+  const response = await authFetch(path, { headers: token ? { token } : {}, cache: 'no-store', signal })
   if (!response.ok) {
     const result = await response.json().catch(() => null)
     throw new Error(result?.message || '发布资源下载失败，请刷新技能目录后重试。')

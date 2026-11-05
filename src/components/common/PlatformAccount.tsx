@@ -1,9 +1,12 @@
+import { LogOut } from 'lucide-react'
+import { useAuthStore } from '@/stores/authStore'
+
 export default function PlatformAccount() {
-  // 右上角沿用原型展示；接口权限仍由平台 token 的真实用户决定。
-  return <>
-    <div className="team-selector">
-      <span>当前团队：</span><strong>测试一组</strong><span className="team-chevron" aria-hidden="true">∨</span>
-    </div>
-    <span className="platform-avatar" aria-label="用户头像">何</span>
-  </>
+  const session = useAuthStore(state => state.session)
+  const name = session?.alias || session?.username || '未登录'
+  return <div className="platform-account">
+    <span className="platform-avatar" aria-label="用户头像">{Array.from(name)[0]}</span>
+    <div className="platform-account-name"><strong>{name}</strong><span>{session?.username}</span></div>
+    <button type="button" className="button small account-logout" onClick={() => useAuthStore.getState().clearSession()}><LogOut size={16} />退出登录</button>
+  </div>
 }

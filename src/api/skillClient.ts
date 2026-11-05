@@ -1,3 +1,4 @@
+import { authFetch } from './authFetch'
 import { useAuthStore } from '@/stores/authStore'
 import type { Implementation, SkillBuild, SkillUploads } from '@/types/developer'
 import { hasSkillSession, skillAccount } from './skillSession'
@@ -16,9 +17,9 @@ async function request<T>(path: string, options: RequestInit = {}, authenticated
   if (authenticated && !hasSkillSession()) throw new SkillApiError('请先登录后再生成 Skill。')
   let response: Response
   try {
-    response = await fetch(path, { ...options, headers: { ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...(authenticated && token ? { token } : {}), ...options.headers } })
+    response = await authFetch(path, { ...options, headers: { ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...(authenticated && token ? { token } : {}), ...options.headers } })
   } catch { throw new SkillApiError('无法连接后端，请检查后端服务和代理配置。') }
-  if (response.status === 401) { useAuthStore.getState().setSession(null); throw new SkillApiError('登录已失效，请重新登录。') }
+  if (response.status === 401) throw new SkillApiError('登录已失效，请重新登录。')
   let result: ApiResponse<T>
   try { result = await response.json() } catch { throw new SkillApiError('后端未返回 JSON，请检查接口代理和后端启动状态。') }
   if (!response.ok || result.status !== 'success') {
@@ -70,7 +71,7 @@ export function saveSkillDefinition(item: Implementation, markdown: string) {
 export async function downloadBuild(item: Implementation) {
   await readBuild(item)
   const token = useAuthStore.getState().session?.token
-  const response = await fetch(`/skills/packages/download-build?${new URLSearchParams({ skill_id: item.backendSkillId!, build_id: item.buildId! })}`, { headers: token ? { token } : {} })
+  const response = await authFetch(`/skills/packages/download-build?${new URLSearchParams({ skill_id: item.backendSkillId!, build_id: item.buildId! })}`, { headers: token ? { token } : {} })
   if (!response.ok || !response.headers.get('Content-Type')?.includes('application/zip')) throw new SkillApiError('下载失败，请重新查询生成结果或登录。')
   const url = URL.createObjectURL(await response.blob())
   const link = document.createElement('a'); link.href = url; link.download = `${item.technicalName}.zip`; link.click()

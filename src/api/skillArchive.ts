@@ -1,3 +1,4 @@
+import { authFetch } from './authFetch'
 import { createZip } from '@/lib/zip'
 import type { ZipEntry } from '@/lib/zip'
 import { downloadBlob, readBlob, saveBlobs } from '@/lib/resourceStorage'
@@ -24,7 +25,7 @@ export async function restoreSkillUploads(item: ImplementationForm, provided: Sk
     const resourceUrl = skillResourceDownloadUrl(row)
     if (!blob && resourceUrl) {
       const token = useAuthStore.getState().session?.token
-      const response = await fetch(resourceUrl, { headers: token ? { token } : {} })
+      const response = await authFetch(resourceUrl, { headers: token ? { token } : {} })
       if (!response.ok) throw new Error(`资源 ${row.name} 下载失败，请检查平台凭证和原文件。`)
       blob = await response.blob()
     }

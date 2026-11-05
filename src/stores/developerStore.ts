@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { useAuthStore } from './authStore'
 import { setApplicationCatalog } from '@/lib/access'
 import type { Implementation } from '@/types/developer'
 import { getDeveloperMetadata, listDeveloperSkillsPage, type DeveloperCatalogOption } from '@/api/developerCenter'
@@ -29,16 +30,18 @@ export const useDeveloperStore = create<DeveloperState>((set) => ({
   total: 0,
   pages: 1,
   load: async (requestedPage = 1) => {
+    const token = useAuthStore.getState().session?.token
     set({ loading: true })
     try {
       const state = useDeveloperStore.getState()
       const page = Math.max(1, Math.min(requestedPage, Math.max(1, state.pages)))
       const [result, metadata] = await Promise.all([listDeveloperSkillsPage(page, state.pageSize), getDeveloperMetadata()])
+      if (useAuthStore.getState().session?.token !== token) return
       setApplicationCatalog(metadata.applications)
       set({ implementations: result.items, skillClasses: metadata.skill_classes, applications: metadata.applications,
         page: result.page, pageSize: result.pageSize, total: result.total, pages: Math.max(1, result.pages) })
     }
-    finally { set({ loading: false }) }
+    finally { if (useAuthStore.getState().session?.token === token) set({ loading: false }) }
   },
   replace: item => set(state => ({ implementations: state.implementations.some(row => row.id === item.id) ? state.implementations.map(row => row.id === item.id ? item : row) : [item, ...state.implementations] })),
   patch: (id, changes) => set(state => ({ implementations: state.implementations.map(row => row.id === id ? { ...row, ...changes } : row) })),

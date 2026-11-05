@@ -6,7 +6,10 @@ import KnowledgePage from '@/pages/KnowledgePage'
 import SkillsPage from '@/pages/SkillsPage'
 import { useDeveloperStore } from '@/stores/developerStore'
 import { useAccessStore } from '@/stores/accessStore'
-import { getPlatformContext } from '@/api/developerCenter'
+import { currentUser } from '@/api/auth'
+import { useAuthStore } from '@/stores/authStore'
+import { useKnowledgeStore } from '@/stores/knowledgeStore'
+import LoginPage from '@/pages/LoginPage'
 import PlatformAccount from '@/components/common/PlatformAccount'
 import FloatingAssistant from '@/components/assistant/FloatingAssistant'
 import KnowledgeProcessingWorker from '@/components/developer/KnowledgeProcessingWorker'
@@ -26,17 +29,35 @@ const navigation = [
 ]
 
 export default function App() {
+  const token = useAuthStore(state => state.session?.token)
+  const [verifiedToken, setVerifiedToken] = useState('')
+  const [error, setError] = useState('')
+  const [retry, setRetry] = useState(0)
+  useEffect(() => {
+    const controller = new AbortController()
+    setVerifiedToken(''); setError('')
+    useAccessStore.getState().setIdentity({ id: '', name: '未登录' })
+    useDeveloperStore.setState({ implementations: [], skillClasses: [], applications: [], total: 0, pages: 1, page: 1, loading: false })
+    useKnowledgeStore.setState({ knowledgeBases: [], error: '', loading: false })
+    if (token) void currentUser(controller.signal).then(user => {
+      const session = useAuthStore.getState().session
+      if (controller.signal.aborted || session?.token !== token) return
+      useAuthStore.getState().setSession({ ...session, username: user.username, alias: user.alias || user.username, userId: String(user.id ?? '') })
+      useAccessStore.getState().setIdentity({ id: user.username, name: user.alias || user.username })
+      setVerifiedToken(token)
+    }).catch(reason => { if (!controller.signal.aborted) setError((reason as Error).message) })
+    return () => controller.abort()
+  }, [token, retry])
+  if (!token) return <LoginPage />
+  if (verifiedToken !== token) return <main className="auth-loading" aria-live="polite"><div className="surface"><h1>{error ? '暂时无法确认登录状态' : '正在确认登录状态…'}</h1>{error && <><p role="alert">{error}</p><button className="button primary" onClick={() => setRetry(value => value + 1)}>重试</button><button className="button" onClick={() => useAuthStore.getState().clearSession()}>返回登录</button></>}</div></main>
+  return <Workspace key={token} />
+}
+
+function Workspace() {
   const [page, setPage] = useState('developer')
   const [mobileMenu, setMobileMenu] = useState(false)
   const { implementations } = useDeveloperStore()
   const actor = useAccessStore(state => state.actor)
-  const { setIdentity } = useAccessStore()
-  useEffect(() => {
-    useDeveloperStore.setState({ implementations: [], skillClasses: [], applications: [] })
-    let active = true
-    void getPlatformContext().then(identity => { if (active) setIdentity(identity) }).catch(() => { if (active) setIdentity({ id: '', name: '' }) })
-    return () => { active = false }
-  }, [setIdentity])
   const pending = implementations.filter(item => ['草稿', '已生成', '调试中'].includes(item.status)).length
   const label = navigation.flatMap(group => group.items).find(item => item.id === page)?.label ?? '开发者中心'
   return <ErrorBoundary><div className="platform">

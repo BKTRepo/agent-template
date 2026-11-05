@@ -1,3 +1,4 @@
+import { authFetch } from './authFetch'
 import { useAuthStore } from '@/stores/authStore'
 import { hasSkillSession } from './skillSession'
 import { restoreSkillUploads } from './skillArchive'
@@ -58,11 +59,10 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
   const token = useAuthStore.getState().session?.token
   if (!hasSkillSession()) throw new DeveloperCenterError('平台认证未配置，请检查接口代理的token配置。')
   let response: Response
-  try { response = await fetch(path, { ...options, cache: options.cache ?? 'no-store', headers: { ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...(token ? { token } : {}), ...options.headers } }) }
+  try { response = await authFetch(path, { ...options, cache: options.cache ?? 'no-store', headers: { ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...(token ? { token } : {}), ...options.headers } }) }
   catch (error) { if (options.signal?.aborted) throw error; throw new DeveloperCenterError('无法连接后端，请检查后端服务是否已启动。') }
   if (response.status === 401) {
-    useAuthStore.getState().setSession(null)
-    throw new DeveloperCenterError('平台凭证已失效，请更新服务端代理token。')
+    throw new DeveloperCenterError('平台凭证已失效，请重新登录。')
   }
   let result: ApiResponse<T>
   try { result = await response.json() } catch { throw new DeveloperCenterError('后端返回格式异常。') }
