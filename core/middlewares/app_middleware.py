@@ -165,6 +165,15 @@ async def logging_middleware(request: Request, call_next):
     request_tags: str = ROUTER_TAGS.get(request_router or "未定义", "未定义")
     request_summary: str = ROUTER_SUMMARY.get(request_router or "未定义", "未定义")
     request_body: bytes = request_body if is_upload else original_request_body.decode("utf-8", errors="ignore")
+    if request_router == LOGIN_ACCESS_TOKEN_PATH:
+        # 原始请求继续交给登录接口；审计仅记录脱敏副本。
+        try:
+            login_params = orjson.loads(original_request_body)
+            if isinstance(login_params, dict) and "password" in login_params:
+                login_params["password"] = "[REDACTED]"
+            request_body = orjson.dumps(login_params).decode("utf-8")
+        except (orjson.JSONDecodeError, TypeError):
+            request_body = "<LOGIN REQUEST>"
     request_params: str = unquote(request.query_params.__str__())
 
     # 请求流传递并获取响应
@@ -242,6 +251,14 @@ async def logging_middleware(request: Request, call_next):
                     audit_log["response_code"] = _response.get("code", "")
                     audit_log["response_message"] = _response.get("message", "")[:512]
                 audit_log["response_params"] = response_body
+                if request_router == LOGIN_ACCESS_TOKEN_PATH and isinstance(_response, dict):
+                    logged_response = dict(_response)
+                    if isinstance(logged_response.get("data"), dict):
+                        logged_response["data"] = dict(logged_response["data"])
+                        for field in ("access_token", "refresh_token", "password"):
+                            if field in logged_response["data"]:
+                                logged_response["data"][field] = "[REDACTED]"
+                    audit_log["response_params"] = orjson.dumps(logged_response).decode("utf-8")
             except orjson.JSONDecodeError:
                 audit_log["response_params"] = response_body
 

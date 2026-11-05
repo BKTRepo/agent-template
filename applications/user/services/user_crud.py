@@ -70,6 +70,8 @@ class UserCrud(ScaffoldCrud[User, UserCreate, UserUpdate]):
             raise NotFoundException(message="用户名或密码错误")
         if user.state == 1:
             raise NoPermissionException(message="用户待岗或已离职")
+        if not user.is_active:
+            raise NoPermissionException(message="账号未激活，请联系管理员")
         return user
 
     async def update_last_login(self, id: int) -> None:
