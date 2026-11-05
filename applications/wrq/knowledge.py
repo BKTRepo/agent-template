@@ -12,7 +12,7 @@ from applications.wrq.agent.services.developer_skill_crud import DeveloperError
 from applications.wrq.models.knowledge_execution_model import KnowledgeExecution, KnowledgeToolCall
 from enums import DocumentStatus
 from applications.knowledge_base.rag.embedding import embed_texts
-from applications.knowledge_base.rag.milvus_store import _milvus_client, _search_chunks
+from applications.knowledge_base.rag.milvus_store import hybrid_query_chunks
 
 
 def knowledge_permissions(user_id, kb):
@@ -96,10 +96,8 @@ async def search(token, query, top_k=5):
         vectors = await embed_texts([query])
         jobs = sorted({j for d in context.scope for j in d['jobs']})
         expression = 'doc_id in ' + json.dumps(jobs)
-        def retrieve():
-            with _milvus_client() as client:
-                return _search_chunks(client, vectors, top_k, filter_expr=expression)
-        chunks = await asyncio.to_thread(retrieve)
+        chunks = await asyncio.to_thread(
+            hybrid_query_chunks, vectors, query, top_k=top_k, filter_expr=expression)
         await authorized_execution(token)
         docs = {j: d for d in context.scope for j in d['jobs']}
         matches = []

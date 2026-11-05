@@ -624,7 +624,11 @@ def hybrid_query_chunks(
         # 整个问题判定为“无召回”：退回同一查询的 Dense 结果，后续仍由
         # RRF 外层和 rerank 统一排序。
         try:
-            fallback = query_chunks(query_vectors, top_k=top_k)
+            fallback = _run_milvus_read_with_retry(
+                "混合检索向量回退",
+                lambda fallback_client: _search_chunks(
+                    fallback_client, query_vectors, top_k, filter_expr=filter_expr),
+            )
             for chunk in fallback:
                 chunk["source"] = "milvus_dense_fallback"
             return fallback

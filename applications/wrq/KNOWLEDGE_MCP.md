@@ -9,6 +9,7 @@
 3. 创建沙箱任务时，multipart 同时提交 skill_id、skill_version_id、build_id；服务端核验本人及当前构建，读取服务端保存的 Skill 定义。
 4. WRQ 根据真实绑定生成本次任务范围，只含可见且处理完成的知识库。短期访问凭据只保存哈希，容器凭据通过运行环境传入，不写入 Skill 包或模型提示词。
 5. 容器中的 Claude Agent SDK 注册 knowledge_search。模型自主调用，stdio MCP 桥接器将请求发到知识库后端。后端先限制 Milvus 文档范围再搜索，不使用全库回退。
+   MCP 检索复用 `hybrid_query_chunks`：Dense 向量与 BM25 关键词分别召回（默认各 60 条），通过 RRF 融合后返回请求的 top_k（默认 5、最多 10）。所有召回分路及异常时的 Dense 回退均携带同一文档授权过滤；返回前再次核验运行凭据和分块归属。该链路不包含外部模型 Rerank。
 6. SDK 根据 ToolUseBlock / ToolResultBlock 关联调用和结果；模型未调用或无有效命中时，允许两次补充。仍缺证据则失败。普通模型文本中的“已查询”不能通过核验。
 7. 宿主服务核对返回的 search_id 确实属于当前 run_id，并关联工具调用编号及返回记录时间，之后才能完成任务。任务结束后撤销凭据。
 
