@@ -7,7 +7,7 @@ class KnowledgeForm(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     knowledge_name: str = Field(min_length=1, max_length=128)
     description: str = Field(default="", max_length=10_000)
-    tag: Literal["general", "custom", ""] = ""
+    tag: str = Field(default="", max_length=32)
     application: str = Field(default="", max_length=128)
     is_public: bool = True
     change_summary: str = Field(default="", max_length=10_000)

@@ -11,7 +11,7 @@ from tortoise.exceptions import IntegrityError
 from tortoise.expressions import Q
 from tortoise.transactions import in_transaction
 
-from applications.wrq.platform_catalog import validate_application
+from applications.wrq.platform_catalog import validate_application_async
 from applications.wrq.agent.models.agent_model import Skill
 from applications.wrq.agent.services.skill_package_builder import safe_relative_path
 from applications.knowledge_base.models.knowledge_base_model import KnowledgeBase, Document, DocumentChunk
@@ -127,9 +127,15 @@ class KnowledgeService:
                     LOGGER.warning("知识库旧文件暂时无法清理，需在文件不再占用后维护清理：{}", path.name)
 
     async def save(self, user, form: KnowledgeForm, files, *, kb_id=None, expected_document=None):
+        previous = await self.require(kb_id, user, write=True) if kb_id is not None else None
+        from .tag_catalog import validate_tag
         try:
-            if form.application:
-                validate_application(form.application, allow_all=True)
+            await validate_tag(form.tag, previous.tag if previous else None)
+        except ValueError as exc:
+            raise KnowledgeError(str(exc), 'tag') from exc
+        try:
+            if form.application and (not previous or form.application != previous.application):
+                await validate_application_async(form.application, allow_all=True)
         except ValueError as exc:
             raise KnowledgeError(str(exc), "application") from exc
         creating = kb_id is None
@@ -279,6 +285,8 @@ class KnowledgeService:
     async def detail(self, kb_id, user):
         from applications.wrq.knowledge import knowledge_permissions
         kb = await self.require(kb_id, user)
+        from applications.knowledge_base.models.knowledge_base_model import KnowledgeTag
+        tag = await KnowledgeTag.get_or_none(code=kb.tag) if kb.tag else None
         from .conversion_links import sync_knowledge_conversions
         conversions = await sync_knowledge_conversions(kb_id)
         docs = await Document.filter(knowledge_base_id=kb_id).order_by("created_time")
@@ -294,7 +302,7 @@ class KnowledgeService:
         count = await SkillResourceBinding.filter(skill_version_id__in=current,
             source_type='knowledge_base',source_id=kb_id).count()
         return {"id": kb.id, "knowledge_name": kb.knowledge_name, "description": kb.description,
-            "tag": kb.tag, "application": kb.application, "version": next_version(kb.revision),
+            "tag": kb.tag, "tag_name": tag.name if tag else kb.tag, "application": kb.application, "version": next_version(kb.revision),
             "user_id": kb.user_id, "creator_login_name": creator.username, "creator_name": creator.alias or creator.username,
             "maintainer": (kb.history or [{}])[-1].get("maintainer") or creator.alias or creator.username,
             "is_public": kb.is_public, "can_edit": can_edit,

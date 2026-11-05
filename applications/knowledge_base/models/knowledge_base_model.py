@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from tortoise import fields
+from tortoise import fields, models
 
 from applications.base.services.scaffold import (
     ScaffoldModel,
@@ -8,6 +8,19 @@ from applications.base.services.scaffold import (
     unique_identify,
 )
 from enums.chat_session_enum import DocumentStatus
+
+
+class KnowledgeTag(models.Model):
+    id = fields.IntField(pk=True)
+    code = fields.CharField(max_length=32, unique=True, description="稳定标签代码")
+    name = fields.CharField(max_length=64, description="显示名称")
+    is_enabled = fields.BooleanField(default=True)
+    sort_order = fields.IntField(default=0)
+    created_at = fields.DatetimeField(auto_now_add=True)
+    updated_at = fields.DatetimeField(auto_now=True)
+
+    class Meta:
+        table = 'keenrobot_knowledge_tags'
 
 
 class KnowledgeBase(ScaffoldModel, StateModel, TimestampMixin):

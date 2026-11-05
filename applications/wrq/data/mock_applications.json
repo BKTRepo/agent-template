@@ -1,0 +1,12 @@
+{
+  "retCd": "000000", "retMsg": "操作成功",
+  "data": [
+    {"subApplicationId": 1, "subApplicationName": "零售贷款核心", "subApplicationIdentify": "RLCS", "subApplicationStatus": "2", "applicationType": "0"},
+    {"subApplicationId": 2, "subApplicationName": "信用卡系统", "subApplicationIdentify": "CCS", "subApplicationStatus": "2", "applicationType": "0"},
+    {"subApplicationId": 3, "subApplicationName": "核心系统", "subApplicationIdentify": "CORE", "subApplicationStatus": "2", "applicationType": "0"},
+    {"subApplicationId": 4, "subApplicationName": "ATPM", "subApplicationIdentify": "ATPM", "subApplicationStatus": "2", "applicationType": "0"},
+    {"subApplicationId": 5, "subApplicationName": "FNP", "subApplicationIdentify": "FNP", "subApplicationStatus": "2", "applicationType": "0"},
+    {"subApplicationId": 6, "subApplicationName": "BLIM", "subApplicationIdentify": "BLIM", "subApplicationStatus": "2", "applicationType": "0"},
+    {"subApplicationId": 7, "subApplicationName": "智能测试平台", "subApplicationIdentify": "TEST_PLATFORM", "subApplicationStatus": "2", "applicationType": "0"}
+  ]
+}

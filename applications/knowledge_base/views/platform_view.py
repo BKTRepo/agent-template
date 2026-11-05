@@ -2,11 +2,11 @@
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, Request, UploadFile
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.datastructures import UploadFile as StarletteUploadFile
 from starlette.responses import FileResponse
+from applications.wrq.platform_catalog import application_catalog as load_applications
 
-from applications.wrq.platform_catalog import applications
 from applications.wrq.validation_errors import ValidationResponseRoute, validation_issues
 from applications.knowledge_base.models.knowledge_base_model import DocumentChunk
 from applications.knowledge_base.schemas.platform_schema import KnowledgeContentEdit, KnowledgeForm, KnowledgeMountRequest, KnowledgeRetry
@@ -73,7 +73,53 @@ async def save_form(request, background, source, files, user, service, kb_id=Non
 
 @knowledge.get("/applications", summary="知识库和开发者中心-应用选择目录")
 async def application_catalog(current_user: User = DependAuth):
-    return SuccessResponse(data=[{"id": value, "name": value} for value in applications()])
+    return SuccessResponse(data=await load_applications())
+
+
+@knowledge.get('/get-form-metadata', summary='知识库-查询应用目录和已启用标签配置')
+async def form_metadata(current_user: User = DependAuth):
+    from applications.knowledge_base.services.tag_catalog import tag_options
+    return SuccessResponse(data={'applications': await load_applications(), 'tags': await tag_options()})
+
+
+class TagSave(BaseModel):
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
+    id: int | None = Field(default=None, ge=1)
+    code: str = Field(min_length=1, max_length=32, pattern=r'^[a-z][a-z0-9_-]*$')
+    name: str = Field(min_length=1, max_length=64)
+    is_enabled: bool = True
+    sort_order: int = Field(default=0, ge=0)
+
+
+@knowledge.get('/tags', summary='知识库标签-查询配置，管理员可包含已停用项')
+async def list_tags(include_disabled: bool = False, current_user: User = DependAuth):
+    from applications.knowledge_base.services.tag_catalog import tag_options
+    if include_disabled and not current_user.is_superuser:
+        result = ForbiddenResponse(message='仅管理员可管理标签配置'); result.status_code = 403
+        return result
+    return SuccessResponse(data=await tag_options(include_disabled))
+
+
+@knowledge.post('/tags/save', summary='知识库标签-管理员新增或修改名称、排序及启用状态')
+async def save_tag(data: TagSave, current_user: User = DependAuth):
+    from applications.knowledge_base.models.knowledge_base_model import KnowledgeTag
+    from tortoise.exceptions import IntegrityError
+    if not current_user.is_superuser:
+        result = ForbiddenResponse(message='仅管理员可管理标签配置'); result.status_code = 403
+        return result
+    async def operation():
+        row = await KnowledgeTag.get_or_none(id=data.id) if data.id else KnowledgeTag(code=data.code)
+        if row is None:
+            raise KnowledgeError('标签不存在', 'id', 404)
+        if row.code != data.code:
+            raise KnowledgeError('标签代码创建后不可修改，请修改显示名称或新增标签', 'code')
+        row.name, row.is_enabled, row.sort_order = data.name, data.is_enabled, data.sort_order
+        try:
+            await row.save()
+        except IntegrityError as exc:
+            raise KnowledgeError('标签代码已存在', 'code') from exc
+        return {'id': row.id, 'code': row.code, 'name': row.name, 'is_enabled': row.is_enabled, 'sort_order': row.sort_order}
+    return await respond(operation())
 
 
 @knowledge.get("/name-availability", summary="知识库名称唯一性预校验")

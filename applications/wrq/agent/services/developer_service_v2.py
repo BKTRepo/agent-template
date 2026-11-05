@@ -98,7 +98,7 @@ class DeveloperSkillCrud:
         if connection: q=q.using_db(connection)
         return not any(normalized_skill_name(r.name)==key for r in await q)
 
-    async def validate(self,data,user,db=None):
+    async def validate(self,data,user,db=None,existing_application=None):
         for key,message in [('name','技能名称不能为空'),('description','请填写描述'),('instructions','请填写执行指令')]:
             if not getattr(data,key).strip(): raise DeveloperError(message,field=key)
         normalized_skill_name(data.name)
@@ -108,7 +108,7 @@ class DeveloperSkillCrud:
             raise DeveloperError('请选择有效的技能大类',field='class_id')
         apps={r['id'] for r in await application_options()}
         application_paso = data.effective_application_paso
-        if application_paso and application_paso not in apps:
+        if application_paso and application_paso not in apps and application_paso != existing_application:
             raise DeveloperError('请选择应用目录中存在的应用',field='application_paso')
         if (data.uploaded_resources or data.resource_ids) and not data.resource_usage.strip():
             raise DeveloperError('已选择挂载知识库或上传资源，请填写资源使用说明',field='resource_usage')
@@ -218,7 +218,7 @@ class DeveloperSkillCrud:
             async with in_transaction() as db:
                 skill=await self.get(skill_id,user,db)
                 self.check_revision(skill,data.expected_revision)
-                files,kbs=await self.validate(data,user,db)
+                files,kbs=await self.validate(data,user,db,existing_application=skill.application_paso)
                 if not await self.name_available(data.name,skill.id,db):
                     raise DeveloperError('该技能名称已存在，请更换',409,'name')
                 skill.current_revision+=1
