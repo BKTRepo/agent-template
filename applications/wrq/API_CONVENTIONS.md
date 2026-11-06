@@ -70,7 +70,39 @@ Content-Type: application/json
 | POST | /update-skill | JSON：skill_id + SkillUpdate；仍提示使用完整表单 |
 | POST | /delete-skill | JSON：skill_id；复用原草稿删除业务 |
 
-## MCP 服务配置管理
+## 应用目录及知识库标签配置（2026-11-05）
+
+开发者中心、技能中心和知识库共用 applications/wrq/platform_catalog.py。
+默认 APPLICATION_CATALOG_MODE=mock，数据位于 data/mock_applications.json，采用正式接口的 retCd/retMsg/data 格式。
+前端显示 subApplicationName，保存 subApplicationIdentify；不会保存数字 subApplicationId 或显示名称。
+切换 APPLICATION_CATALOG_MODE=remote 后，后端 POST APPLICATION_CATALOG_URL，JSON 请求体为 {}，
+默认地址 http://10.240.105.84:9999/selfTest/queryAllApplication。retCd 必须为 000000；失败不会静默回退 mock。
+APPLICATION_CATALOG_CACHE_SECONDS 默认 60 秒。原 WRQ_PORTAL_APPLICATIONS_URL/PLATFORM_APPLICATIONS 配置不再作为目录来源。
+
+- GET /knowledge-bases/applications：具体应用目录；技能目录另保留 *（全应用适用）。
+- GET /knowledge-bases/get-form-metadata：返回 applications 及已启用 tags。
+- GET /knowledge-bases/tags?include_disabled=true：管理员可包含停用项；普通用户仅能读取启用项。
+- POST /knowledge-bases/tags/save：管理员 JSON 请求体包含可选 id、code、name、is_enabled、sort_order。
+  code 创建后固定，支持名称、排序和启用状态修改。未启用标签不能新选，已有知识库可保留原标签。
+- 知识库保存 tag 为配置代码，详情附 tag_name；修改标签显示名称不改知识库里的稳定代码。
+- 知识库列表和详情返回 can_retry 权限；失败项在列表及详情显示“重试”，无权限时置灰并提示仅创建者可重试。
+  有转换任务的失败文档调用 POST /api/convert/retry，JSON 为 job_id；旧文档使用 POST /knowledge-bases/retry，JSON 为整数 kb_id。
+  前端防止重复提交，重试后刷新进度；部分成功也刷新，下一次仅重试剩余失败项。重试不增加知识库版本。
+- 新建 POST /knowledge-bases/create 的 source 中 description、tag、application 必须提供非空值，纯空白同样拒绝。
+  tag 使用已启用标签代码，application 使用应用 identify。前端在上传转换任务前校验，后端创建模型和服务入口均校验。
+- 编辑 POST /knowledge-bases/save 在事务内比较名称、描述、标签、应用、可见范围及最终文件名/内容哈希集合。
+  无实际变更时保留版本、编辑历史、维护人和知识库更新时间；仅填写 change_summary 或调整保留文件顺序不产生新版本。
+  同名同内容重传可修复原件存储，但不增加知识库版本或重建已完成索引；真实文件或元数据变更才递增一次。
+- POST /api/convert 每次上传创建独立 job_id，文件名不做全局查重；不同知识库允许上传相同文件。
+  任务的原文件、解析产物、向量及权限按任务/知识库隔离，同一知识库内部仍保留重复附件校验。
+  旧库部署前显式执行 `python -m applications.knowledge_base.migrations.rag_filename_scope --apply`，
+  仅移除 rag_document 的单列文件名唯一索引，保留 job_id 唯一索引和现有文档。默认不带 --apply 只展示计划。
+
+新增 keenrobot_knowledge_tags，id 为 INT 自增。显式执行
+`python -m applications.knowledge_base.migrations.knowledge_tag_schema --apply` 建表并添加 general/通识类、custom/自定义。
+重复执行不会覆盖管理员修改；不改现有知识库、技能或资源分类表。默认不带 --apply 只展示计划。
+
+## MCP 服务配置管理接口
 
 以下是配置 CRUD，不是 MCP 协议工具调用入口。路径以 `/mcp-servers` 开头。
 

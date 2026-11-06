@@ -6,9 +6,5 @@ def mysql_connection_options():
 
 
 def wrq_connections(configured):
-    connections = deepcopy(configured)
-    for connection in connections.values():
-        if isinstance(connection, dict) and connection.get('engine', '').endswith('mysql'):
-            # 共享账号最多20连接，不能每个本地服务预占10连接。
-            connection['credentials'].update(minsize=1, maxsize=4)
-    return connections
+    # 接口与 Worker 使用 ProjectConfig 中相同的连接池参数；仅隔离配置对象。
+    return deepcopy(configured)

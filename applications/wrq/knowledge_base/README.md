@@ -7,6 +7,20 @@
 默认 hybrid；依次执行历史消解、术语/双语改写、子问题分解、多路混合召回、摘要/邻块补充、rerank、预算裁剪、引用和回答生成。
 所有文档查询均限定知识库权限范围；空范围不会转换成全库查询。检索证据中 metadata.executed_stages 保存阶段执行状态，rerank 降级记录为 fallback。
 
+## Agent MCP 检索独立链路
+
+POST /skills/knowledge/search 由 knowledge.py 校验短期运行凭据及挂载索引，调用
+agent/services/mcp_knowledge_retrieval.py。固定流程为 Agent 原始查询 → Dense + BM25 →
+Milvus RRF 融合、候选去重 → 复用 rag/rerank.py 模型重排序 → 返回原文与来源。
+候选池按 RRF_TOP_K 获取，top_k 仅限制最终返回条数。全部候选在发送重排 API 前校验授权。
+query 原样用于嵌入、混合检索和重排序，不调用 run_query，不执行查询改写、子问题分解、
+英文扩展、摘要补召回、对话记忆或答案生成。原 POST /chat/stream 完整问答流程保持独立。
+
+响应保留 search_id、trace_id、status、matches；匹配项在重排成功时附 rerank_score，
+retrieval.pipeline 固定为 mcp_hybrid_rerank，retrieval.rerank 为 success、fallback 或 skipped。
+重排失败或超时时按 RRF 顺序返回并标记 fallback；无候选时 skipped。调用记录仍保存最终原文证据。
+两条链路共用既有 RERANK_BINDING_HOST、RERANK_BINDING_API_KEY、RERANK_MODEL 配置及底层实现。
+
 ## 请求与恢复
 
 原 question、conversation_id、knowledge_base_ids、model_config_id 字段保持兼容。

@@ -17,6 +17,12 @@ class KnowledgeForm(BaseModel):
     conversion_job_ids: list[str] = Field(default_factory=list, max_length=100)
 
 
+class KnowledgeCreateForm(KnowledgeForm):
+    description: str = Field(min_length=1, max_length=10_000)
+    tag: str = Field(min_length=1, max_length=32)
+    application: str = Field(min_length=1, max_length=128)
+
+
 class DocumentEdit(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     content: str = Field(min_length=1)

@@ -29,6 +29,21 @@ MCP 使用标准 stdio 协议，由容器内 SDK 启动受控桥接进程。知�
 
 查询为空和查询失败区分记录；有挂载知识库的任务至少需要一次成功且有命中的查询。知识库被更新、删除或撤权时，本次上下文失效，不静默查询其他批次。
 
+## MCP 与问答检索的边界
+
+Agent MCP 固定使用原始 query：Dense + BM25 → Milvus RRF 融合、候选去重 →
+已有 rerank_chunks 模型重排序 → 原文与来源。独立编排位于
+agent/services/mcp_knowledge_retrieval.py，候选池按 RRF_TOP_K 获取，top_k 仅限制最终返回数。
+全部候选先核对授权文档和分块编号，再发送重排 API；返回前再次核对运行凭据和索引版本。
+
+MCP 不调用 run_query，不执行术语改写、子问题分解、英文扩展、摘要补召回、对话记忆和答案生成。
+POST /chat/stream 继续调用 knowledge_base/services/query_service.py 和 rag/query.py 的完整问答链路。
+两者仅复用底层嵌入、混合检索及重排序实现，不共用完整查询编排。
+
+MCP 响应保留 search_id、trace_id、status、matches，新增 retrieval.pipeline=mcp_hybrid_rerank、
+retrieval.candidate_count 和 retrieval.rerank（success/fallback/skipped）。成功重排的匹配项附 rerank_score。
+重排超时或服务失败时，按 RRF 顺序返回最多 top_k 条并明确标记 fallback；没有候选时跳过重排。
+
 ## 部署
 
 在后端目录执行两表迁移（不改挂载表）：
@@ -46,3 +61,6 @@ docker build -t test-case-sandbox:local applications/zhaoyunlong/sandbox
 容器安装的 MCP 版本为 1.27.2。KNOWLEDGE_SEARCH_URL 由后端启动进程环境配置，默认 http://host.docker.internal:8519/skills/knowledge/search，Linux 部署应配置容器实际可访问的后端地址。
 
 Milvus 与嵌入模型沿用已迁移知识库的配置。需完成真实 Docker、模型和 Milvus 的联调后，才能宣布端到端验收通过。隔离测试和 MCP 协议测试不等于该项验收。
+
+重排沿用 RERANK_BINDING_HOST、RERANK_BINDING_API_KEY、RERANK_MODEL；硅基流动示例端点为
+https://api.siliconflow.cn/v1/rerank，模型 BAAI/bge-reranker-v2-m3。须显式配置重排密钥；不会把平台登录或运行凭据发送给模型服务。

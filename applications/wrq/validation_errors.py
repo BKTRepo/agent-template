@@ -43,6 +43,8 @@ def validation_issues(errors, *, knowledge=False):
             reason = f"{label}格式不正确，请检查填写内容"
         else:
             reason = error["msg"]
+        if knowledge and field in {'tag', 'application'} and kind in {'missing', 'string_too_short'}:
+            reason = f"请选择{label}"
         result.append({"field": field, "reason": reason})
     return result
 

@@ -435,6 +435,8 @@ class ProjectConfig(BaseSettings):
     DATABASE_SSL_CERT: str = Field(default="", description="MySQL 客户端证书路径（可选）")
     DATABASE_SSL_KEY: str = Field(default="", description="MySQL 客户端私钥路径（可选）")
     DATABASE_CONNECT_TIMEOUT: int = 15
+    DATABASE_POOL_MIN_SIZE: int = Field(default=1, ge=1, description="每进程数据库连接池最小连接数")
+    DATABASE_POOL_MAX_SIZE: int = Field(default=10, ge=1, description="每进程数据库连接池最大连接数")
 
     # Redis 配置
     REDIS_URL: str = ""
@@ -479,6 +481,8 @@ class ProjectConfig(BaseSettings):
         return self.assemble_connection_urls()
 
     def assemble_connection_urls(self) -> Self:
+        if self.DATABASE_POOL_MIN_SIZE > self.DATABASE_POOL_MAX_SIZE:
+            raise ValueError("DATABASE_POOL_MIN_SIZE 不能大于 DATABASE_POOL_MAX_SIZE")
         db_user = quote_plus(self.DATABASE_USERNAME)
         db_password = quote_plus(self.DATABASE_PASSWORD)
         ssl_query = "&ssl=true" if self.DATABASE_SSL_ENABLED else ""
@@ -504,8 +508,8 @@ class ProjectConfig(BaseSettings):
             "user": self.DATABASE_USERNAME,
             "password": self.DATABASE_PASSWORD,
             "database": self.DATABASE_NAME,
-            "minsize": 10,
-            "maxsize": 40,
+            "minsize": self.DATABASE_POOL_MIN_SIZE,
+            "maxsize": self.DATABASE_POOL_MAX_SIZE,
             "pool_recycle": 3600,
             "charset": "utf8mb4",
             "echo": False,

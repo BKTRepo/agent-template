@@ -347,7 +347,7 @@ class DeveloperSkillCrud:
                 'task':result}
 
     async def list(self,user,*,page=None,page_size=None):
-        query=Skill.filter(create_user_login_name=user_login_name(user),state=0).order_by('-updated_time')
+        query=Skill.filter(create_user_login_name=user_login_name(user),state=0).order_by('-updated_time','-id')
         if page is None or page_size is None:
             return await query
         total=await query.count()

@@ -1,12 +1,14 @@
 ---
 title: 知识库列表返回与前端展示字段对应
 status: 接口已实现，目标库七张知识库处理表已完成整数编号迁移
-last_updated: 2026-11-04
+last_updated: 2026-11-05
 ---
 
 # 知识库列表返回
 
-GET `/knowledge-bases/list?search=...&offset=0&limit=100` 携带平台token，返回 `{code,status,message,data:[知识库记录],total}`，其中total在响应外层。后端只列公开或本人记录，按更新时间倒序。前端以100条逐页读取，经 `src/api/knowledge.ts::toKnowledge` 转换，缓存到 `knowledgeStore.knowledgeBases`，最后在 `KnowledgePage.tsx` 展示。
+GET `/knowledge-bases/list?search=...&offset=0&limit=10` 携带平台token，返回 `{code,status,message,data:[知识库记录],total}`，其中total在响应外层，为权限和搜索过滤后的总条数。limit默认10、最大10，超出上限返回422。后端只列公开或本人记录，先过滤和计数，再按更新时间、编号倒序执行offset/limit，保证相同更新时间下翻页顺序稳定。
+
+知识库管理页面每页10条，只请求当前页，不预先读取所有页。上一页、下一页和页码切换时，经 `src/api/knowledge.ts::listKnowledgeBasesPage` 转换并替换 `knowledgeStore.knowledgeBases`；搜索由后端执行并回到第一页，空结果保留第1页。新建后刷新第一页，编辑后刷新当前页，进度轮询只更新当前页已有记录。2026-11-05调整为与开发者中心共用分页控件，页面统一纵向滚动，表格内部仅按需横向滚动，不再限制表格高度或提供第二条纵向滚动条。描述放在名称下方，灰色12px常规字重，每行22个字符、最多44字符，超长为前41字符加三个点；不再提供单独描述列或“1/1已入库”等灰色状态补充。技能编辑中的知识库搜索仍遍历匹配页获取可挂载选项，但每个请求也最多10条。
 
 每条知识库记录包含元数据、documents文件状态数组、history版本历史；没有在列表里传原文件、向量数据或完整解析正文。列表与详情共用 `KnowledgeService.detail()` 聚合逻辑，生成列表时同步已关联convert任务的状态。
 

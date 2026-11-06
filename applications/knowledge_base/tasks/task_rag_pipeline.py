@@ -19,6 +19,14 @@ def get_celery_execution_id():
 from configure import LOGGER
 
 
+async def record_processing_failure(job_id, task_id, summary, error_trace):
+    try:
+        from applications.knowledge_base.services.rag_document_crud import RagDocumentCrud
+        await RagDocumentCrud().fail_execution(job_id, task_id, summary, error_trace)
+    except Exception as state_exc:
+        LOGGER.error("文档失败状态回写失败: job_id={}, 错误类型={}", job_id, type(state_exc).__name__)
+
+
 @celery.task(
     name="applications.knowledge_base.tasks.task_rag_pipeline.process_document_task",
     soft_time_limit=3300,
@@ -32,6 +40,7 @@ async def process_document_task(job_id: str) -> Dict[str, Any]:
 
     :param job_id: 文档任务ID
     """
+    execution_id = get_celery_execution_id() or process_document_task.request.id
     try:
         from applications.knowledge_base.services.rag_pipeline import RagPipelineService
         from applications.knowledge_base.services.rag_service import RagDocumentService
@@ -41,7 +50,7 @@ async def process_document_task(job_id: str) -> Dict[str, Any]:
         # （acks_late 重投递任务 task_id 不变, 可接管续跑; 不同 token 的并行执行被拒）
         return await pipeline_service.process_document(
             job_id=job_id,
-            execution_token=get_celery_execution_id() or process_document_task.request.id,
+            execution_token=execution_id,
         )
     except SoftTimeLimitExceeded as exc:
         # 软超时仍有机会执行清理和状态回写：明确记录为失败并继续抛出，
@@ -51,20 +60,7 @@ async def process_document_task(job_id: str) -> Dict[str, Any]:
             f"错误类型={type(exc).__name__}, 错误描述={exc}\n"
             f"错误回溯={traceback.format_exc()}"
         )
-        try:
-            from applications.knowledge_base.services.rag_service import RagDocumentService
-
-            await RagDocumentService().update_document(job_id, {
-                "status": "failed",
-                "summary": "文档解析任务超时, 请重试",
-                "error_trace": traceback.format_exc()[-5000:],
-                "updated_at": RagDocumentService.now_time(),
-            })
-        except Exception as state_exc:
-            LOGGER.error(
-                f"文档解析超时状态回写失败: job_id={job_id}, "
-                f"{type(state_exc).__name__}: {state_exc}"
-            )
+        await record_processing_failure(job_id, execution_id, "文档解析任务超时, 请重试", traceback.format_exc())
         raise
     except Exception as exc:
         LOGGER.error(
@@ -74,7 +70,10 @@ async def process_document_task(job_id: str) -> Dict[str, Any]:
             f"错误描述: {exc}\n"
             f"错误回溯: {traceback.format_exc()}\n"
         )
-        return {"success": False, "error": str(exc)}
+        await record_processing_failure(
+            job_id, execution_id, f"文档处理异常（{type(exc).__name__}），请重试", traceback.format_exc(),
+        )
+        raise
 
 
 @celery.task(

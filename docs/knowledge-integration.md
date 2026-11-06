@@ -1,7 +1,7 @@
 ---
 title: 知识库转换任务与技能挂载接入
 status: implemented-local
-last_updated: 2026-11-04
+last_updated: 2026-11-06
 ---
 
 # 知识库转换任务与技能挂载接入
@@ -20,7 +20,7 @@ last_updated: 2026-11-04
 | GET | `/api/documents/markdown?job_id=...` | 解析 Markdown |
 | GET | `/api/documents/terminology?job_id=...` | 术语产物 |
 | GET | `/api/documents/chunks?job_id=...` | 最终分块 |
-| GET | `/knowledge-bases/list?search=...&offset=0&limit=100` | 公开及本人知识库；保留外层 total |
+| GET | `/knowledge-bases/list?search=...&offset=0&limit=10` | 公开及本人知识库；默认及最大每次 10 条，按更新时间和编号倒序；外层 total 为权限及搜索过滤后的总数 |
 | GET | `/knowledge-bases/detail?kb_id=...` | 详情、文档状态、转换 job_id、历史及引用数 |
 | POST | `/knowledge-bases/create` | form-data：source JSON，含 conversion_job_ids |
 | POST | `/knowledge-bases/save` | form-data：kb_id、source；含 expected_version、retained_document_ids、新 conversion_job_ids |
@@ -58,13 +58,34 @@ conversion_links.py 校验任务所有权、原文件哈希和归属，建立 Ra
 
 ## 挂载与状态
 
-前端多选抽象类，读取本人技能列表的全部分页，筛选所选类下本人全部实现。对每个未挂载目标调用现有 save-skill，保留完整表单、expected_revision、原 resource_ids、knowledge_bases、上传文件、指令及环境，只合并新知识库。
+前端展示本人创建的所有状态技能，复用开发者中心前五列（实现名称、技能类、所属应用、版本、状态），每页10条，维护人固定为当前登录人。技能类仅用于筛选；2026-11-05确认改为只挂载勾选的具体实现，不再扩展到同类全部实现。读取本人技能列表分页后重新核对所选编号的归属，对每个未挂载的勾选目标调用现有 save-skill，保留完整表单、expected_revision、原 resource_ids、knowledge_bases、上传文件、指令及环境，只合并新知识库。
 
 保存服务维护 keenrobot_skill_resource_bindings：source_type=knowledge_base、source_id=知识库 ID，关联各自 skill_id、skill_version_id。没有新增挂载表、自定义批量数据库写入接口或绕过技能保存服务的路径。
 
 多个 HTTP 保存独立成功/失败，准确报告成功、已存在和失败明细；重试刷新全部分页，已保存项跳过。这不是跨请求的整批事务，不承诺全部回滚。当前保存接口生成新版本并转为 DRAFT，需重新构建、调试和发布，页面有明确提示。
 
 ## 隔离与验证
+
+### 数据库连接池与任务失败状态
+
+接口、通用启动入口和 Celery Worker 统一使用 `DATABASE_POOL_MIN_SIZE=1`、
+`DATABASE_POOL_MAX_SIZE=10`（2026-11-06 调整），可通过 `.env` 调整；最小值不得大于最大值。
+WRQ 入口不再覆盖这两个参数。每个进程分别建池，同一数据库账号下各进程、
+其他部署及运维工具的连接数均累加，需预留重启时新旧进程重叠的额度。
+应用启动不会修改 MySQL 全局或账号连接限额；服务端参数由单独的管理操作维护。
+
+2026-11-06 按用户授权，经 SSH 在应用专用的 23306 实例执行管理操作：
+`SET PERSIST max_connections=151`，并将 `zdhgj`@`%` 的 `MAX_USER_CONNECTIONS`
+调整为 151。已核验运行值和 `performance_schema.persisted_variables` 中的持久化值，
+未改动 3306 实例；修改前备份在服务器 `/root/mysql-connection-limits-20261106-lijoEU/`。
+对应管理员脚本为 `deploy/mysql-connection-limit-151.sql`，不由应用启动自动执行。
+
+解析任务未捕获异常和超时会回写 `failed` 并向 Celery 抛出异常，不再将异常返回为成功任务。
+状态回写校验当前任务编号和处理中状态，保留取消、删除、已完成及新重试任务的结果。
+数据库暂不可用导致回写失败时保留错误日志，可在连接恢复后运行
+`RagDocumentService.sweep_stale_documents()`，仅将确认中断且心跳过期的任务标记失败，
+再通过现有重试接口或页面恢复。Windows 自定义启动脚本必须使用
+`if __name__ == '__main__':` 保护启动动作，避免解析子进程重复启动 Worker。
 
 services/resource_isolation.py 的 resolve_isolation_rule 当前实现公开或本人可读、仅本人可改。知识库维护、技能保存中的知识库校验和构建资源解析均调用该函数，后续接团队时可替换内部策略。技能目标仍限定本人创建。
 
@@ -73,5 +94,12 @@ services/resource_isolation.py 的 resolve_isolation_rule 当前实现公开或�
 ```
 
 定向测试使用 SQLite 与显式外部服务替身；前端另有接口回归和浏览器交互验证。未连接生产数据库、模型或 Milvus，未执行迁移，不代表外部服务端到端验收。
+
+2026-11-05 连接池修复联调另行使用当前配置的真实 MySQL、Redis 和知识处理服务：
+页面登录、创建私有验证知识库、上传 TXT、后台完整处理、完成状态、原文件预览、
+Markdown 与分块查询均通过；11 个旧文件任务恢复完成，新验证文件完成。
+核对时账号可见连接数为 8（包含临时诊断连接），实际全局上限 40、账号上限 20，
+未修改数据库服务端参数。前端 67 项测试与正式构建、后端连接池/失败回写/任务身份/
+知识库关联及接口约定定向测试通过。此记录不代表生产压力测试或高并发容量验收。
 
 部署按 applications/knowledge_base/README_MIGRATION.md 准备模型、Redis Worker、Milvus；现有业务库缺少迁入处理表时，需审核、应用其中的迁移。原有技能关联表无需新增迁移。旧 Chroma/PUT 验收脚本不代表迁移后的当前接口。

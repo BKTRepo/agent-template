@@ -41,6 +41,12 @@ def _history(kb, user, summary, *, initial=False):
         "created_at": datetime.now(timezone.utc).isoformat()}]
 
 
+def _metadata_key(value):
+    """Compare editable content, excluding the change note and transport fields."""
+    return tuple((getattr(value, field) or '').strip() for field in
+        ('knowledge_name', 'description', 'tag', 'application')) + (bool(value.is_public),)
+
+
 class KnowledgeService:
     def __init__(self, pipeline=None):
         self.pipeline = pipeline or DocumentPipeline()
@@ -127,6 +133,10 @@ class KnowledgeService:
                     LOGGER.warning("知识库旧文件暂时无法清理，需在文件不再占用后维护清理：{}", path.name)
 
     async def save(self, user, form: KnowledgeForm, files, *, kb_id=None, expected_document=None):
+        if kb_id is None:
+            for field, message in [('description', '请填写知识库描述'), ('tag', '请选择知识库标签'), ('application', '请选择所属应用')]:
+                if not getattr(form, field).strip():
+                    raise KnowledgeError(message, field)
         previous = await self.require(kb_id, user, write=True) if kb_id is not None else None
         from .tag_catalog import validate_tag
         try:
@@ -176,11 +186,13 @@ class KnowledgeService:
                     kb = await self.require(kb_id, user, write=True, connection=conn)
                     if form.expected_version and form.expected_version != next_version(kb.revision):
                         raise KnowledgeError("知识库已被修改，请刷新后重试", "expected_version", 409)
+                metadata_changed = creating or _metadata_key(kb) != _metadata_key(form)
                 kb.knowledge_name, kb.name_key = form.knowledge_name, name_key(form.knowledge_name)
                 kb.description, kb.tag, kb.application = form.description, form.tag, form.application
                 kb.is_public = form.is_public
-                _history(kb, user, "创建知识库" if creating else form.change_summary, initial=creating)
-                await kb.save(using_db=conn)
+                if creating:
+                    _history(kb, user, "创建知识库", initial=True)
+                    await kb.save(using_db=conn)
                 kb_id = kb.id
                 docs = await Document.filter(knowledge_base_id=kb_id, is_deleted=False).using_db(conn).all()
                 if expected_document:
@@ -213,6 +225,11 @@ class KnowledgeService:
                         seen_hashes[digest] = (filename, index)
                 if not final_files:
                     raise KnowledgeError("知识库至少保留一个文件", "files")
+                files_changed = {(d.filename, d.content_hash) for d in docs} != {
+                    (filename, digest) for filename, digest, _ in final_files.values()}
+                if not creating and (metadata_changed or files_changed):
+                    _history(kb, user, form.change_summary)
+                    await kb.save(using_db=conn)
                 changed_ids = [d.id for d in docs if d.id not in retained]
                 for item in staged:
                     previous = by_name.get(unicodedata.normalize("NFKC", item["filename"]).casefold())
@@ -306,6 +323,7 @@ class KnowledgeService:
             "user_id": kb.user_id, "creator_login_name": creator.username, "creator_name": creator.alias or creator.username,
             "maintainer": (kb.history or [{}])[-1].get("maintainer") or creator.alias or creator.username,
             "is_public": kb.is_public, "can_edit": can_edit,
+            "can_retry": knowledge_permissions(user.id, kb)['can_retry'],
             "status": status, "document_count": len(visible_docs), "reference_count": count,
             "created_time": kb.created_time.isoformat(), "updated_time": kb.updated_time.isoformat(),
             "history": kb.history or [], "documents": [{**self.document_out(d),
@@ -330,13 +348,13 @@ class KnowledgeService:
             "chunk_count": doc.chunk_count, "error_message": doc.error_message,
             "has_markdown": bool(doc.markdown), "updated_time": doc.updated_time.isoformat()}
 
-    async def list(self, user, search="", *, offset=0, limit=50):
+    async def list(self, user, search="", *, offset=0, limit=10):
         from applications.wrq.knowledge import knowledge_permissions
         qs = KnowledgeBase.filter(knowledge_permissions(user.id,None)['visible_filter'], state__not=1)
         if search.strip():
             qs = qs.filter(knowledge_name__icontains=search.strip())
         total = await qs.count()
-        rows = await qs.order_by("-updated_time").offset(offset).limit(limit)
+        rows = await qs.order_by("-updated_time", "-id").offset(max(0, offset)).limit(min(10, max(1, limit)))
         return [await self.detail(row.id, user) for row in rows], total
 
     async def process(self, doc_id):

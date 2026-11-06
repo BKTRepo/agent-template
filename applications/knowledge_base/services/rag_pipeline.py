@@ -293,8 +293,7 @@ class RagPipelineService:
         """提交文档转换任务: 校验 → 落盘 → 建条目 → 分发 Celery 任务。
 
         :return: 任务摘要信息（job_id/status/filename/page_count/parts）
-        :raises ParameterException: 文件参数不合法（预检发现重名亦走此分支）
-        :raises DataAlreadyExistsException: 并发场景下锁内权威校验发现文件名重复
+        :raises ParameterException: 文件参数不合法或任务分发失败
         """
         service = self.document_service
 
@@ -307,13 +306,6 @@ class RagPipelineService:
             validate_document(file_bytes, filename)
         except ValueError as exc:
             raise ParameterException(message=str(exc))
-        # 重名预检（快速失败, 避免重名文件白跑页数统计与落盘）:
-        # 权威校验在 service.create_document 的跨进程锁内, 防并发同名上传双双通过
-        canonical_name = filename.lower()
-        for doc in (await service.load_all()).values():
-            if doc.get("filename", "").lower() == canonical_name:
-                raise ParameterException(message=f"文件名 '{filename}' 已存在, 请修改文件名后上传")
-
         page_count = None
         total_parts = 1
 
@@ -344,8 +336,7 @@ class RagPipelineService:
         # 先以 queued 态建条目: 表示"已落盘、待派发确认"。随后立即升级为正式
         # 处理态（splitting/parsing）再派发; 派发失败立即标 failed（防僵尸文档）
         doc_entry["status"] = "queued"
-        # 原子创建: 重名权威校验 + 唯一约束兜底在数据库侧完成, 防并发同名上传双双通过
-        # （重名时抛 DataAlreadyExistsException, 视图层统一转为 DataAlreadyExistsResponse）
+        # 每次上传创建独立任务和目录；附件重复校验由目标知识库在保存时执行。
         await service.create_document(doc_entry)
 
         # 先写正式处理态再派发（与 retry_document 的安全顺序一致）: 消息一旦投出,
@@ -1038,7 +1029,7 @@ class RagPipelineService:
                 await self.run_background_process(job_id=job_id, file_bytes=file_bytes)
         except Exception as exc:
             LOGGER.error(f"文档处理任务异常: job_id={job_id}, {type(exc).__name__}: {exc}\n{traceback.format_exc()}")
-            return {"success": False, "error": str(exc)}
+            raise
         finally:
             # 流水线结束, 清理启动时间（MySQL 单行表行级更新, 跨进程原子）
             await service.pipeline.set_start_time(None)

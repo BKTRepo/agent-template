@@ -30,8 +30,8 @@ class RagDocument(ScaffoldModel, TimestampMixin):
 
     # ---- 身份与基础信息 ----
     job_id = fields.CharField(max_length=64, unique=True, description="任务ID(doc-<md5前16位>)")
-    # MySQL utf8mb4 默认排序规则(ci)下唯一约束为大小写不敏感, 与原 JSON 侧重名校验语义一致
-    filename = fields.CharField(max_length=255, unique=True, description="文件名")
+    # 文件名是展示信息；不同知识库可上传同一文件，任务由 job_id 隔离。
+    filename = fields.CharField(max_length=255, description="文件名")
     status = fields.CharField(
         max_length=32, default="queued", index=True,
         description="处理状态: queued/splitting/parsing/terminology/analyzing/chunking/embedding/complete/failed/deleting/delete_failed",

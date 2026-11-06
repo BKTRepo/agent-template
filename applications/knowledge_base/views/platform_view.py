@@ -9,7 +9,7 @@ from applications.wrq.platform_catalog import application_catalog as load_applic
 
 from applications.wrq.validation_errors import ValidationResponseRoute, validation_issues
 from applications.knowledge_base.models.knowledge_base_model import DocumentChunk
-from applications.knowledge_base.schemas.platform_schema import KnowledgeContentEdit, KnowledgeForm, KnowledgeMountRequest, KnowledgeRetry
+from applications.knowledge_base.schemas.platform_schema import KnowledgeContentEdit, KnowledgeForm, KnowledgeCreateForm, KnowledgeMountRequest, KnowledgeRetry
 from applications.knowledge_base.services.platform_service import KnowledgeError, KnowledgeService, get_knowledge_service
 from applications.user.models.user_model import User
 from configure import LOGGER, PROJECT_CONFIG
@@ -51,7 +51,8 @@ async def save_form(request, background, source, files, user, service, kb_id=Non
         if any(key != "files" for key, _ in uploads):
             raise KnowledgeError("文件请统一通过 files 字段上传", "files")
         try:
-            form = KnowledgeForm.model_validate_json(source)
+            form_type = KnowledgeCreateForm if kb_id is None else KnowledgeForm
+            form = form_type.model_validate_json(source)
         except ValidationError as exc:
             result = ParameterResponse(message="source 不符合知识库表单合同",
                 data={"errors": validation_issues(exc.errors(), knowledge=True)})
@@ -139,7 +140,7 @@ async def name_availability(name: str = Query(min_length=1, max_length=128), exc
 
 
 @knowledge.get("/list", summary="知识库-查询公开及本人知识库列表")
-async def list_knowledge(search: str = "", offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100),
+async def list_knowledge(search: str = "", offset: int = Query(0, ge=0), limit: int = Query(10, ge=1, le=10),
                          current_user: User = DependAuth, service=Depends(get_knowledge_service)):
     try:
         items, total = await service.list(current_user, search, offset=offset, limit=limit)

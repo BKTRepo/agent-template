@@ -8,18 +8,15 @@ doc_status.json）: Web 进程与 Celery Worker 进程共享 MySQL, 行级 UPDAT
 守卫语义与原 RagDocumentService 完全一致: 已标记"用户取消"的文档,
 Worker 的进度/失败写回不得将其复活或篡改摘要（显式重置传 bypass_guard=True）。
 """
-import traceback
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from tortoise.exceptions import IntegrityError
 from tortoise.expressions import Q
 from tortoise.transactions import in_transaction
 
 from applications.knowledge_base.models.rag_document_model import RagDocument
 from applications.base.services.scaffold import ScaffoldCrud
 from configure import LOGGER
-from core.exceptions import DataAlreadyExistsException
 
 
 class RagDocumentCrud(ScaffoldCrud[RagDocument, Dict, Dict]):
@@ -140,27 +137,8 @@ class RagDocumentCrud(ScaffoldCrud[RagDocument, Dict, Dict]):
     # ==================== 写入 ====================
 
     async def create_document(self, entry: Dict[str, Any]) -> RagDocument:
-        """创建文档条目: 重名查重（大小写不敏感）+ 唯一约束兜底。
-
-        MySQL utf8mb4 默认排序规则(ci)下 UNIQUE(filename) 即大小写不敏感唯一,
-        与原 JSON 侧锁内重名校验语义一致; 预检查先行给出友好错误,
-        并发窗口由唯一约束兜底。
-
-        :raises DataAlreadyExistsException: 已存在同名文档
-        """
-        entry = self.sanitize(entry)
-        filename = entry.get("filename") or ""
-        if filename and await self.model.filter(filename=filename).exists():
-            raise DataAlreadyExistsException(
-                message=f"文件名 '{filename}' 已存在, 请修改文件名后上传"
-            )
-        try:
-            return await self.create(entry)
-        except IntegrityError as e:
-            LOGGER.warning(f"创建文档触发唯一约束（并发同名上传）: {filename}\n{traceback.format_exc()}")
-            raise DataAlreadyExistsException(
-                message=f"文件名 '{filename}' 已存在, 请修改文件名后上传"
-            ) from e
+        """创建独立解析任务；文件名允许重复，job_id 唯一约束保留。"""
+        return await self.create(self.sanitize(entry))
 
     @staticmethod
     def _is_cancelled(doc: RagDocument) -> bool:
@@ -283,6 +261,18 @@ class RagDocumentCrud(ScaffoldCrud[RagDocument, Dict, Dict]):
             qs = qs.filter(heartbeat_at=expected_heartbeat)
         updated = await qs.update(status="failed", summary=summary)
         return updated > 0
+
+    async def fail_execution(self, job_id, task_id, summary, error_trace):
+        """仅收敛当前执行的中间态，不覆盖重试、取消、删除或成功结果。"""
+        query = self.model.filter(
+            job_id=job_id, status__in=self.ACTIVE_STATUSES, cancel_requested=False,
+        )
+        if task_id:
+            query = query.filter(Q(celery_task_id=task_id) | Q(celery_task_id__isnull=True))
+        return await query.update(
+            status="failed", summary=summary, error_trace=error_trace[-5000:],
+            is_updating=False, process_end_time=datetime.now(), updated_time=datetime.now(),
+        )
 
     # ==================== 删除 ====================
 
