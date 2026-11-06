@@ -26,3 +26,6 @@ export function assertImplementationOwner(item: Pick<Implementation, 'creatorId'
 export const canEditKnowledge = (item: Pick<KnowledgeBase, 'creatorId' | 'canEdit'>, actor: Actor) => !!actor.id && (item.canEdit ?? (!!item.creatorId && item.creatorId === actor.id))
 export const canViewKnowledge = (item: Pick<KnowledgeBase, 'creatorId' | 'scope' | 'canEdit' | 'source'>, actor: Actor) => !!actor.id && (item.source === 'backend' || item.scope === 'public' || canEditKnowledge(item, actor))
 export const canMountKnowledge = (item: Pick<KnowledgeBase, 'creatorId' | 'scope' | 'processingStatus'>, actor: Actor) => canViewKnowledge(item, actor) && item.processingStatus === '知识处理完成'
+export const hasKnowledgeFailure = (item: Pick<KnowledgeBase, 'processingStatus' | 'files'>) => item.processingStatus === '知识处理失败'
+  || item.files.some(file => ['failed', 'delete_failed'].includes(file.conversionStatus || '') || ['failed', 'delete_failed'].includes(file.processingStatus || ''))
+export const canRetryKnowledge = (item: KnowledgeBase, actor: Actor) => !!actor.id && (item.canRetry ?? canEditKnowledge(item, actor)) && hasKnowledgeFailure(item)

@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowRight, Check, ChevronLeft, ChevronRight, LoaderCircle, Plus, RefreshCw } from 'lucide-react'
+import { ArrowRight, Check, LoaderCircle, Plus, RefreshCw } from 'lucide-react'
 import Dialog from '@/components/developer/Dialog'
+import ListPagination from '@/components/common/ListPagination'
 import DebugDialog from '@/components/developer/DebugDialog'
 import SkillFields from '@/components/developer/SkillFields'
+import ImplementationSummaryCells, { implementationSummaryHeaders } from '@/components/developer/ImplementationSummaryCells'
 import { restoreSkillUploads } from '@/api/skillArchive'
-import { applicationText, canViewKnowledge } from '@/lib/access'
+import { canViewKnowledge } from '@/lib/access'
 import { useAccessStore } from '@/stores/accessStore'
 import { useKnowledgeStore } from '@/stores/knowledgeStore'
 import { skillResourceExtensions, validateResourceFiles, validateSkillForm } from '@/lib/skillForm'
@@ -19,11 +21,9 @@ import type { Implementation, ImplementationForm, SkillUploads } from '@/types/d
 const steps = ['新建技能', '自测调试', '上线']
 const blankForm = (team: string): ImplementationForm => ({ classId: '', name: '', technicalName: `skill-${crypto.randomUUID()}`, system: '核心系统', team, version: '1.0.0', modelTier: 'standard', description: '', instructions: '', compatibility: '', resourceIds: [], applicationIds: [], resourceUsage: '', knowledgeBases: [], uploadedResources: [] })
 const dateText = (value: string) => new Date(value).toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
-const statusClass = (status: string) => ['已上线', '调试成功'].includes(status) ? 'green' : ['调试失败', '执行超时'].includes(status) ? 'red' : ['草稿', '已下线'].includes(status) ? 'neutral' : 'orange'
-function Status({ status }: { status: string }) { return <span className={`status-tag ${statusClass(status)}`}>{status}</span> }
 
 export default function DeveloperPage() {
-  const { implementations, skillClasses, applications, load, replace, patch, remove, loading, page, pages, total } = useDeveloperStore()
+  const { implementations, skillClasses, applications, load, refresh, replace, patch, remove, loading, page, pages, total } = useDeveloperStore()
   const actor = useAccessStore(state => state.actor)
   const team = ''
   const [preview, setPreview] = useState<Partial<Implementation>>({})
@@ -70,6 +70,15 @@ export default function DeveloperPage() {
 
   useEffect(() => { if (!notice) return; const timer = window.setTimeout(() => setNotice(''), 4000); return () => window.clearTimeout(timer) }, [notice])
   useEffect(() => { void load().catch(error => setMessage((error as Error).message)) }, [load])
+  useEffect(() => {
+    if (panel || busy) return
+    const revalidate = () => {
+      if (document.visibilityState === 'visible') void refresh().catch(() => {})
+    }
+    const timer = window.setInterval(revalidate, 5000)
+    window.addEventListener('focus', revalidate)
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', revalidate) }
+  }, [panel, busy, actor.id, refresh])
   function update<K extends keyof ImplementationForm>(key: K, value: ImplementationForm[K]) {
     formDirty.current = true
     setForm(previous => ({ ...previous, [key]: value }))
@@ -147,7 +156,10 @@ export default function DeveloperPage() {
         setForm(previous => ({ ...previous, revision: saved.revision, skillVersionId: saved.skillVersionId, version: saved.version }))
         setNotice('修改已保存到后端数据库。')
       }
-      else { setPanel(null); setNotice('草稿已保存到后端数据库。') }
+      else {
+        setPanel(null); setNotice('草稿已保存到后端数据库。')
+        await refresh(1).catch(error => setMessage(`草稿已保存，列表刷新失败：${(error as Error).message}`))
+      }
     } catch (error) { setMessage((error as Error).message) } finally { setBusy(null) }
   }
   async function savePublished() {
@@ -182,6 +194,7 @@ export default function DeveloperPage() {
       remove(selected.id)
       setPanel(null); setDraftDeletePrompt(false)
       setNotice('草稿已删除。')
+      await refresh(page).catch(error => setMessage(`草稿已删除，列表刷新失败：${(error as Error).message}`))
     } catch (error) { setMessage((error as Error).message) } finally { setBusy(null) }
   }
   async function build(saveChanges = false) {
@@ -196,6 +209,7 @@ export default function DeveloperPage() {
       const item = selectedId && selected && !saveChanges ? selected : selectedId ? await updateDeveloperSkill(selectedId, ready) : await createDeveloperSkill(ready)
       formDirty.current = false
       replace(item); setSelectedId(item.id)
+      if (!selectedId) await refresh(1).catch(() => {})
       // 新建后立即进入构建流程时，当前表单仍然是创建前的草稿对象。
       // 回填后端返回的修订号，后续重试保存/构建才能携带 expected_revision。
       setForm(previous => ({ ...previous, revision: item.revision, skillVersionId: item.skillVersionId, version: item.version }))
@@ -261,18 +275,17 @@ export default function DeveloperPage() {
     setMessage('')
     void load(nextPage).catch(error => setMessage((error as Error).message))
   }
-  const pageNumbers = Array.from({ length: pages }, (_, index) => index + 1)
   const primaryBusy = <><LoaderCircle className="spin" size={16} />处理中…</>
 
   return <>
     <div className="developer-flow surface" aria-label="技能开发流程">{steps.map((step, index) => <div className="flow-step" key={step}><span className={`flow-node ${index === 0 ? 'done' : index === 1 ? 'current' : ''}`}><span>{['①', '②', '③'][index]}</span> {step}</span>{index < steps.length - 1 && <ArrowRight size={20} aria-hidden="true" />}</div>)}</div>
     <section className="surface implementation-section" aria-labelledby="implementation-title">
       <div className="section-heading"><h2 id="implementation-title">我创建的技能</h2><div className="section-actions"><button className="button" disabled={loading || !!busy} onClick={() => void refreshList()}><RefreshCw size={14} className={loading ? 'spin' : undefined} />刷新</button><button className="button primary" disabled={loading || !!busy} onClick={() => openForm()}><Plus size={16} />新建技能</button></div></div>
-      <div className="implementation-table-wrap"><table className="implementation-table"><thead><tr>{['实现名称', '技能类', '所属应用', '版本', '状态', '更新时间', '操作'].map(label => <th key={label} scope="col">{label}</th>)}</tr></thead><tbody>
-        {mine.map(item => <tr key={item.id}><td className="implementation-name">{item.name}{item.pendingChanges && <span className="status-tag orange">有编辑稿</span>}</td><td>{skillClasses.find(row => row.id === item.classId)?.name}</td><td>{applicationText(item)}</td><td><span className="implementation-version">{item.version || '-'}</span></td><td><Status status={item.status} /></td><td>{dateText(item.updatedAt)}</td><td><button className="button small" disabled={!!busy || loading} onClick={() => { if (['调试中', '调试成功', '调试失败'].includes(item.status)) openDebug(item); else openForm(item) }}>{['调试中', '调试成功', '调试失败'].includes(item.status) ? '调试' : '详情'}</button></td></tr>)}
+      <div className="implementation-table-wrap"><table className="implementation-table"><thead><tr>{[...implementationSummaryHeaders, '更新时间', '操作'].map(label => <th key={label} scope="col">{label}</th>)}</tr></thead><tbody>
+        {mine.map(item => <tr key={item.id}><ImplementationSummaryCells item={item} skillClasses={skillClasses} /><td>{dateText(item.updatedAt)}</td><td><button className="button small" disabled={!!busy || loading} onClick={() => { if (['调试中', '调试成功', '调试失败'].includes(item.status)) openDebug(item); else openForm(item) }}>{['调试中', '调试成功', '调试失败'].includes(item.status) ? '调试' : '详情'}</button></td></tr>)}
         {!mine.length && <tr><td colSpan={7} className="empty-table">暂无实现类，点击“新建技能”开始创建。</td></tr>}
       </tbody></table></div>
-      <div className="developer-pagination" aria-label="技能列表分页"><span className="pagination-total">共 {total} 条</span><button className="button small" disabled={loading || page <= 1} onClick={() => goToPage(page - 1)}><ChevronLeft size={14} />上一页</button><div className="pagination-pages">{pageNumbers.map(number => <button key={number} className={`button small ${number === page ? 'primary' : ''}`} aria-current={number === page ? 'page' : undefined} disabled={loading} onClick={() => goToPage(number)}>{number}</button>)}</div><button className="button small" disabled={loading || page >= pages} onClick={() => goToPage(page + 1)}>下一页<ChevronRight size={14} /></button></div>
+      <ListPagination total={total} page={page} pages={pages} label="技能列表分页" busy={loading} onPageChange={goToPage} />
     </section>
     {!panel && message && <p className="error-banner" role="alert">{message}</p>}
 

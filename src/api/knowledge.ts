@@ -2,6 +2,7 @@ import { authFetch } from './authFetch'
 import { useAuthStore } from '@/stores/authStore'
 import { useAccessStore } from '@/stores/accessStore'
 import { hasSkillSession, skillAccount } from './skillSession'
+import { knowledgeCreationErrors } from '@/lib/knowledgeForm'
 import type { KnowledgeBase, KnowledgeBaseOption } from '@/types/developer'
 
 export interface KnowledgeUpload { id: string; file: File }
@@ -14,7 +15,7 @@ export interface ConversionJob { job_id?: string; id?: string; status: string; s
 interface ServerDocument { id: string | number; filename: string; file_size: number; status: string; updated_time: string; conversion_job_id?: string; conversion_status?: string; error_message?: string }
 interface ServerKnowledge {
   id: string | number; knowledge_name: string; description: string; tag: string; tag_name?: string; application: string; version: string
-  user_id: number; creator_login_name?: string; creator_name?: string; maintainer: string; is_public: boolean; can_edit: boolean
+  user_id: number; creator_login_name?: string; creator_name?: string; maintainer: string; is_public: boolean; can_edit: boolean; can_retry?: boolean
   status: string; reference_count: number; updated_time: string; documents: ServerDocument[]
   history: { version: string; maintainer: string; change_summary: string; created_at: string }[]
 }
@@ -35,21 +36,29 @@ export function toKnowledge(row: ServerKnowledge): KnowledgeBase {
     tag: row.tag || '', tagName: row.tag_name || row.tag || '',
     team: '', scope: row.is_public ? 'public' : 'team', applicationIds: row.application ? [row.application] : [],
     source: 'backend', creatorId: row.creator_login_name || String(row.user_id), creatorName: row.creator_name || row.creator_login_name || String(row.user_id),
-    canEdit: row.can_edit, referenceCount: row.reference_count, maintainer: row.maintainer, updatedAt: row.updated_time,
+    canEdit: row.can_edit, canRetry: row.can_retry ?? row.can_edit, referenceCount: row.reference_count, maintainer: row.maintainer, updatedAt: row.updated_time,
     vectorized: row.status === 'completed', model: '',
     processingStatus: row.status === 'completed' ? '知识处理完成' : row.status === 'failed' ? '知识处理失败' : '知识处理中',
     files: (row.documents || []).map(doc => ({ id: String(doc.id), name: doc.filename, size: doc.file_size,
       lastModified: Date.parse(doc.updated_time) || 0, conversionJobId: doc.conversion_job_id,
-      conversionStatus: doc.conversion_status, errorMessage: doc.error_message })),
+      conversionStatus: doc.conversion_status, processingStatus: doc.status, errorMessage: doc.error_message })),
     history: [...(row.history || [])].reverse().map((entry, i) => ({ id: `${row.id}:${entry.version}:${i}`,
       version: entry.version, summary: entry.change_summary, maintainer: entry.maintainer, updatedAt: entry.created_at })),
   }
 }
+export const KNOWLEDGE_PAGE_SIZE = 10
+export async function listKnowledgeBasesPage(page = 1, search = '', signal?: AbortSignal) {
+  const requestedPage = Math.max(1, Math.floor(page))
+  const result = await knowledgeRequest<ServerKnowledge[]>(`/knowledge-bases/list?${new URLSearchParams({ search: search.trim(), offset: String((requestedPage - 1) * KNOWLEDGE_PAGE_SIZE), limit: String(KNOWLEDGE_PAGE_SIZE) })}`, { signal })
+  const total = result.total ?? result.data.length
+  return { items: result.data.map(toKnowledge), total, page: requestedPage, pages: Math.max(1, Math.ceil(total / KNOWLEDGE_PAGE_SIZE)) }
+}
+// The skill picker searches across pages; the management list requests one page only.
 export async function listKnowledgeBases(search = '', signal?: AbortSignal) {
   const items: KnowledgeBase[] = []
   let total = 0
   do {
-    const result = await knowledgeRequest<ServerKnowledge[]>(`/knowledge-bases/list?${new URLSearchParams({ search: search.trim(), offset: String(items.length), limit: '100' })}`, { signal })
+    const result = await knowledgeRequest<ServerKnowledge[]>(`/knowledge-bases/list?${new URLSearchParams({ search: search.trim(), offset: String(items.length), limit: String(KNOWLEDGE_PAGE_SIZE) })}`, { signal })
     items.push(...result.data.map(toKnowledge)); total = result.total ?? items.length
     if (!result.data.length) break
   } while (items.length < total)
@@ -73,6 +82,10 @@ export async function retryConversion(jobId: string) {
 // Successful uploads survive a metadata-save retry and are isolated by platform account.
 const submissions = new Map<string, Promise<ConversionJob>>()
 export async function saveKnowledgeBase(form: Omit<KnowledgeBase, 'id' | 'updatedAt'> & { changeSummary?: string }, uploads: KnowledgeUpload[], id?: string) {
+  if (!id) {
+    const errors = knowledgeCreationErrors(form)
+    if (Object.keys(errors).length) throw new Error(Object.values(errors).join('；'))
+  }
   const account = skillAccount(), actor = useAccessStore.getState().actor.id
   const checkIdentity = () => { if (skillAccount() !== account || useAccessStore.getState().actor.id !== actor) throw new Error('平台身份已切换，已停止提交文档，请重新打开知识库。') }
   const keys: string[] = [], jobIds: string[] = []

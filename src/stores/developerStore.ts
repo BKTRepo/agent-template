@@ -14,12 +14,32 @@ interface DeveloperState {
   total: number
   pages: number
   load: (page?: number) => Promise<void>
+  refresh: (page?: number) => Promise<void>
   replace: (item: Implementation) => void
   patch: (id: string, changes: Partial<Implementation>) => void
   remove: (id: string) => void
 }
 
-// 业务记录只来自后端。页面刷新后重新查询数据库，不使用浏览器持久化记录。
+let requestSequence = 0
+async function readPage(requestedPage: number, silent: boolean): Promise<void> {
+  const state = useDeveloperStore.getState()
+  if (silent && state.loading) return
+  const token = useAuthStore.getState().session?.token, sequence = ++requestSequence
+  const current = () => sequence === requestSequence && useAuthStore.getState().session?.token === token
+  if (!silent) useDeveloperStore.setState({ loading: true })
+  try {
+    const [result, metadata] = await Promise.all([
+      listDeveloperSkillsPage(Math.max(1, requestedPage), state.pageSize),
+      silent ? Promise.resolve(undefined) : getDeveloperMetadata(),
+    ])
+    if (!current()) return
+    if (metadata) setApplicationCatalog(metadata.applications)
+    useDeveloperStore.setState({ implementations: result.items, page: result.page, pageSize: result.pageSize,
+      total: result.total, pages: Math.max(1, result.pages),
+      ...(metadata ? { skillClasses: metadata.skill_classes, applications: metadata.applications } : {}) })
+  } finally { if (!silent && current()) useDeveloperStore.setState({ loading: false }) }
+}
+// 列表和总数始终来自后端；静默刷新保留当前内容和页码。
 export const useDeveloperStore = create<DeveloperState>((set) => ({
   implementations: [],
   skillClasses: [],
@@ -29,21 +49,9 @@ export const useDeveloperStore = create<DeveloperState>((set) => ({
   pageSize: 10,
   total: 0,
   pages: 1,
-  load: async (requestedPage = 1) => {
-    const token = useAuthStore.getState().session?.token
-    set({ loading: true })
-    try {
-      const state = useDeveloperStore.getState()
-      const page = Math.max(1, Math.min(requestedPage, Math.max(1, state.pages)))
-      const [result, metadata] = await Promise.all([listDeveloperSkillsPage(page, state.pageSize), getDeveloperMetadata()])
-      if (useAuthStore.getState().session?.token !== token) return
-      setApplicationCatalog(metadata.applications)
-      set({ implementations: result.items, skillClasses: metadata.skill_classes, applications: metadata.applications,
-        page: result.page, pageSize: result.pageSize, total: result.total, pages: Math.max(1, result.pages) })
-    }
-    finally { if (useAuthStore.getState().session?.token === token) set({ loading: false }) }
-  },
-  replace: item => set(state => ({ implementations: state.implementations.some(row => row.id === item.id) ? state.implementations.map(row => row.id === item.id ? item : row) : [item, ...state.implementations] })),
+  load: (requestedPage = 1) => readPage(requestedPage, false),
+  refresh: (requestedPage?: number): Promise<void> => readPage(requestedPage ?? useDeveloperStore.getState().page, true),
+  replace: item => set(state => ({ implementations: state.implementations.some(row => row.id === item.id) ? state.implementations.map(row => row.id === item.id ? item : row) : [item, ...state.implementations].slice(0, state.pageSize) })),
   patch: (id, changes) => set(state => ({ implementations: state.implementations.map(row => row.id === id ? { ...row, ...changes } : row) })),
   remove: id => set(state => ({ implementations: state.implementations.filter(row => row.id !== id) })),
 }))

@@ -80,6 +80,7 @@ h1,h2,h3,p { margin:0; }
 .button:hover:not(:disabled) { border-color:#9dc2f8; color:var(--platform-blue); background:#f8fbff; }
 .button.primary { background:var(--platform-blue); border-color:var(--platform-blue); color:#fff; }
 .button.primary:hover:not(:disabled) { background:#0b65e7; }
+.button.primary.knowledge-save-button:disabled { background:#e5e7eb; border-color:#d1d5db; color:#6b7280; opacity:1; }
 .button.small { padding:6px 10px; font-size:12px; }
 .button.danger { color:#c52b2b; }
 .icon-button { display:inline-flex; align-items:center; justify-content:center; border:0; background:transparent; color:inherit; padding:5px; border-radius:5px; }
@@ -101,6 +102,10 @@ h1,h2,h3,p { margin:0; }
 .implementation-version { display:inline-block; min-width:5ch; text-align:center; }
 .implementation-table tr:hover td { background:#fbfdff; }
 .implementation-name { font-weight:600; }
+.name-description { min-width:0; }
+.entity-name { font-weight:600; }
+.entity-description { display:block; margin-top:5px; color:var(--platform-muted); font-size:12px; font-weight:400; line-height:1.6; }
+.entity-description>span { display:block; white-space:pre; }
 .status-tag { display:inline-flex; align-items:center; padding:3px 8px; border-radius:12px; font-size:11px; white-space:nowrap; line-height:1.5; }
 .status-tag.green { color:#087b50; background:#e7f8f1; }
 .status-tag.blue { color:#1263cf; background:#eaf3ff; }
@@ -319,8 +324,11 @@ h1,h2,h3,p { margin:0; }
 .identity-context label { display:flex; flex-direction:column; gap:8px; margin:12px 0; }
 .identity-context select { padding:9px; border:1px solid #dbe5f0; border-radius:6px; background:white; width:100%; }
 .knowledge-table { min-width:1180px; }
-.knowledge-table .knowledge-description { max-width:225px; min-width:170px; white-space:normal; line-height:1.7; }
 .knowledge-table .table-actions { min-width:125px; }
+.mount-filters .mount-maintainer { display:flex; align-items:center; gap:8px; font-size:13px; }
+.mount-maintainer em { color:#e34d59; font-style:normal; }
+.mount-filters .mount-maintainer input:disabled { background:#f3f5f8; color:#8390a3; cursor:not-allowed; }
+.mount-implementation-table input[type="checkbox"] { width:15px; height:15px; accent-color:var(--platform-blue); }
 .knowledge-history article { padding:16px 0; border-bottom:1px solid var(--platform-line); }
 .knowledge-history article>div { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; }
 .knowledge-history span { color:var(--platform-muted); font-size:12px; }

@@ -38,7 +38,7 @@ export default function App() {
     setVerifiedToken(''); setError('')
     useAccessStore.getState().setIdentity({ id: '', name: '未登录' })
     useDeveloperStore.setState({ implementations: [], skillClasses: [], applications: [], total: 0, pages: 1, page: 1, loading: false })
-    useKnowledgeStore.setState({ knowledgeBases: [], error: '', loading: false })
+    useKnowledgeStore.getState().reset()
     if (token) void currentUser(controller.signal).then(user => {
       const session = useAuthStore.getState().session
       if (controller.signal.aborted || session?.token !== token) return
