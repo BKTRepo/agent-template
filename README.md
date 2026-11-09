@@ -1,5 +1,7 @@
 # 简介
 
+资产管理支持按技能大类查询、归档快照、原文件预览下载和回收恢复。部署、接口及回收期限配置见 [资产管理接入与验收](docs/asset-management.md)。
+
 测试案例思维导图联调可设置 `ASSISTANT_ARTIFACT_MOCK_DIR` 指向独立可写共享目录，默认关闭。样例按登录用户隔离，保存覆盖样例原 XLSX，归档另存快照。接口、样例格式和正式对接边界见 [产出物联调接口](applications/wrq/API_CONVENTIONS.md#悬浮对话台测试案例产出物联调)。
 
 同一联调入口也提供 DOCX、XLSX、常见脚本、Markdown 和 JSON 的预览与编辑。保存按原文件 SHA-256 检查版本并在共享目录替换原件。

@@ -21,6 +21,7 @@ from core.initializations import (
     init_database_table,
 )
 from core.responses import SuccessResponse
+from applications.conversation.services.asset_cleanup import register_asset_cleanup
 from applications.zhaoyunlong.services.online_debug_cleanup_scheduler import (
     create_online_debug_cleanup_scheduler,
 )
@@ -48,6 +49,7 @@ async def lifespan(app: FastAPI):
                 ROUTER_SUMMARY[route.path] = route.summary
                 ROUTER_TAGS[route.path] = route.tags
         online_debug_scheduler = create_online_debug_cleanup_scheduler()
+        register_asset_cleanup(online_debug_scheduler)
         online_debug_scheduler.start()
         yield
     finally:

@@ -4,6 +4,8 @@
 
 以下接口以 `/assistant/artifacts` 为前缀，均使用平台 token，按登录人定位样例文件。仅配置 `ASSISTANT_ARTIFACT_MOCK_DIR` 时启用，不涉及 `chat_artifact` 或资产数据库表。
 
+平台悬浮窗的纳入状态与归档走 `/api/assets/source-status` 和 `/api/assets/create`。原样例的本地快照接口用于单独联调。正式资产查询及归档契约见 [资产管理接口](../../docs/asset-management.md#接口)。
+
 | 方法 | 路径后缀 | 参数与行为 |
 |---|---|---|
 | POST | /create-demo | JSON 可选 `kind`，默认 `test_cases`，支持 `docx`、`xlsx`、`py`、`js`、`ts`、`sh`、`sql`、`md`、`json`。已存在时打开当前原件 |

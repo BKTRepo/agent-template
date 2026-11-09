@@ -171,6 +171,7 @@ def register_routers(app: FastAPI) -> None:
     from applications.agent.views import mcp_servers_router, skills_router
     from applications.conversation.views import chat_router, history_router
     from applications.conversation.views.artifact_view import artifact_router
+    from applications.conversation.views.asset_view import asset_router
     from applications.knowledge_base.views import knowledge_router
     from applications.model_config.views import model_router
 
@@ -193,6 +194,7 @@ def register_routers(app: FastAPI) -> None:
 
     app.include_router(router=chat_router, prefix="/chat", tags=["RAG-对话"], dependencies=[DependAuth])
     app.include_router(artifact_router)
+    app.include_router(asset_router)
     app.include_router(router=history_router, prefix="/conversations", tags=["RAG-历史"], dependencies=[DependAuth])
     app.include_router(router=model_router, prefix="/model-configs", tags=["RAG-模型配置"], dependencies=[DependAuth])
     app.include_router(router=mcp_servers_router, prefix="/mcp-servers", tags=["RAG-MCP服务"], dependencies=[DependAuth])
