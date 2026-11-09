@@ -1,4 +1,10 @@
 import type { KnowledgeBase } from '@/types/developer'
+import { knowledgeFileLimits } from './skillForm'
+
+export function knowledgeFileSizeError(files: { size: number }[]): string {
+  return files.reduce((total, file) => total + file.size, 0) > knowledgeFileLimits.maxTotalBytes!
+    ? '知识库文件总大小不能超过 200 MB' : ''
+}
 
 /** Immutable business-content snapshot; progress, version and change notes are excluded. */
 export function knowledgeEditSnapshot(form: Pick<KnowledgeBase, 'name' | 'description' | 'tag' | 'scope' | 'applicationIds' | 'files'>): string {

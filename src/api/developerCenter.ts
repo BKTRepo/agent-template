@@ -2,10 +2,12 @@ import { authFetch } from './authFetch'
 import { useAuthStore } from '@/stores/authStore'
 import { hasSkillSession } from './skillSession'
 import { restoreSkillUploads } from './skillArchive'
+import { hasDuplicateKnowledge, knowledgeIdentity, uniqueKnowledgeSelections } from '@/lib/knowledgeSelection'
 import type { Implementation, ImplementationForm, SkillUploads } from '@/types/developer'
 
 interface ApiResponse<T> { status: string; message?: string; data: T }
 export interface ServerSkill {
+  knowledge_update_count?: number
   id: string | number; name: string; class_id: string | number; application_ids?: string[]; application_paso?: string; description: string
   instructions: string; resource_ids: (string | number)[]; resource_usage: string; compatibility: string
   technical_name: string; uploaded_resources: Implementation['uploadedResources']; knowledge_bases: Implementation['knowledgeBases']
@@ -14,7 +16,14 @@ export interface ServerSkill {
   debug?: { id: string; runId: string; buildId?: string; skillVersionId?: number; status: 'queued' | 'running' | 'passed' | 'failed' | 'timeout'; output: string; origin: 'backend' }
 }
 export interface DeveloperCatalogOption { id: string; name: string }
-export interface DeveloperMetadata { skill_classes: DeveloperCatalogOption[]; applications: DeveloperCatalogOption[] }
+export const developerSkillStatuses: DeveloperCatalogOption[] = [
+  { id: 'DRAFT', name: '草稿' }, { id: 'DEBUGGING', name: '调试中' },
+  { id: 'DEBUG_SUCCESS', name: '调试成功' }, { id: 'DEBUG_FAILED', name: '调试失败' },
+  { id: 'ONLINE', name: '已上线' }, { id: 'OFFLINE', name: '已下线' },
+]
+export interface DeveloperMetadata { skill_classes: DeveloperCatalogOption[]; applications: DeveloperCatalogOption[]; filter_skill_classes?: DeveloperCatalogOption[]; statuses?: DeveloperCatalogOption[] }
+export interface DeveloperFilters { name: string; classId: string; status: string; application: string }
+export const emptyDeveloperFilters: DeveloperFilters = { name: '', classId: '', status: '', application: '' }
 
 export class DeveloperCenterError extends Error {
   constructor(message: string, public statusCode?: number) { super(message) }
@@ -34,11 +43,12 @@ export interface DeveloperDebugLink {
 export function toImplementation(row: ServerSkill): Implementation {
   const applicationIds = row.application_ids ?? (row.application_paso ? [row.application_paso] : [])
   return {
+    knowledgeUpdateCount: row.knowledge_update_count ?? 0,
     id: String(row.id), revision: row.current_revision, skillVersionId: row.skill_version_id, backendVersion: row.version ?? undefined, name: row.name, classId: String(row.class_id), applicationIds,
     system: applicationIds.includes('*') ? '全应用适用' : applicationIds[0] || '', team: '',
     technicalName: row.technical_name, description: row.description, instructions: row.instructions,
-    resourceIds: row.resource_ids.map(String), resourceUsage: row.resource_usage, compatibility: row.compatibility,
-    uploadedResources: row.uploaded_resources ?? [], knowledgeBases: (row.knowledge_bases ?? []).map(kb => ({ ...kb, id: String(kb.id) })), skillMarkdown: row.skill_markdown,
+    resourceIds: [...new Set(row.resource_ids.map(knowledgeIdentity))], resourceUsage: row.resource_usage, compatibility: row.compatibility,
+    uploadedResources: row.uploaded_resources ?? [], knowledgeBases: uniqueKnowledgeSelections(row.knowledge_bases ?? []), skillMarkdown: row.skill_markdown,
     version: row.version ?? '', modelTier: 'standard', status: row.status, creatorId: row.creator_id ?? row.creator_login_name,
     creatorName: row.creator_name, updatedAt: row.updated_at,
     backendSkillId: String(row.backend_skill_id ?? row.id), buildId: row.build_id,
@@ -49,8 +59,11 @@ export function toImplementation(row: ServerSkill): Implementation {
 }
 
 function body(form: ImplementationForm) {
+  if (hasDuplicateKnowledge(form.resourceIds) || hasDuplicateKnowledge((form.knowledgeBases ?? []).map(row => row.id))) {
+    throw new DeveloperCenterError('同一个技能不能重复挂载同一个知识库', 400)
+  }
   return { expected_revision: form.revision, name: form.name, class_id: Number(form.classId), application_ids: form.applicationIds ?? [], description: form.description,
-    instructions: form.instructions, resource_ids: form.resourceIds, resource_usage: form.resourceUsage ?? '',
+    instructions: form.instructions, resource_ids: form.resourceIds.map(knowledgeIdentity), resource_usage: form.resourceUsage ?? '',
     compatibility: form.compatibility ?? '', technical_name: form.technicalName, uploaded_resources: (form.uploadedResources ?? []).map(row => ({ ...row, fileId: row.fileId ?? row.sourceId })),
     knowledge_bases: form.knowledgeBases ?? [], skill_markdown: form.skillMarkdown }
 }
@@ -70,8 +83,11 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
   return result.data
 }
 
-export async function listDeveloperSkillsPage(page = 1, pageSize = 10): Promise<DeveloperSkillPage> {
+export async function listDeveloperSkillsPage(page = 1, pageSize = 10, filters: Partial<DeveloperFilters> = {}): Promise<DeveloperSkillPage> {
   const params = new URLSearchParams({ page: String(Math.max(1, page)), page_size: String(Math.max(1, pageSize)) })
+  for (const [field, parameter] of [['name', 'name'], ['classId', 'class_id'], ['status', 'status'], ['application', 'application']] as const) {
+    if (filters[field]?.trim()) params.set(parameter, filters[field]!.trim())
+  }
   const result = await request<ServerSkill[] | { items: ServerSkill[]; total: number; page: number; page_size: number; pages: number }>(`/skills/developer/list-skills?${params.toString()}`)
   if (Array.isArray(result)) {
     const items = result.map(toImplementation)
@@ -83,9 +99,14 @@ export async function listDeveloperSkillsPage(page = 1, pageSize = 10): Promise<
 export async function listDeveloperSkills(page = 1, pageSize = 10) {
   return (await listDeveloperSkillsPage(page, pageSize)).items
 }
+export async function getDeveloperSkill(id: string) {
+  return toImplementation(await request<ServerSkill>(`/skills/developer/get-skill?${new URLSearchParams({ skill_id: id })}`))
+}
 export async function getDeveloperMetadata() {
   const metadata = await request<DeveloperMetadata>('/skills/developer/get-form-metadata')
-  return { ...metadata, skill_classes: metadata.skill_classes.map(row => ({ ...row, id: String(row.id) })) }
+  return { ...metadata, skill_classes: metadata.skill_classes.map(row => ({ ...row, id: String(row.id) })),
+    statuses: metadata.statuses?.length ? metadata.statuses : developerSkillStatuses,
+    filter_skill_classes: (metadata.filter_skill_classes ?? metadata.skill_classes).map(row => ({ ...row, id: String(row.id) })) }
 }
 export async function createDeveloperSkill(form: ImplementationForm) { return toImplementation(await request<ServerSkill>('/skills/developer/create-skill-draft', { method: 'POST', body: JSON.stringify(body(form)) })) }
 export async function updateDeveloperSkill(id: string, form: ImplementationForm) { return toImplementation(await request<ServerSkill>('/skills/developer/save-skill', { method: 'POST', body: JSON.stringify({ ...body(form), skill_id: Number(id) }) })) }

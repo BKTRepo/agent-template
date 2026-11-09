@@ -5,6 +5,7 @@ import ListPagination from '@/components/common/ListPagination'
 import NameDescription from '@/components/common/NameDescription'
 import ResourceUpload from '@/components/developer/ResourceUpload'
 import ApplicationPicker from '@/components/developer/ApplicationPicker'
+import SearchSelect from '@/components/developer/SearchSelect'
 import { useDeveloperStore } from '@/stores/developerStore'
 import { useAccessStore } from '@/stores/accessStore'
 import { filterKnowledgeBases, useKnowledgeStore, type KnowledgeForm } from '@/stores/knowledgeStore'
@@ -16,7 +17,7 @@ import { nextVersion } from '@/lib/version'
 import { knowledgeExtensions, knowledgeFileLimits, validateResourceFiles } from '@/lib/skillForm'
 import { downloadBlob } from '@/lib/resourceStorage'
 import { downloadKnowledgeFile, getKnowledgeMetadata, type KnowledgeMetadata } from '@/api/knowledge'
-import { knowledgeCreationErrors, knowledgeEditSnapshot } from '@/lib/knowledgeForm'
+import { knowledgeCreationErrors, knowledgeEditSnapshot, knowledgeFileSizeError } from '@/lib/knowledgeForm'
 import type { KnowledgeBase } from '@/types/developer'
 
 const emptyForm = (actor: Actor): KnowledgeForm => ({ name: '', version: '', description: '', tag: '', scope: 'public', team: '', applicationIds: [], vectorized: false, model: '', files: [], processingOutcome: 'success' })
@@ -25,13 +26,10 @@ const stages: Record<string, string> = { queued: '排队', splitting: '预处理
 export default function KnowledgePage() {
   const actor = useAccessStore(state => state.actor)
   const implementations = useDeveloperStore(state => state.implementations)
-  const { knowledgeBases, save, retry, retryingIds, load, page, pages, pageSize, total, search, loading, error: loadError } = useKnowledgeStore()
+  const { knowledgeBases, save, retry, retryingIds, load, page, pages, pageSize, total, search, filters: appliedFilters, loading, error: loadError } = useKnowledgeStore()
   const [query, setQuery] = useState(search)
-  useEffect(() => {
-    if (query.trim() === useKnowledgeStore.getState().search) return
-    const timer = window.setTimeout(() => void load(1, query), 300)
-    return () => window.clearTimeout(timer)
-  }, [query, actor.id, load])
+  const [filterApplication, setFilterApplication] = useState(appliedFilters.application)
+  const [filterMaintainer, setFilterMaintainer] = useState(appliedFilters.maintainer)
   const [form, setForm] = useState<KnowledgeForm | null>(null)
   const [editing, setEditing] = useState<string>()
   const [originalContent, setOriginalContent] = useState<string | null>(null)
@@ -63,9 +61,9 @@ export default function KnowledgePage() {
   const detail = knowledgeBases.find(row => row.id === detailId && canViewKnowledge(row, actor))
   const history = knowledgeBases.find(row => row.id === historyId && canViewKnowledge(row, actor))
   const items = filterKnowledgeBases(knowledgeBases, '', actor)
-  const pagingBusy = loading || query.trim() !== search
+  const pagingBusy = loading
   function goToPage(target: number) {
-    if (!pagingBusy && target >= 1 && target <= pages && target !== page) void load(target)
+    if (!pagingBusy && target >= 1 && target <= pages && target !== page) { setMessage(''); void load(target) }
   }
   const editUnchanged = !!editing && (!form || originalContent === null || knowledgeEditSnapshot(form) === originalContent)
   function open(item?: KnowledgeBase) { setOriginalContent(item ? knowledgeEditSnapshot(item) : null); setForm(item ? { ...item, applicationIds: [...(item.applicationIds ?? [])], files: item.files.map(file => ({ ...file })), changeSummary: '', processingOutcome: 'success' } : emptyForm(actor)); setEditing(item?.id); setUploads([]); setErrors({}); setMessage('') }
@@ -83,6 +81,8 @@ export default function KnowledgePage() {
     const issues: Record<string, string> = editing ? {} : knowledgeCreationErrors(form)
     if (!form.name.trim()) issues.name = '请填写知识库名称'
     if (!form.files.length) issues.files = '请至少上传一个知识库文件'
+    const sizeError = knowledgeFileSizeError(form.files)
+    if (sizeError) issues.files = sizeError
     if ((form.applicationIds?.length ?? 0) > 1) issues.applicationIds = '最多选择一个所属应用'
     if (knowledgeBases.some(row => row.id !== editing && row.name.trim().normalize('NFKC').toLowerCase() === form.name.trim().normalize('NFKC').toLowerCase())) issues.name = '知识库名称已存在'
     setErrors(issues); if (Object.keys(issues).length) return
@@ -120,14 +120,22 @@ export default function KnowledgePage() {
     <div className="developer-flow surface" aria-label="知识库使用流程">
       {['新建知识库', '向量化检索', '挂载使用'].map((step, index) => <div className="flow-step" key={step}><span className={`flow-node ${index === 0 ? 'done' : index === 1 ? 'current' : ''}`}><span>{['①', '②', '③'][index]}</span> {step}</span>{index < 2 && <ArrowRight size={20} aria-hidden="true" />}</div>)}
     </div>
-    <section className="surface knowledge-management"><div className="section-heading"><h2>知识库（多文件成库 · 可向量化检索）</h2><button className="button" onClick={() => open()}><Plus size={16} />新建知识库</button></div><div className="knowledge-search form-field"><input aria-label="知识库名称模糊搜索" placeholder="知识库名称模糊搜索" value={query} onChange={event => setQuery(event.target.value)} /><button className="button" onClick={() => { setQuery(''); void load(1, '') }}>重置</button></div>
-      <div className="implementation-table-wrap" aria-busy={loading}><table className="implementation-table knowledge-table"><thead><tr>{['知识库', '文件数', '版本', '可见范围', '所属应用', '引用次数', '维护人', '状态', '操作'].map(label => <th key={label} scope="col">{label}</th>)}</tr></thead><tbody>{items.map(kb => <tr key={kb.id}><td className="implementation-name"><NameDescription name={kb.name} description={kb.description}><span className="status-tag neutral">{kb.tagName || kb.tag}</span></NameDescription></td><td>{kb.files.length}</td><td>{kb.version}</td><td><span className="status-tag blue">{kb.scope === 'public' ? '全体可见' : '仅本人可见'}</span></td><td>{applicationText(kb)}</td><td>{kb.referenceCount ?? implementations.filter(item => item.resourceIds.includes(kb.id)).length}</td><td>{kb.maintainer}</td><td><span role="status" className={`status-tag ${kb.processingStatus === '知识处理失败' ? 'red' : kb.processingStatus === '知识处理完成' ? 'green' : 'orange'}`}>{kb.processingStatus}</span></td><td><div className="table-actions"><button className="button small" onClick={() => setDetailId(kb.id)}>查看</button><button className="button small" disabled={!canMountKnowledge(kb, actor)} title={canMountKnowledge(kb, actor) ? "挂载到技能" : "知识处理完成后才可挂载到技能"} onClick={() => setMountId(kb.id)}>挂载到技能</button>{canEditKnowledge(kb, actor) && <button className="button small" onClick={() => open(kb)}>编辑</button>}<button className="button small" onClick={() => setHistoryId(kb.id)}>编辑历史</button>{retryButton(kb)}</div></td></tr>)}{!items.length && <tr><td colSpan={9} className="empty-table">{loading ? '正在加载知识库…' : search ? '未找到可见的匹配知识库，请更换关键词。' : '暂无知识库，请点击“新建知识库”创建。'}</td></tr>}</tbody></table></div>
+    <section className="surface knowledge-management"><div className="section-heading"><h2>知识库（多文件成库 · 可向量化检索）</h2><button className="button" onClick={() => open()}><Plus size={16} />新建知识库</button></div>
+      <form className="management-filters knowledge-list-filters" role="search" aria-label="知识库筛选" onSubmit={event => { event.preventDefault(); if (!loading && !busy) { setMessage(''); void load(1, query, { application: filterApplication, maintainer: filterMaintainer }) } }}>
+        <input aria-label="知识库名称模糊搜索" placeholder="知识库名称模糊搜索" maxLength={128} value={query} onChange={event => setQuery(event.target.value)} />
+        <SearchSelect label="筛选所属应用" placeholder="全部应用" value={filterApplication} options={metadata.applications} disabled={metadataLoading || !!metadataError} onChange={setFilterApplication} />
+        <input aria-label="维护人" placeholder="维护人姓名或账号" maxLength={64} value={filterMaintainer} onChange={event => setFilterMaintainer(event.target.value)} />
+        <button type="submit" className="button primary" disabled={loading || busy}>搜索</button>
+        <button type="button" className="button" disabled={loading || busy} onClick={() => { setQuery(''); setFilterApplication(''); setFilterMaintainer(''); setMessage(''); void load(1, '', { application: '', maintainer: '' }) }}>重置</button>
+      </form>
+      <div className="implementation-table-wrap" aria-busy={loading}><table className="implementation-table knowledge-table"><thead><tr>{['知识库', '文件数', '版本', '可见范围', '所属应用', '引用次数', '维护人', '状态', '操作'].map(label => <th key={label} scope="col">{label}</th>)}</tr></thead><tbody>{items.map(kb => <tr key={kb.id}><td className="implementation-name"><NameDescription name={kb.name} description={kb.description}><span className="status-tag neutral">{kb.tagName || kb.tag}</span></NameDescription></td><td>{kb.files.length}</td><td>{kb.version}</td><td><span className="status-tag blue">{kb.scope === 'public' ? '全体可见' : '仅本人可见'}</span></td><td>{applicationText(kb)}</td><td>{kb.referenceCount ?? implementations.filter(item => item.resourceIds.includes(kb.id)).length}</td><td>{kb.maintainer}</td><td><span role="status" className={`status-tag ${kb.processingStatus === '知识处理失败' ? 'red' : kb.processingStatus === '知识处理完成' ? 'green' : 'orange'}`}>{kb.processingStatus}</span></td><td><div className="table-actions"><button className="button small" onClick={() => setDetailId(kb.id)}>查看</button><button className="button small" disabled={!canMountKnowledge(kb, actor)} title={canMountKnowledge(kb, actor) ? "挂载到技能" : "知识处理完成后才可挂载到技能"} onClick={() => setMountId(kb.id)}>挂载到技能</button>{canEditKnowledge(kb, actor) && <button className="button small" onClick={() => open(kb)}>编辑</button>}<button className="button small" onClick={() => setHistoryId(kb.id)}>编辑历史</button>{retryButton(kb)}</div></td></tr>)}{!items.length && <tr><td colSpan={9} className="empty-table">{loading ? '正在加载知识库…' : (search || appliedFilters.application || appliedFilters.maintainer) ? '未找到符合筛选条件的知识库，请调整条件或重置。' : '暂无知识库，请点击“新建知识库”创建。'}</td></tr>}</tbody></table></div>
       <ListPagination total={total} page={page} pages={pages} pageSize={pageSize} label="知识库列表分页" busy={pagingBusy} onPageChange={goToPage} />
     </section>
     {!form && message && <p className="form-hint" role="status">{message}</p>}
     {retryFeedback && <p className={retryFeedback.error ? 'error-banner' : 'form-hint'} role={retryFeedback.error ? 'alert' : 'status'}>{retryFeedback.text}</p>}
     {loading && <p role="status">正在加载知识库…</p>}
-    {loadError && <p className="error-banner" role="alert">{loadError} <button className="button small" onClick={() => void load(query.trim() === search ? page : 1, query)}>重新加载</button></p>}
+    {loadError && <p className="error-banner" role="alert">{loadError} <button className="button small" onClick={() => void load(pagingBusy ? 1 : page, query, { application: filterApplication, maintainer: filterMaintainer })}>重新加载</button></p>}
+    {metadataError && !form && <p className="error-banner" role="alert">筛选应用目录加载失败：{metadataError}</p>}
     {form && <Dialog wide title={readonly ? '知识库详情' : editing ? '编辑知识库' : '新建知识库'} busy={busy} onClose={() => setForm(null)} footer={<><button className="button" disabled={busy} onClick={() => setForm(null)}>{readonly ? '关闭' : '取消'}</button>{!readonly && <button className="button primary knowledge-save-button" disabled={busy || metadataLoading || !!metadataError || editUnchanged} title={editUnchanged ? '修改知识库内容后可保存' : undefined} onClick={submit}>{busy ? '保存中…' : editing ? '保存修改' : '创建知识库'}</button>}</>}>
       <fieldset className="implementation-form skill-create-form" disabled={busy || readonly}>
         <label className="form-field"><span>知识库名称 <em>*</em></span><input value={form.name} maxLength={128} placeholder="如：核心交易业务知识库" aria-invalid={!!errors.name} onChange={event => update('name', event.target.value)} />{error('name')}</label>

@@ -2,6 +2,30 @@ import { defineConfig, loadEnv, type Plugin, type ProxyOptions } from 'vite'
 import react from '@vitejs/plugin-react'
 import legacy from '@vitejs/plugin-legacy'
 import path from 'path'
+import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs'
+
+/** Bundle PDF fonts/decoders locally so LAN previews never depend on a CDN. */
+function pdfPreviewAssets(): Plugin {
+  const root = path.resolve(__dirname, 'node_modules/pdfjs-dist')
+  const folders = ['cmaps', 'standard_fonts', 'wasm']
+  return {
+    name: 'pdf-preview-assets',
+    configureServer(server) {
+      server.middlewares.use('/pdfjs', (request, response, next) => {
+        const relative = (request.url || '').split('?')[0].replace(/^\//, '')
+        const file = path.resolve(root, relative)
+        if (!folders.some(folder => file.startsWith(path.join(root, folder) + path.sep)) || !existsSync(file) || !statSync(file).isFile()) return next()
+        response.setHeader('Content-Type', file.endsWith('.wasm') ? 'application/wasm' : file.endsWith('.js') ? 'text/javascript' : 'application/octet-stream')
+        response.end(readFileSync(file))
+      })
+    },
+    generateBundle() {
+      for (const folder of folders) for (const name of readdirSync(path.join(root, folder))) {
+        if (statSync(path.join(root, folder, name)).isFile()) this.emitFile({ type: 'asset', fileName: `pdfjs/${folder}/${name}`, source: readFileSync(path.join(root, folder, name)) })
+      }
+    },
+  }
+}
 
 // 【离线兼容目标】无网环境的旧版 Chrome/Edge 90~110:
 // - CSS 不走 Vite 处理, 由 scripts/build-css.mjs 预编译为 public/app.css,
@@ -60,6 +84,7 @@ export default defineConfig(({ mode }) => {
   return {
   plugins: [
     react(),
+    pdfPreviewAssets(),
     appCssReload(),
     // 目标浏览器均支持 ES 模块, 无需 nomodule 遗留包; 仅按 targets 给
     // 现代产物注入缺失的 stdlib API 补丁（core-js）

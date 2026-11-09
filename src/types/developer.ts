@@ -40,6 +40,7 @@ export interface ImplementationForm {
   uploadedResources?: UploadedResource[]
 }
 export interface Implementation extends ImplementationForm {
+  knowledgeUpdateCount?: number
   catalog?: boolean
   maintainerId?: string
   maintainerName?: string
@@ -75,8 +76,10 @@ export interface SkillBuild {
 }
 export interface SkillUpload { id: string; file: File; usage: string }
 export interface SkillUploads { references: SkillUpload[]; scripts: SkillUpload[] }
-export interface KnowledgeSelection { id: string; name: string; source: 'backend' | 'mock' }
-export interface KnowledgeBaseOption extends KnowledgeSelection { description: string; scope: string }
+export interface KnowledgeSelection { id: string; name: string; version?: string; source: 'backend' | 'mock' }
+export interface KnowledgeBaseOption extends KnowledgeSelection {
+  description: string; scope: string; fileCount: number; applicationIds: string[]; maintainer: string
+}
 export type ResourceCategory = '参考资料' | '模板' | '静态资源' | '脚本'
 export interface UploadedResource { sourceId?: number; fileId?: number; sourceVersionId?: number; downloadUrl?: string; savedCategory?: ResourceCategory; id: string; name: string; size: number; lastModified: number; category?: ResourceCategory }
 export interface DebugInput { conversation: string; documentText: string; documents: UploadedResource[] }

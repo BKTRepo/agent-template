@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { canEditKnowledge, canViewKnowledge, canRetryKnowledge, type Actor } from '@/lib/access'
 import { useAuthStore } from './authStore'
 import { useAccessStore } from './accessStore'
-import { getConversionStatus, getKnowledgeBase, knowledgeRequest, listKnowledgeBasesPage, KNOWLEDGE_PAGE_SIZE, retryConversion, saveKnowledgeBase, type KnowledgeUpload } from '@/api/knowledge'
+import { getConversionStatus, getKnowledgeBase, knowledgeRequest, listKnowledgeBasesPage, KNOWLEDGE_PAGE_SIZE, retryConversion, saveKnowledgeBase, emptyKnowledgeFilters, type KnowledgeFilters, type KnowledgeUpload } from '@/api/knowledge'
 import type { KnowledgeBase } from '@/types/developer'
 
 export type KnowledgeForm = Omit<KnowledgeBase, 'id' | 'updatedAt'> & { changeSummary?: string }
@@ -11,26 +11,29 @@ let loadSequence = 0
 interface KnowledgeState {
   knowledgeBases: KnowledgeBase[]; loading: boolean; error: string; retryingIds: string[]
   page: number; pageSize: number; total: number; pages: number; search: string
-  reset: () => void; load: (page?: number, search?: string) => Promise<void>; replace: (item: KnowledgeBase) => void
+  filters: KnowledgeFilters
+  reset: () => void; load: (page?: number, search?: string, filters?: KnowledgeFilters) => Promise<void>; replace: (item: KnowledgeBase) => void
   save: (form: KnowledgeForm, id?: string, uploads?: KnowledgeUpload[]) => Promise<KnowledgeBase>
   retry: (id: string) => Promise<void>; refreshProcessing: (signal?: AbortSignal) => Promise<void>
 }
 export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
   knowledgeBases: [], loading: false, error: '', retryingIds: [],
   page: 1, pageSize: KNOWLEDGE_PAGE_SIZE, total: 0, pages: 1, search: '',
-  reset: () => { loadSequence++; set({ knowledgeBases: [], loading: false, error: '', retryingIds: [], page: 1, pageSize: KNOWLEDGE_PAGE_SIZE, total: 0, pages: 1, search: '' }) },
+  filters: { ...emptyKnowledgeFilters },
+  reset: () => { loadSequence++; set({ knowledgeBases: [], loading: false, error: '', retryingIds: [], page: 1, pageSize: KNOWLEDGE_PAGE_SIZE, total: 0, pages: 1, search: '', filters: { ...emptyKnowledgeFilters } }) },
   replace: item => set(state => ({ knowledgeBases: state.knowledgeBases.some(row => row.id === item.id)
     ? state.knowledgeBases.map(row => row.id === item.id ? item : row) : [item, ...state.knowledgeBases].slice(0, KNOWLEDGE_PAGE_SIZE) })),
-  load: async (page = get().page, search = get().search) => {
+  load: async (page = get().page, search = get().search, filters = get().filters) => {
+    filters = { application: filters.application.trim(), maintainer: filters.maintainer.trim() }
     const actor = useAccessStore.getState().actor.id
     const token = useAuthStore.getState().session?.token, sequence = ++loadSequence
     const current = () => sequence === loadSequence && useAccessStore.getState().actor.id === actor && useAuthStore.getState().session?.token === token
     set({ loading: true, error: '' })
     try {
-      let result = await listKnowledgeBasesPage(page, search)
+      let result = await listKnowledgeBasesPage(page, search, undefined, filters)
       if (!current()) return
-      if (result.page > result.pages) result = await listKnowledgeBasesPage(result.pages, search)
-      if (current()) set({ knowledgeBases: result.items, page: result.page, total: result.total, pages: result.pages, search: search.trim() })
+      if (result.page > result.pages) result = await listKnowledgeBasesPage(result.pages, search, undefined, filters)
+      if (current()) set({ knowledgeBases: result.items, page: result.page, total: result.total, pages: result.pages, search: search.trim(), filters })
     }
     catch (error) { if (current()) set({ error: (error as Error).message }) }
     finally { if (current()) set({ loading: false }) }

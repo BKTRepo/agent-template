@@ -2,7 +2,7 @@ import { authFetch } from './authFetch'
 import { useAuthStore } from '@/stores/authStore'
 import { useAccessStore } from '@/stores/accessStore'
 import { hasSkillSession, skillAccount } from './skillSession'
-import { knowledgeCreationErrors } from '@/lib/knowledgeForm'
+import { knowledgeCreationErrors, knowledgeFileSizeError } from '@/lib/knowledgeForm'
 import type { KnowledgeBase, KnowledgeBaseOption } from '@/types/developer'
 
 export interface KnowledgeUpload { id: string; file: File }
@@ -47,9 +47,14 @@ export function toKnowledge(row: ServerKnowledge): KnowledgeBase {
   }
 }
 export const KNOWLEDGE_PAGE_SIZE = 10
-export async function listKnowledgeBasesPage(page = 1, search = '', signal?: AbortSignal) {
+export interface KnowledgeFilters { application: string; maintainer: string }
+export const emptyKnowledgeFilters: KnowledgeFilters = { application: '', maintainer: '' }
+export async function listKnowledgeBasesPage(page = 1, search = '', signal?: AbortSignal, filters: Partial<KnowledgeFilters> = {}) {
   const requestedPage = Math.max(1, Math.floor(page))
-  const result = await knowledgeRequest<ServerKnowledge[]>(`/knowledge-bases/list?${new URLSearchParams({ search: search.trim(), offset: String((requestedPage - 1) * KNOWLEDGE_PAGE_SIZE), limit: String(KNOWLEDGE_PAGE_SIZE) })}`, { signal })
+  const params = new URLSearchParams({ search: search.trim(), offset: String((requestedPage - 1) * KNOWLEDGE_PAGE_SIZE), limit: String(KNOWLEDGE_PAGE_SIZE) })
+  if (filters.application?.trim()) params.set('application', filters.application.trim())
+  if (filters.maintainer?.trim()) params.set('maintainer', filters.maintainer.trim())
+  const result = await knowledgeRequest<ServerKnowledge[]>(`/knowledge-bases/list?${params}`, { signal })
   const total = result.total ?? result.data.length
   return { items: result.data.map(toKnowledge), total, page: requestedPage, pages: Math.max(1, Math.ceil(total / KNOWLEDGE_PAGE_SIZE)) }
 }
@@ -82,6 +87,9 @@ export async function retryConversion(jobId: string) {
 // Successful uploads survive a metadata-save retry and are isolated by platform account.
 const submissions = new Map<string, Promise<ConversionJob>>()
 export async function saveKnowledgeBase(form: Omit<KnowledgeBase, 'id' | 'updatedAt'> & { changeSummary?: string }, uploads: KnowledgeUpload[], id?: string) {
+  const uploadSizes = new Map(uploads.map(row => [row.id, row.file.size]))
+  const sizeError = knowledgeFileSizeError(form.files.map(row => ({ size: uploadSizes.get(row.id) ?? row.size })))
+  if (sizeError) throw new Error(sizeError)
   if (!id) {
     const errors = knowledgeCreationErrors(form)
     if (Object.keys(errors).length) throw new Error(Object.values(errors).join('；'))
@@ -117,8 +125,17 @@ export async function downloadKnowledgeFile(kbId: string, documentId: string) {
   if (!response.ok || /json|text\/html/i.test(response.headers.get('Content-Type') || '')) throw new Error('原文件下载失败，请检查访问权限。')
   return response.blob()
 }
+function knowledgeOption(row: KnowledgeBase): KnowledgeBaseOption {
+  return { id: row.id, name: row.name, version: row.version, description: row.description,
+    scope: row.scope === 'public' ? '全平台' : '仅本人', source: 'backend',
+    fileCount: row.files.length, applicationIds: row.applicationIds ?? [], maintainer: row.maintainer || row.creatorName || '未记录' }
+}
+export async function listKnowledgeOptionsPage(search = '', offset = 0, signal?: AbortSignal) {
+  const result = await knowledgeRequest<ServerKnowledge[]>(`/knowledge-bases/list?${new URLSearchParams({ search: search.trim(), offset: String(offset), limit: String(KNOWLEDGE_PAGE_SIZE) })}`, { signal })
+  const nextOffset = offset + result.data.length
+  return { items: result.data.map(toKnowledge).filter(row => row.processingStatus === '知识处理完成').map(knowledgeOption),
+    nextOffset, hasMore: result.data.length > 0 && (result.total !== undefined ? nextOffset < result.total : result.data.length === KNOWLEDGE_PAGE_SIZE) }
+}
 export async function searchKnowledgeBases(search: string, _team: string, signal: AbortSignal): Promise<{ items: KnowledgeBaseOption[]; demo: boolean }> {
-  return { demo: false, items: (await listKnowledgeBases(search, signal)).filter(row => row.processingStatus === '知识处理完成').map(row => ({
-    id: row.id, name: row.name, description: row.description, scope: row.scope === 'public' ? '全平台' : '仅本人', source: 'backend',
-  })) }
+  return { demo: false, items: (await listKnowledgeBases(search, signal)).filter(row => row.processingStatus === '知识处理完成').map(knowledgeOption) }
 }

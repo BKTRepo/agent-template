@@ -19,7 +19,7 @@ export function getCatalogClass(classId: string, signal?: AbortSignal) {
   return request<ClassDefinition>(`/skills/catalog/get-class?${new URLSearchParams({ class_id: classId })}`, { signal })
 }
 export async function listCatalogSkills(filters: CatalogFilters, page = 1, signal?: AbortSignal) {
-  const params = new URLSearchParams({ name: filters.name, application: filters.system, maintainer: filters.maintainer, page: String(page), page_size: '20' })
+  const params = new URLSearchParams({ name: filters.name, application: filters.system, maintainer: filters.maintainer, page: String(page), page_size: '10' })
   if (filters.classId) params.set('class_id', filters.classId)
   const result = await request<{ items: CatalogRow[]; total: number; pages: number; page: number }>(`/skills/catalog/list-skills?${params}`, { signal })
   return { ...result, items: result.items.map(map) }

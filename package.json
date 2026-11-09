@@ -21,6 +21,7 @@
     "framer-motion": "^12.43.0",
     "highlight.js": "^11.11.0",
     "lucide-react": "^0.503.0",
+    "pdfjs-dist": "6.5.438",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-markdown": "^10.1.0",

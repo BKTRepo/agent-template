@@ -13,6 +13,8 @@ import LoginPage from '@/pages/LoginPage'
 import PlatformAccount from '@/components/common/PlatformAccount'
 import FloatingAssistant from '@/components/assistant/FloatingAssistant'
 import KnowledgeProcessingWorker from '@/components/developer/KnowledgeProcessingWorker'
+import KnowledgeUpdatesWorker from '@/components/developer/KnowledgeUpdatesWorker'
+import { useKnowledgeUpdatesStore } from '@/stores/knowledgeUpdatesStore'
 
 const navigation = [
   { group: '平台门户', items: [
@@ -37,8 +39,9 @@ export default function App() {
     const controller = new AbortController()
     setVerifiedToken(''); setError('')
     useAccessStore.getState().setIdentity({ id: '', name: '未登录' })
-    useDeveloperStore.setState({ implementations: [], skillClasses: [], applications: [], total: 0, pages: 1, page: 1, loading: false })
+    useDeveloperStore.setState({ implementations: [], skillClasses: [], applications: [], filterSkillClasses: [], statuses: [], filters: { name: '', classId: '', status: '', application: '' }, total: 0, pages: 1, page: 1, loading: false })
     useKnowledgeStore.getState().reset()
+    useKnowledgeUpdatesStore.getState().reset()
     if (token) void currentUser(controller.signal).then(user => {
       const session = useAuthStore.getState().session
       if (controller.signal.aborted || session?.token !== token) return
@@ -56,9 +59,9 @@ export default function App() {
 function Workspace() {
   const [page, setPage] = useState('developer')
   const [mobileMenu, setMobileMenu] = useState(false)
-  const { implementations } = useDeveloperStore()
+  const updateSummary = useKnowledgeUpdatesStore(state => state.summary)
   const actor = useAccessStore(state => state.actor)
-  const pending = implementations.filter(item => ['草稿', '已生成', '调试中'].includes(item.status)).length
+  const unreadSkills = updateSummary?.unread_skill_count ?? 0
   const label = navigation.flatMap(group => group.items).find(item => item.id === page)?.label ?? '开发者中心'
   return <ErrorBoundary><div className="platform">
     {mobileMenu && <button className="sidebar-shade" aria-label="关闭导航" onClick={() => setMobileMenu(false)} />}
@@ -66,12 +69,12 @@ function Workspace() {
       <a className="platform-logo" href="#developer" onClick={() => { setPage('developer'); setMobileMenu(false) }}><span className="platform-mark">AI</span><span>智能服务调度集</span></a>
       <button className="mobile-close icon-button" aria-label="关闭导航" onClick={() => setMobileMenu(false)}><X size={20} /></button>
       <nav>{navigation.map(group => <div className="nav-group" key={group.group}><div className="nav-group-title">{group.group}</div>
-        {group.items.map(item => <button key={item.id} className={`nav-link ${page === item.id ? 'active' : ''}`} aria-current={page === item.id ? 'page' : undefined} onClick={() => { setPage(item.id); setMobileMenu(false) }}><item.icon size={17} strokeWidth={1.6} /><span>{item.label}</span>{item.id === 'developer' && pending > 0 && <span className="nav-badge">{pending}</span>}</button>)}
+        {group.items.map(item => <button key={item.id} className={`nav-link ${page === item.id ? 'active' : ''}`} aria-current={page === item.id ? 'page' : undefined} onClick={() => { setPage(item.id); setMobileMenu(false) }}><item.icon size={17} strokeWidth={1.6} /><span>{item.label}</span>{item.id === 'developer' && unreadSkills > 0 && <span className="nav-badge knowledge-update-nav-badge" aria-label={`${unreadSkills}个技能有未读知识库更新`} title={`${unreadSkills}个技能有未读知识库更新`}>{unreadSkills > 99 ? '99+' : unreadSkills}</span>}</button>)}
       </div>)}</nav>
     </aside>
-    <main className="platform-main"><header className="platform-topbar"><div className="topbar-title"><button className="mobile-menu icon-button" aria-label="打开导航" onClick={() => setMobileMenu(true)}><Menu size={20} /></button><span>{label}</span>{page === 'developer' && <span className="topbar-subtitle">技能新建、调试、上线全链路管理</span>}{page === 'knowledge' && <span className="topbar-subtitle">Skill 依赖与引用资源管理 · 团队权限隔离</span>}</div><div className="topbar-actions"><PlatformAccount /></div></header>
+    <main className="platform-main"><header className="platform-topbar"><div className="topbar-title"><button className="mobile-menu icon-button" aria-label="打开导航" onClick={() => setMobileMenu(true)}><Menu size={20} /></button><span>{label}</span>{page === 'skills' && <span className="topbar-subtitle">Skill 类 + 实现类管理 · 已上线可在线测试，已下线保留详情和下载</span>}{page === 'developer' && <span className="topbar-subtitle">技能新建、调试、上线全链路管理</span>}{page === 'knowledge' && <span className="topbar-subtitle">Skill 依赖与引用资源管理 · 团队权限隔离</span>}</div><div className="topbar-actions"><PlatformAccount /></div></header>
       <div className="platform-content" key={actor.id || "platform"}>{page === 'developer' ? <DeveloperPage /> : page === 'knowledge' ? <KnowledgePage /> : page === 'skills' ? <SkillsPage /> : <section className="module-placeholder"><h1>{label}</h1><div className="surface placeholder-body"><Layers3 size={36} /><h2>该模块暂未开放</h2><p>当前可使用开发者中心创建和调试 Skill。</p><button className="button primary" onClick={() => setPage('developer')}>进入开发者中心</button></div></section>}</div>
     </main>
-    <KnowledgeProcessingWorker /><FloatingAssistant key={actor.id || "platform"} />
+    <KnowledgeProcessingWorker /><KnowledgeUpdatesWorker /><FloatingAssistant key={actor.id || "platform"} />
   </div></ErrorBoundary>
 }

@@ -3,6 +3,7 @@ import { useDeveloperStore } from '@/stores/developerStore'
 import { useAccessStore } from '@/stores/accessStore'
 import { useAuthStore } from '@/stores/authStore'
 import { canMountKnowledge } from '@/lib/access'
+import { knowledgeIdentity, uniqueKnowledgeSelections } from '@/lib/knowledgeSelection'
 import { getKnowledgeBase } from './knowledge'
 import { listDeveloperSkillsPage, updateDeveloperSkill } from './developerCenter'
 import type { Implementation } from '@/types/developer'
@@ -33,12 +34,12 @@ export async function mountKnowledge(kbId: string, skillIds: string[]): Promise<
   const result: KnowledgeMountResult = { matched: targets.length, saved: 0, skipped: 0, failures: [] }
   for (const item of targets) {
     if (!current()) throw new Error('平台身份已切换，批量更新已停止；已保存的结果保留在服务端。')
-    if (item.resourceIds.includes(kbId)) { result.skipped++; continue }
+    if (item.resourceIds.some(id => knowledgeIdentity(id) === knowledgeIdentity(kbId))) { result.skipped++; continue }
     try {
       // Delegate the entire save/version/binding operation to the canonical skill update API.
       const updated = await updateDeveloperSkill(item.backendSkillId || item.id, { ...item,
-        resourceIds: [...item.resourceIds, kbId],
-        knowledgeBases: [...(item.knowledgeBases || []).filter(row => row.id !== kbId), { id: kbId, name: kb.name, source: 'backend' }],
+        resourceIds: [...new Set([...item.resourceIds, kbId].map(knowledgeIdentity))],
+        knowledgeBases: uniqueKnowledgeSelections([...(item.knowledgeBases || []), { id: kbId, name: kb.name, version: kb.version, source: 'backend' as const }]),
         resourceUsage: item.resourceUsage?.trim() || `执行时检索“${kb.name}”，用于核对相关业务规则。`,
       })
       if (!current()) throw new Error('平台身份已切换，请重新加载保存结果。')
