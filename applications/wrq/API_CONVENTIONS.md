@@ -1,5 +1,26 @@
 # WRQ 接口开发规范与当前清单
 
+## 悬浮对话台测试案例产出物联调
+
+以下接口以 `/assistant/artifacts` 为前缀，均使用平台 token，按登录人定位样例文件。仅配置 `ASSISTANT_ARTIFACT_MOCK_DIR` 时启用，不涉及 `chat_artifact` 或资产数据库表。
+
+| 方法 | 路径后缀 | 参数与行为 |
+|---|---|---|
+| POST | /create-demo | JSON 可选 `kind`，默认 `test_cases`，支持 `docx`、`xlsx`、`py`、`js`、`ts`、`sh`、`sql`、`md`、`json`。已存在时打开当前原件 |
+| GET | /detail | 查询 `artifact_id`。返回 `is_test_case`、格式和 `base_hash`。测试案例返回案例与分组，普通文件返回 `editor` 及对应的 `blocks`、`sheets` 或 `text` |
+| GET | /sheet | 查询 `artifact_id`、`base_hash`、`sheet_index`、行列偏移与上限，返回普通 XLSX 工作表的一页单元格 |
+| POST | /save-content | JSON `artifact_id`、`base_hash`，另传 `cases`、`paragraphs`、`cells` 或 `text` 四者之一。锁内校验原文件哈希，冲突返回 409 |
+| GET | /download | 查询 `artifact_id`、可选 `base_hash`、可选 `archived`。下载整份原格式文件或归档快照 |
+| GET | /asset-status | 查询 `artifact_id`。返回样例是否已归档 |
+| POST | /submit-to-assets | JSON `artifact_id`、`base_hash`、`name`、`application_identify`。重复提交返回已有样例归档 |
+
+样例 XLSX 有「测试案例」「操作步骤」两张表，分别按案例编号和案例编号加步骤编号定位。写回前校验生成后的工作簿，在原文件所在目录用临时文件替换原件。已归档快照独立保存。正式接入时用同事的产出物查询替换 mock 元数据，用真实输出样本确定工作簿适配方式，再将样例归档替换为正式资产查询和创建接口。
+
+导图按验证目标归纳，支持把不同场景的相似案例合入同一测试要点。归纳结果单独放在共享目录的 `.case-groups/<用户ID>/<产出物ID>.json`。其中记录 `schema_version`、`artifact_id`、`source_sha256`、`mode` 和 `groups`，文件哈希变化时重新生成。默认使用样例规则，设置 `ASSISTANT_ARTIFACT_MODEL_GROUPING=true` 后复用现有模型配置，验证模型覆盖全部原案例且每条只出现一次。模型失败时回退到样例规则。JSON 不写入 XLSX，也不参与导出或归档。
+
+普通文件编辑使用同一原文件定位与保存事务。DOCX 按段落编号修改正文及表格内文本，复杂段落只读，保留其他文档部件。XLSX 按 `sheet_index` 和 `address` 修改单元格，支持文本、数字、布尔、普通公式和清空，保留原工作表样式与未修改部件，复杂公式和合并区域的从属格只读。文本支持 UTF-8、带 BOM 的 UTF-16 和 GB18030，保存保留编码、BOM 和原换行风格；JSON 写入前检查语法。样例原文件最大 10 MiB，文本最多 2 Mi 字符，Office 解压最多 64 MiB。
+
+
 知识库附件预览：GET `/knowledge-bases/documents/preview?kb_id=1&doc_id=2` 返回格式与文档代次；GET `/knowledge-bases/documents/preview-pdf?kb_id=1&doc_id=2&generation=1` 返回原PDF/Word转换PDF；GET `/knowledge-bases/documents/preview-sheet?kb_id=1&doc_id=2&generation=1&sheet_index=0&offset=0&limit=100&column_offset=0&column_limit=50` 返回Excel分页。原下载接口增加可选generation。平台token均在请求头。详见 [附件预览](../../docs/document-preview.md)。
 
 2026-11-06 知识库更新提醒新增：GET `/skills/developer/get-knowledge-update-summary`，GET `/skills/developer/get-knowledge-updates?skill_id=14`，POST `/skills/developer/mark-knowledge-updates-read`（JSON：`skill_id`、`items:[{notification_id,seen_revision}]`）。均验证平台身份及本人技能，列表增加批量查询的 `knowledge_update_count`；已读仅确认用户看到的版本，不修改技能修订号或发布状态。完整语义和显式迁移见 [知识库更新提醒](../../docs/knowledge-integration.md#知识库更新的持久化提醒)。

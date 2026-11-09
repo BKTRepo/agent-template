@@ -243,6 +243,8 @@ class ProjectConfig(BaseSettings):
     DOCUMENT_PREVIEW_CONVERTER_URL: str = Field(default="", description="内部 Word 转 PDF 服务地址")
     DOCUMENT_PREVIEW_CACHE_DIR: str = os.path.abspath(os.path.join(OUTPUT_DIR, "knowledge_previews"))
     DOCUMENT_PREVIEW_TIMEOUT: int = Field(default=60, ge=5, le=180)
+    ASSISTANT_ARTIFACT_MOCK_DIR: str = Field(default="", description="本地联调样例的共享目录，留空关闭")
+    ASSISTANT_ARTIFACT_MODEL_GROUPING: bool = Field(default=False, description="使用现有模型归纳导图测试要点")
     OUTPUT_DOWNLOAD_DIR: str = os.path.abspath(os.path.join(OUTPUT_DIR, "download"))
     OUTPUT_MEDIA_DIR: str = os.path.abspath(os.path.join(OUTPUT_DIR, "media"))
     OUTPUT_DATAGRAM_DIR: str = os.path.abspath(os.path.join(OUTPUT_DIR, "datagram"))
