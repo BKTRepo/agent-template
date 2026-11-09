@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Boxes, FileStack, GitBranch, House, Layers3, Menu, Settings, Sparkles, X } from 'lucide-react'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import DeveloperPage from '@/pages/DeveloperPage'
+import AssetsPage from '@/pages/AssetsPage'
 import KnowledgePage from '@/pages/KnowledgePage'
 import SkillsPage from '@/pages/SkillsPage'
 import { useDeveloperStore } from '@/stores/developerStore'
@@ -73,7 +74,7 @@ function Workspace() {
       </div>)}</nav>
     </aside>
     <main className="platform-main"><header className="platform-topbar"><div className="topbar-title"><button className="mobile-menu icon-button" aria-label="打开导航" onClick={() => setMobileMenu(true)}><Menu size={20} /></button><span>{label}</span>{page === 'skills' && <span className="topbar-subtitle">Skill 类 + 实现类管理 · 已上线可在线测试，已下线保留详情和下载</span>}{page === 'developer' && <span className="topbar-subtitle">技能新建、调试、上线全链路管理</span>}{page === 'knowledge' && <span className="topbar-subtitle">Skill 依赖与引用资源管理 · 团队权限隔离</span>}</div><div className="topbar-actions"><PlatformAccount /></div></header>
-      <div className="platform-content" key={actor.id || "platform"}>{page === 'developer' ? <DeveloperPage /> : page === 'knowledge' ? <KnowledgePage /> : page === 'skills' ? <SkillsPage /> : <section className="module-placeholder"><h1>{label}</h1><div className="surface placeholder-body"><Layers3 size={36} /><h2>该模块暂未开放</h2><p>当前可使用开发者中心创建和调试 Skill。</p><button className="button primary" onClick={() => setPage('developer')}>进入开发者中心</button></div></section>}</div>
+      <div className="platform-content" key={actor.id || "platform"}>{page === 'developer' ? <DeveloperPage /> : page === 'knowledge' ? <KnowledgePage /> : page === 'skills' ? <SkillsPage /> : page === 'assets' ? <AssetsPage /> : <section className="module-placeholder"><h1>{label}</h1><div className="surface placeholder-body"><Layers3 size={36} /><h2>该模块暂未开放</h2><p>当前可使用开发者中心创建和调试 Skill。</p><button className="button primary" onClick={() => setPage('developer')}>进入开发者中心</button></div></section>}</div>
     </main>
     <KnowledgeProcessingWorker /><KnowledgeUpdatesWorker /><FloatingAssistant key={actor.id || "platform"} />
   </div></ErrorBoundary>

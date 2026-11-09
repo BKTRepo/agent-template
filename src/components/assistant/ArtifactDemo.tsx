@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { archiveArtifact, artifactAssetStatus, exportArtifact, getArtifact, openArtifactDemo, saveArtifact } from '@/api/assistantArtifacts'
+import { exportArtifact, getArtifact, openArtifactDemo, saveArtifact } from '@/api/assistantArtifacts'
+import { assetSourceStatus, createAsset, downloadAsset, getAssetOverview, type AssetStatus, type AssetOverview } from '@/api/assets'
 import { getDeveloperMetadata, type DeveloperCatalogOption } from '@/api/developerCenter'
 import ApplicationPicker from '@/components/developer/ApplicationPicker'
 import Dialog from '@/components/developer/Dialog'
@@ -18,6 +19,8 @@ interface ArchiveForm {
   exportAfter: boolean
   name: string
   application: string
+  classId: string
+  visibility: 'private' | 'platform'
 }
 
 export default function ArtifactDemo() {
@@ -27,7 +30,8 @@ export default function ArtifactDemo() {
   const [exportChoice, setExportChoice] = useState<ArtifactFile>()
   const [form, setForm] = useState<ArchiveForm>()
   const [applications, setApplications] = useState<DeveloperCatalogOption[]>([])
-  const [included, setIncluded] = useState(false)
+  const [classes, setClasses] = useState<AssetOverview['classes']>([])
+  const [assetStatus, setAssetStatus] = useState<AssetStatus>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -44,17 +48,17 @@ export default function ArtifactDemo() {
     return run(async () => {
       const artifactId = artifactIds[kind]
       const current = artifactId ? await getArtifact(artifactId) : await openArtifactDemo(kind)
-      const status = await artifactAssetStatus(current.artifactId)
       setArtifactIds(previous => ({ ...previous, [kind]: current.artifactId }))
-      setIncluded(status.included)
       setArtifact(current)
+      setAssetStatus(undefined)
+      setAssetStatus(await assetSourceStatus(current.artifactId))
     })
   }
 
   function chooseExport(current: ArtifactFile) {
     return run(async () => {
-      const status = await artifactAssetStatus(current.artifactId)
-      setIncluded(status.included)
+      const status = await assetSourceStatus(current.artifactId)
+      setAssetStatus(status)
       if (status.included) await exportArtifact(current)
       else setExportChoice(current)
     })
@@ -62,21 +66,22 @@ export default function ArtifactDemo() {
 
   function beginArchive(current: ArtifactFile, exportAfter: boolean) {
     return run(async () => {
-      const metadata = await getDeveloperMetadata()
+      const [metadata, overview] = await Promise.all([getDeveloperMetadata(), getAssetOverview()])
       setApplications(metadata.applications.filter(application => application.id !== '*'))
-      setForm({ artifact: current, exportAfter, name: current.name, application: '' })
+      setClasses(overview.classes.filter(row => row.enabled))
+      setForm({ artifact: current, exportAfter, name: current.name, application: '', classId: '', visibility: 'private' })
       setExportChoice(undefined)
     })
   }
 
   function submit(form: ArchiveForm) {
     return run(async () => {
-      const status = await archiveArtifact(form.artifact, form.name.trim(), form.application)
-      setIncluded(true)
+      const status = await createAsset({ artifact_id: form.artifact.artifactId, base_hash: form.artifact.baseHash,
+        name: form.name.trim(), application_identify: form.application, skill_classes_id: Number(form.classId), visibility: form.visibility })
+      setAssetStatus(status)
       setForm(undefined)
-      if (form.exportAfter) {
-        await exportArtifact(form.artifact, status.file_sha256 === form.artifact.baseHash)
-      }
+      window.dispatchEvent(new Event('asset-collection-changed'))
+      if (form.exportAfter && status.asset_id && status.files.length === 1) await downloadAsset(status.asset_id, status.files[0])
     })
   }
 
@@ -85,7 +90,8 @@ export default function ArtifactDemo() {
     onClose: () => { setArtifact(undefined); setError('') },
     toolbar: (saved: ArtifactFile, disabled: boolean) => <>
       <button type="button" className="button" disabled={disabled} onClick={() => void chooseExport(saved)}>导出</button>
-      <button type="button" className="button primary" disabled={disabled || included} onClick={() => void beginArchive(saved, false)}>{included ? '已纳入样例资产' : '纳入资产管理'}</button>
+      <button type="button" className="button primary" disabled={disabled || !!assetStatus?.included || !!assetStatus?.recycled}
+        onClick={() => void beginArchive(saved, false)}>{assetStatus?.included ? '已纳入资产管理' : assetStatus?.recycled ? '资产在回收站' : '纳入资产管理'}</button>
     </>,
   }
 
@@ -106,19 +112,23 @@ export default function ArtifactDemo() {
         await exportArtifact(exportChoice)
         setExportChoice(undefined)
       })}>仅导出</button>
-        <button type="button" className="button primary" disabled={busy} onClick={() => void beginArchive(exportChoice, true)}>纳入资产并导出</button></>}>
-      <p>当前产出物尚未纳入资产管理，是否将整份产出物纳入后再导出？</p>
+        <button type="button" className="button primary" disabled={busy || assetStatus?.recycled} onClick={() => void beginArchive(exportChoice, true)}>纳入资产并导出</button></>}>
+      <p>{assetStatus?.recycled ? '产出物已在回收站，可仅导出原件，或在资产管理中恢复。' : '当前产出物尚未纳入资产管理，是否将整份产出物纳入后再导出？'}</p>
       {error && <p className="error-banner" role="alert">{error}</p>}
     </Dialog>}
     {form && <Dialog title="纳入资产管理" busy={busy} onClose={() => { setForm(undefined); setError('') }}
       footer={<><button type="button" className="button" disabled={busy} onClick={() => { setForm(undefined); setError('') }}>取消</button>
-        <button type="button" className="button primary" disabled={busy || !form.name.trim() || !form.application} onClick={() => void submit(form)}>确认纳入</button></>}>
-      <p className="helper-text">联调样例，归档快照保存在样例共享目录。</p>
+        <button type="button" className="button primary" disabled={busy || !form.name.trim() || !form.application || !form.classId} onClick={() => void submit(form)}>确认纳入</button></>}>
       <div className="artifact-case-editor">
         <label>资产名称<input value={form.name} maxLength={128} disabled={busy} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
-        <p>资产分类 · {artifact?.editor === 'cases' ? '测试用例' : ['docx', 'md'].includes(form.artifact.fileType) ? '测试报告' : ['xlsx', 'json'].includes(form.artifact.fileType) ? '测试数据' : '自动化脚本'}</p>
+        <label>技能大类<select value={form.classId} disabled={busy} onChange={event => setForm({ ...form, classId: event.target.value })}>
+          <option value="">请选择技能大类</option>{classes.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
         <ApplicationPicker required value={form.application ? [form.application] : []} options={applications}
           disabled={busy} onChange={ids => setForm({ ...form, application: ids[0] ?? '' })} />
+        <label>可见范围<select value={form.visibility} disabled={busy}
+          onChange={event => setForm({ ...form, visibility: event.target.value === 'platform' ? 'platform' : 'private' })}>
+          <option value="private">仅本人</option><option value="platform">全平台</option>
+        </select></label>
       </div>
       {error && <p className="error-banner" role="alert">{error}</p>}
     </Dialog>}
