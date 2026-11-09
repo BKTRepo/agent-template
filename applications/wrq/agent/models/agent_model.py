@@ -150,12 +150,14 @@ class SkillResourceBinding(models.Model):
     display_name = fields.CharField(max_length=255, default="", description="挂载时展示名称")
     usage_text = fields.TextField(null=True, description="单项资源使用说明")
     content_hash = fields.CharField(max_length=64, null=True, description="挂载内容校验摘要")
+    knowledge_mount_revision = fields.IntField(null=True, description="本次连续挂载的知识库版本基线")
     sort_order = fields.IntField(default=0, description="该技能版本内资源展示顺序")
     created_time = fields.DatetimeField(auto_now_add=True, description="挂载建立时间")
     update_user_login_name = fields.CharField(max_length=10, null=True, description="最后修改人工号")
     updated_time = fields.DatetimeField(auto_now=True, description="最后修改时间")
     class Meta:
         table = "keenrobot_skill_resource_bindings"
+        indexes = (("source_type", "source_id"),)
         unique_together = (("skill_version_id", "source_type", "source_id"), ("skill_version_id", "file_id"))
 
 class SkillDebugRun(models.Model):
@@ -215,3 +217,19 @@ class McpServer(ScaffoldModel, StateModel, TimestampMixin):
 
     class Meta:
         table = "keenrobot_mcp_servers"
+
+
+class SkillKnowledgeNotification(models.Model):
+    id = fields.IntField(pk=True)
+    recipient_user_id = fields.BigIntField(index=True)
+    skill_id = fields.IntField(index=True)
+    knowledge_base_id = fields.IntField(index=True)
+    latest_revision = fields.IntField(default=0)
+    read_revision = fields.IntField(default=0)
+    change_summary = fields.TextField(default="")
+    updated_at = fields.DatetimeField(auto_now=True)
+    read_at = fields.DatetimeField(null=True)
+
+    class Meta:
+        table = "keenrobot_skill_knowledge_notifications"
+        unique_together = (("recipient_user_id", "skill_id", "knowledge_base_id"),)

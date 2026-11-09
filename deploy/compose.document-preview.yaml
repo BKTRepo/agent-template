@@ -1,0 +1,15 @@
+name: platform-document-preview
+services:
+  document-preview:
+    image: gotenberg/gotenberg:9.0.0-libreoffice
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3001:3000"
+    command:
+      - gotenberg
+      - --api-timeout=60s
+      - --libreoffice-max-queue-size=10
+      - --libreoffice-deny-private-ips=true
+      - --libreoffice-deny-public-ips=true
+    mem_limit: 2g
+    cpus: 2

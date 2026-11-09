@@ -14,6 +14,7 @@ from applications.wrq.agent.services.skill_package_builder import SkillPackageEr
 from applications.wrq.agent.services.published_skill_version import display_skill_version
 from applications.wrq.catalog import application_options
 from applications.wrq.markdown_storage import read_markdown
+from applications.wrq.agent.services.knowledge_reference_service import current_knowledge_references
 
 
 class SkillCatalogService:
@@ -67,7 +68,8 @@ class SkillCatalogService:
                 'description': row.description or '', 'input_schema': row.input_schema,
                 'output_schema': row.output_schema, 'template': row.template}
 
-    async def list(self, *, name='', class_id=None, application='', maintainer='', page=1, page_size=20):
+    async def list(self, *, name='', class_id=None, application='', maintainer='', page=1, page_size=10):
+        page_size = max(1, min(page_size, 10))
         # 分类和应用取发布表单，避免当前草稿更换分类后污染目录。
         form_query = SkillForm.all()
         if name.strip():
@@ -95,8 +97,8 @@ class SkillCatalogService:
 
     async def detail(self, skill_id):
         skill, version, form = await self.published(skill_id)
-        knowledge = [{'id': row.source_id, 'name': row.display_name, 'source': 'backend'} for row in
-                     await SkillResourceBinding.filter(skill_version_id=version.id, source_type='knowledge_base').order_by('sort_order', 'id')]
+        knowledge = await current_knowledge_references(await SkillResourceBinding.filter(
+            skill_version_id=version.id, source_type='knowledge_base').order_by('sort_order', 'id'))
         return {**self.summary(skill, version, form), 'instructions': form.instructions,
                 'technical_name': form.technical_name, 'compatibility': form.compatibility or '',
                 'resource_usage': form.resource_usage or '', 'resource_ids': [row['id'] for row in knowledge],

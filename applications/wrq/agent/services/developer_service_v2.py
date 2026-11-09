@@ -13,6 +13,7 @@ from applications.wrq.markdown_storage import write_markdown, read_markdown, dis
 from applications.wrq.sandbox import SandboxResults
 from applications.wrq.agent.services.version_service import version_and_form
 from applications.wrq.agent.services.published_skill_version import display_skill_version
+from applications.wrq.agent.services.knowledge_reference_service import current_knowledge_references
 
 STATUS_TEXT = {
     'DRAFT': '草稿',
@@ -27,6 +28,24 @@ class DeveloperError(ValueError):
     def __init__(self, message, status_code=400, field=None):
         self.status_code, self.field = status_code, field
         super().__init__(message)
+
+
+def knowledge_ids(values, field='resource_ids'):
+    """Resolve integer identity before checking duplicates; names never identify a KB."""
+    result = []
+    seen = set()
+    for value in values:
+        text = str(value).strip()
+        if isinstance(value, bool) or not isinstance(value, (str, int)) or not text.isascii() or not text.isdecimal():
+            raise DeveloperError('知识库编号无效，请重新选择', field=field)
+        identifier = int(text)
+        if not 1 <= identifier <= 2147483647:
+            raise DeveloperError('知识库编号无效，请重新选择', field=field)
+        if identifier in seen:
+            raise DeveloperError('同一个技能不能重复挂载同一个知识库', field=field)
+        seen.add(identifier)
+        result.append(identifier)
+    return result
 
 def version_text(revision):
     return f'1.0.{revision - 1}'
@@ -78,6 +97,8 @@ class DeveloperSkillCrud:
     async def metadata(self):
         categories = await ResourceCategory.filter(is_enabled=True).order_by('id').values('id','code','name')
         return {'skill_classes':await DeveloperSkillClass.filter(is_enabled=True).order_by('id').values('id','name'),
+                'filter_skill_classes':await DeveloperSkillClass.all().order_by('id').values('id','name','is_enabled'),
+                'statuses':[{'id':key,'name':name} for key,name in STATUS_TEXT.items()],
                 'applications':await application_options(), 'resource_categories':categories,
                 'source_types':categories}  # 旧前端响应键兼容；值仍只是用途，不是来源。
 
@@ -99,6 +120,8 @@ class DeveloperSkillCrud:
         return not any(normalized_skill_name(r.name)==key for r in await q)
 
     async def validate(self,data,user,db=None,existing_application=None):
+        selected_knowledge = knowledge_ids(data.resource_ids)
+        knowledge_ids((row.get('id') for row in data.knowledge_bases), 'knowledge_bases')
         for key,message in [('name','技能名称不能为空'),('description','请填写描述'),('instructions','请填写执行指令')]:
             if not getattr(data,key).strip(): raise DeveloperError(message,field=key)
         normalized_skill_name(data.name)
@@ -145,7 +168,7 @@ class DeveloperSkillCrud:
                 raise DeveloperError('知识库服务尚未接入，请先使用资源上传', 503, 'resource_ids')
             from applications.knowledge_base.models.knowledge_base_model import KnowledgeBase
             from services.resource_isolation import resolve_isolation_rule
-            for kid in dict.fromkeys(str(value) for value in data.resource_ids):
+            for kid in selected_knowledge:
                 query = KnowledgeBase.filter(resolve_isolation_rule(user),id=kid,state__not=1)
                 if db: query = query.using_db(db)
                 kb=await query.first()
@@ -162,6 +185,7 @@ class DeveloperSkillCrud:
             raise DeveloperError('技能已被修改或缺少版本信息，请刷新后重试',409)
 
     async def _write(self,skill,data,user,files,knowledge,db,markdown=None,artifacts=None,extra_update_fields=()):
+        previous_version_id = skill.current_version_id
         published = await SkillVersion.filter(id=skill.published_version_id).using_db(db).first() if skill.published_version_id else None
         version=await SkillVersion.create(using_db=db,skill_id=skill.id,version=published.version if published else None,
             revision=skill.current_revision,create_user_login_name=user_login_name(user),
@@ -194,12 +218,18 @@ class DeveloperSkillCrud:
             'update_user_login_name', 'current_version_id', 'updated_time',
             *extra_update_fields,
         ])
+        from .knowledge_notification_service import sync_mounts
+        await sync_mounts(skill, previous_version_id, db)
         return skill
 
     async def create(self,user,data):
+        if not (data.effective_application_paso or '').strip():
+            raise DeveloperError('请选择所属应用', field='application_paso')
         artifacts=[]
         try:
             async with in_transaction() as db:
+                from .knowledge_notification_service import lock_mount_knowledge
+                await lock_mount_knowledge(None, knowledge_ids(data.resource_ids), db)
                 files,kbs=await self.validate(data,user,db)
                 if not await self.name_available(data.name,connection=db):
                     raise DeveloperError('该技能名称已存在，请更换',409,'name')
@@ -216,6 +246,8 @@ class DeveloperSkillCrud:
         artifacts=[]
         try:
             async with in_transaction() as db:
+                from .knowledge_notification_service import lock_mount_knowledge
+                await lock_mount_knowledge(skill_id, knowledge_ids(data.resource_ids), db)
                 skill=await self.get(skill_id,user,db)
                 self.check_revision(skill,data.expected_revision)
                 files,kbs=await self.validate(data,user,db,existing_application=skill.application_paso)
@@ -346,20 +378,56 @@ class DeveloperSkillCrud:
                 'is_current_version':skill.current_version_id==version.id,
                 'task':result}
 
-    async def list(self,user,*,page=None,page_size=None):
+    async def list(self,user,*,page=None,page_size=None,name='',class_id=None,status=None,application=''):
         query=Skill.filter(create_user_login_name=user_login_name(user),state=0).order_by('-updated_time','-id')
+        if name.strip():
+            query=query.filter(name__icontains=name.strip())
+        if class_id is not None:
+            query=query.filter(skill_classes_id=class_id)
+        if application.strip():
+            query=query.filter(application_paso__in=[application.strip(), '*'])
+        if status:
+            status=self.status_value(status)
+            # Refresh only running jobs that can enter the requested debug status,
+            # before counting/paging. A conditional write protects newer skill versions.
+            if status in {'DEBUGGING','DEBUG_SUCCESS','DEBUG_FAILED'}:
+                running=await query.filter(display_status='DEBUGGING')
+                versions={v.id:v for v in await SkillVersion.filter(id__in=[s.current_version_id for s in running])}
+                for skill in running:
+                    link=await SkillDebugRun.filter(skill_id=skill.id,skill_version_id=skill.current_version_id,
+                        create_user_login_name=user_login_name(user)).order_by('-created_time','-id').first()
+                    version=versions.get(skill.current_version_id)
+                    if not link or not version or link.build_id!=version.build_id:
+                        continue
+                    try:
+                        result=await self.sandbox.get(link.run_id,skill.id)
+                    except Exception as exc:
+                        from configure import LOGGER
+                        LOGGER.warning('筛选时查询调试状态暂不可用: {}',type(exc).__name__)
+                        continue
+                    target=self.debug_status(result)
+                    if target and target!='DEBUGGING':
+                        from tortoise.timezone import now
+                        await Skill.filter(id=skill.id,current_version_id=version.id,display_status='DEBUGGING').update(
+                            display_status=target,updated_time=now())
+            query=query.filter(display_status=status)
         if page is None or page_size is None:
             return await query
         total=await query.count()
         return await query.offset((page-1)*page_size).limit(page_size), total
 
-    async def output(self,skill,user):
+    async def output(self,skill,user,knowledge_update_count=None):
+        if knowledge_update_count is None:
+            from .knowledge_notification_service import counts
+            knowledge_update_count = (await counts(user, [skill.id])).get(skill.id, 0)
         version,form=await version_and_form(skill.current_version_id)
         if not version or not form or version.skill_id!=skill.id:
             raise DeveloperError('技能缺少有效版本或表单，请检查迁移记录',409)
         categories={r.id:r.name for r in await ResourceCategory.all()}
-        files=[]; knowledge=[]
-        for binding in await SkillResourceBinding.filter(skill_version_id=version.id).order_by('sort_order','id'):
+        files=[]
+        bindings = await SkillResourceBinding.filter(skill_version_id=version.id).order_by('sort_order','id')
+        knowledge = await current_knowledge_references(bindings)
+        for binding in bindings:
             if binding.file_id is not None:
                 file=await Source.get_or_none(id=binding.file_id)
                 if not file: raise DeveloperError('挂载文件不存在，请核对资源关系',409)
@@ -368,8 +436,6 @@ class DeveloperSkillCrud:
                     'name':file.original_name,'size':file.byte_size,'lastModified':0,'category':category,'savedCategory':category,
                     'downloadUrl':f'/skills/developer/download-resource-file?file_id={file.id}',
                     'usage':binding.usage_text or ''})
-            elif binding.source_type=='knowledge_base':
-                knowledge.append({'id':binding.source_id,'name':binding.display_name or binding.source_id,'source':'backend'})
         link=await SkillDebugRun.filter(skill_id=skill.id,skill_version_id=version.id,
             create_user_login_name=user_login_name(user)).order_by('-created_time').first()
         debug=None
@@ -384,6 +450,7 @@ class DeveloperSkillCrud:
         if page_status not in ('已上线','已下线') and debug:
             page_status = {'passed':'调试成功','failed':'调试失败','queued':'调试中','running':'调试中'}.get(debug['status'], page_status)
         return {'id':skill.id,'name':form.name,'class_id':form.skill_class_id,
+            'knowledge_update_count':knowledge_update_count,
             'application_paso':form.application_paso,'application_ids':[form.application_paso] if form.application_paso else [],'description':form.description,
             'instructions':form.instructions,'resource_ids':[k['id'] for k in knowledge],
             'resource_usage':form.resource_usage or '','compatibility':form.compatibility or '',

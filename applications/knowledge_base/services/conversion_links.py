@@ -11,6 +11,7 @@ from applications.knowledge_base.models.knowledge_base_model import Document, Do
 from applications.knowledge_base.models.rag_document_model import RagDocument
 from configure import PROJECT_CONFIG
 from enums import DocumentStatus
+from applications.knowledge_base.services import knowledge_limits
 
 
 async def stage_conversions(user, job_ids, kb_id, *, storage_key=None):
@@ -18,6 +19,7 @@ async def stage_conversions(user, job_ids, kb_id, *, storage_key=None):
     from .file_type import validate_file_type
 
     staged = []
+    total_size = 0
     try:
         for job_id in dict.fromkeys(job_ids):
             job = await RagDocument.get_or_none(job_id=job_id, owner_id=user.id)
@@ -30,13 +32,22 @@ async def stage_conversions(user, job_ids, kb_id, *, storage_key=None):
             source = Path(job.input_path or "").resolve()
             if not source.is_relative_to(Path(PROJECT_CONFIG.RAG_INPUT_DIR).resolve()) or not source.is_file():
                 raise KnowledgeError("转换任务原文件不存在，请重新上传", "conversion_job_ids", 409)
+            source_size = source.stat().st_size
+            total_size += source_size
+            if total_size > knowledge_limits.MAX_TOTAL_BYTES:
+                raise KnowledgeError(knowledge_limits.TOTAL_SIZE_ERROR, "files")
             suffix = validate_file_type(job.filename)
             directory = PROJECT_CONFIG.upload_path / str(storage_key or kb_id)
             directory.mkdir(parents=True, exist_ok=True)
             target = directory / f"{uuid.uuid4().hex}.{suffix}"
             staged.append({"filename": job.filename, "file_type": suffix, "file_path": str(target),
-                           "file_size": source.stat().st_size, "content_hash": job.file_sha256})
+                           "file_size": source_size, "content_hash": job.file_sha256})
             await asyncio.to_thread(shutil.copyfile, source, target)
+            actual_size = target.stat().st_size
+            total_size += actual_size - source_size
+            if total_size > knowledge_limits.MAX_TOTAL_BYTES:
+                raise KnowledgeError(knowledge_limits.TOTAL_SIZE_ERROR, "files")
+            staged[-1]['file_size'] = actual_size
             def fingerprint():
                 with target.open('rb') as stream:
                     return hashlib.file_digest(stream, 'sha256').hexdigest()

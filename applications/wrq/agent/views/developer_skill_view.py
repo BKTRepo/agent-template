@@ -1,4 +1,5 @@
 import json
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from fastapi import APIRouter, File, Form, Query, UploadFile
 from starlette.responses import FileResponse
 from applications.wrq.http import WrqRoute
@@ -11,6 +12,7 @@ from applications.wrq.agent.services.developer_skill_crud import DeveloperSkillC
 from applications.wrq.agent.services.source_service import SourceService
 from core.responses import SuccessResponse
 from applications.wrq.auth import DependAuth, user_login_name
+from applications.wrq.agent.models.agent_model import SkillDisplayStatus
 
 developer_skills=APIRouter(route_class=WrqRoute)
 crud=DeveloperSkillCrud()
@@ -35,20 +37,74 @@ async def metadata(current_user=DependAuth):
     result.headers['Pragma'] = 'no-cache'
     return result
 
-@developer_skills.get('/developer/list-skills',summary='开发者中心-分页查询本人技能列表及调试状态')
-async def list_skills(page: int = Query(default=1, ge=1), page_size: int = Query(default=10, ge=1, le=100), current_user=DependAuth):
+@developer_skills.get('/developer/get-skill',summary='开发者中心-按编号查询本人技能及当前知识库引用')
+async def get_skill(skill_id: int = Query(..., ge=1, le=2147483647), current_user=DependAuth):
+    result = SuccessResponse(data=await crud.output(await crud.get(skill_id, current_user), current_user))
+    result.headers['Cache-Control'] = 'no-store, max-age=0'
+    return result
+
+
+@developer_skills.get('/developer/list-skills',summary='开发者中心-按实现名称、技能类、状态和所属应用分页筛选本人技能')
+async def list_skills(page: int = Query(default=1, ge=1), page_size: int = Query(default=10, ge=1, le=100),
+                     name: str = Query('', max_length=128), class_id: int | None = Query(None, ge=1, le=2147483647),
+                     status: SkillDisplayStatus | None = Query(None), application: str = Query('', max_length=128), current_user=DependAuth):
     # 列表用于开发者中心的刷新与分页，禁止浏览器/代理复用旧快照。
-    rows,total=await crud.list(current_user,page=page,page_size=page_size)
+    filters=dict(name=name,class_id=class_id,status=status,application=application)
+    rows,total=await crud.list(current_user,page=page,page_size=page_size,**filters)
     pages=max(1,(total+page_size-1)//page_size)
     # 删除最后一页记录后，刷新可能仍带着旧页码；回退到最后有效页，避免前端停在空白页。
     if page > pages:
         page=pages
-        rows,total=await crud.list(current_user,page=page,page_size=page_size)
-    result=SuccessResponse(data={'items':[await crud.output(r,current_user) for r in rows], 'total':total,
+        rows,total=await crud.list(current_user,page=page,page_size=page_size,**filters)
+    from applications.wrq.agent.services.knowledge_notification_service import counts
+    update_counts = await counts(current_user, [r.id for r in rows])
+    result=SuccessResponse(data={'items':[await crud.output(r,current_user,knowledge_update_count=update_counts.get(r.id,0)) for r in rows], 'total':total,
         'page':page, 'page_size':page_size, 'pages':pages})
     result.headers['Cache-Control'] = 'no-store, max-age=0'
     result.headers['Pragma'] = 'no-cache'
     return result
+
+
+class KnowledgeUpdateSeen(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    notification_id: int = Field(gt=0, le=2147483647, strict=True)
+    seen_revision: int = Field(ge=0, le=2147483647, strict=True)
+
+
+class KnowledgeUpdatesRead(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    skill_id: int = Field(gt=0, le=2147483647, strict=True)
+    items: list[KnowledgeUpdateSeen] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode='after')
+    def unique_items(self):
+        if len({item.notification_id for item in self.items}) != len(self.items):
+            raise ValueError('提醒编号不能重复')
+        return self
+
+
+@developer_skills.get('/developer/get-knowledge-update-summary', summary='开发者中心-查询全部本人技能知识库未读提醒汇总')
+async def knowledge_update_summary(current_user=DependAuth):
+    from applications.wrq.agent.services.knowledge_notification_service import summary
+    response = SuccessResponse(data=await summary(current_user))
+    response.headers['Cache-Control'] = 'no-store, max-age=0'
+    return response
+
+
+@developer_skills.get('/developer/get-knowledge-updates', summary='开发者中心-查询本人技能挂载知识库的未读更新')
+async def knowledge_updates(skill_id: int = Query(..., ge=1, le=2147483647), current_user=DependAuth):
+    from applications.wrq.agent.services.knowledge_notification_service import details
+    response = SuccessResponse(data=await details(skill_id, current_user))
+    response.headers['Cache-Control'] = 'no-store, max-age=0'
+    return response
+
+
+@developer_skills.post('/developer/mark-knowledge-updates-read', summary='开发者中心-按实际看到的知识库版本确认提醒已读')
+async def mark_knowledge_updates_read(data: KnowledgeUpdatesRead, current_user=DependAuth):
+    from applications.wrq.agent.services.knowledge_notification_service import mark_read
+    response = SuccessResponse(data=await mark_read(data.skill_id, data.items, current_user))
+    response.headers['Cache-Control'] = 'no-store, max-age=0'
+    return response
 
 @developer_skills.post('/developer/create-skill-draft',summary='开发者中心-创建技能草稿')
 async def create(data:DeveloperSkillForm,current_user=DependAuth):

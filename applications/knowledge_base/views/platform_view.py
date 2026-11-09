@@ -1,5 +1,6 @@
 """定稿个人知识库 API。处理任务在响应后执行，状态保存在数据库。"""
 from pathlib import Path
+import asyncio
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, Request, UploadFile
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -139,11 +140,12 @@ async def name_availability(name: str = Query(min_length=1, max_length=128), exc
     return await respond(operation())
 
 
-@knowledge.get("/list", summary="知识库-查询公开及本人知识库列表")
-async def list_knowledge(search: str = "", offset: int = Query(0, ge=0), limit: int = Query(10, ge=1, le=10),
+@knowledge.get("/list", summary="知识库-按名称、所属应用和维护人筛选公开及本人知识库")
+async def list_knowledge(search: str = Query('', max_length=128), offset: int = Query(0, ge=0), limit: int = Query(10, ge=1, le=10),
+                         application: str = Query('', max_length=128), maintainer: str = Query('', max_length=64),
                          current_user: User = DependAuth, service=Depends(get_knowledge_service)):
     try:
-        items, total = await service.list(current_user, search, offset=offset, limit=limit)
+        items, total = await service.list(current_user, search, offset=offset, limit=limit, application=application, maintainer=maintainer)
         return SuccessResponse(data=items, total=total)
     except Exception:
         LOGGER.exception("知识库查询失败")
@@ -188,19 +190,64 @@ async def history(kb_id: int, current_user: User = DependAuth, service=Depends(g
 @knowledge.get("/documents/preview", summary="知识库-查询文件解析内容预览")
 async def preview(kb_id: int, doc_id: int, current_user: User = DependAuth, service=Depends(get_knowledge_service)):
     async def operation():
+        from applications.knowledge_base.services.document_preview import metadata
         doc = await service.require_document(kb_id, doc_id, current_user)
-        return {**service.document_out(doc), "markdown": doc.markdown or ""}
+        information = await metadata(doc)
+        await require_preview_current(service, kb_id, doc_id, current_user, doc)
+        return {**service.document_out(doc), "markdown": doc.markdown or "", **information}
+    return await respond(operation())
+
+
+async def require_preview_current(service, kb_id, doc_id, user, original):
+    current = await service.require_document(kb_id, doc_id, user)
+    if current.generation != original.generation or current.content_hash != original.content_hash:
+        raise KnowledgeError('文件已更新，请重新打开预览', 'generation', 409)
+    return current
+
+
+@knowledge.get('/documents/preview-pdf', summary='知识库-预览原PDF或Word转换PDF')
+async def preview_pdf(kb_id: int = Query(..., ge=1), doc_id: int = Query(..., ge=1), generation: int = Query(..., ge=1),
+                      current_user: User = DependAuth, service=Depends(get_knowledge_service)):
+    async def operation():
+        from applications.knowledge_base.services.document_preview import original_path, converted_pdf
+        doc = await service.require_document(kb_id, doc_id, current_user)
+        original_path(doc, generation)
+        path = await converted_pdf(doc)
+        await require_preview_current(service, kb_id, doc_id, current_user, doc)
+        return FileResponse(path, media_type='application/pdf', headers={'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff'})
+    try:
+        return await operation()
+    except KnowledgeError as exc:
+        async def failed():
+            raise exc
+        return await respond(failed())
+
+
+@knowledge.get('/documents/preview-sheet', summary='知识库-分页预览Excel工作表')
+async def preview_sheet(kb_id: int = Query(..., ge=1), doc_id: int = Query(..., ge=1), generation: int = Query(..., ge=1),
+                        sheet_index: int = Query(0, ge=0), offset: int = Query(0, ge=0, le=1048575),
+                        limit: int = Query(100, ge=1, le=200), column_offset: int = Query(0, ge=0, le=16383),
+                        column_limit: int = Query(50, ge=1, le=100),
+                        current_user: User = DependAuth, service=Depends(get_knowledge_service)):
+    async def operation():
+        from applications.knowledge_base.services.document_preview import original_path, fingerprint, workbook_page
+        doc = await service.require_document(kb_id, doc_id, current_user)
+        original_path(doc, generation)
+        if Path(doc.filename).suffix.lower() != '.xlsx':
+            raise KnowledgeError('该文件不是Excel工作簿', 'doc_id')
+        data = await asyncio.to_thread(workbook_page, fingerprint(doc), sheet_index, offset, limit, column_offset, column_limit)
+        await require_preview_current(service, kb_id, doc_id, current_user, doc)
+        return data
     return await respond(operation())
 
 
 @knowledge.get("/documents/download", summary="知识库-下载原文件")
-async def download(kb_id: int, doc_id: int, current_user: User = DependAuth, service=Depends(get_knowledge_service)):
+async def download(kb_id: int, doc_id: int, generation: int | None = Query(None, ge=1), current_user: User = DependAuth, service=Depends(get_knowledge_service)):
     try:
+        from applications.knowledge_base.services.document_preview import original_path
         doc = await service.require_document(kb_id, doc_id, current_user)
-        path = Path(doc.file_path).resolve()
-        if not path.is_relative_to(PROJECT_CONFIG.upload_path.resolve()) or not path.is_file():
-            raise KnowledgeError("原文件不存在", status_code=404)
-        return FileResponse(path, filename=doc.filename, media_type="application/octet-stream")
+        path = original_path(doc, generation)
+        return FileResponse(path, filename=doc.filename, media_type="application/octet-stream", headers={'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff'})
     except KnowledgeError as exc:
         async def failed():
             raise exc

@@ -1,5 +1,9 @@
 # WRQ 接口开发规范与当前清单
 
+知识库附件预览：GET `/knowledge-bases/documents/preview?kb_id=1&doc_id=2` 返回格式与文档代次；GET `/knowledge-bases/documents/preview-pdf?kb_id=1&doc_id=2&generation=1` 返回原PDF/Word转换PDF；GET `/knowledge-bases/documents/preview-sheet?kb_id=1&doc_id=2&generation=1&sheet_index=0&offset=0&limit=100&column_offset=0&column_limit=50` 返回Excel分页。原下载接口增加可选generation。平台token均在请求头。详见 [附件预览](../../docs/document-preview.md)。
+
+2026-11-06 知识库更新提醒新增：GET `/skills/developer/get-knowledge-update-summary`，GET `/skills/developer/get-knowledge-updates?skill_id=14`，POST `/skills/developer/mark-knowledge-updates-read`（JSON：`skill_id`、`items:[{notification_id,seen_revision}]`）。均验证平台身份及本人技能，列表增加批量查询的 `knowledge_update_count`；已读仅确认用户看到的版本，不修改技能修订号或发布状态。完整语义和显式迁移见 [知识库更新提醒](../../docs/knowledge-integration.md#知识库更新的持久化提醒)。
+
 适用范围：`applications/wrq`；2026-11-03 按用户要求统一。此次只调整接口契约，复用原有权限、修订号冲突、发布状态及文件处理业务。
 
 1. 只使用 GET / POST。查询、下载使用 GET；创建、修改、删除、上下线、构建使用 POST。
@@ -13,12 +17,15 @@
 
 下列路径均以 `/skills/developer` 开头。
 
+列表条件同时成立：`name` 为实现名称模糊搜索，`class_id` 为技能类编号，`application` 为应用代码（具体应用包含全应用适用 `*`），`status` 为 `DRAFT`、`DEBUGGING`、`DEBUG_SUCCESS`、`DEBUG_FAILED`、`ONLINE` 或 `OFFLINE`。省略或清空条件表示不限；仅返回当前用户的有效技能，筛选后统计总数再分页，超出末页时保留全部条件回退到末页。状态筛选前同步当前构建的调试结果，避免已结束任务仍被归为调试中。前端状态选项在字典加载前也提供这六种状态。
+
 | 方法 | 路径后缀 | 功能与参数 |
 |---|---|---|
 | GET | /get-current-user | 当前登录身份 |
-| GET | /get-form-metadata | 技能类、应用、资源用途字典 |
-| GET | /list-skills | 本人技能分页；page、page_size 为查询参数 |
-| POST | /create-skill-draft | JSON：原 DeveloperSkillForm |
+| GET | /get-form-metadata | 技能类、应用、资源用途字典；filter_skill_classes 包含停用技能类供列表筛选，statuses 返回状态代码与名称 |
+| GET | /list-skills | 本人技能分页；page、page_size、name、class_id、status、application 为查询参数 |
+| GET | /get-skill | 按 skill_id 查询本人技能及当前知识库引用；只读、不递增修订或改变技能状态 |
+| POST | /create-skill-draft | JSON：DeveloperSkillForm；新建必选所属应用（application_ids 选择一个有效 identify，或 application_paso），缺失/空白返回 application_paso 字段错误；已有历史技能不补写默认应用 |
 | POST | /save-skill | JSON：skill_id + 原表单，包括 expected_revision |
 | POST | /delete-skill-draft | JSON：skill_id；仍仅软删除草稿 |
 | POST | /offline-skill | JSON：skill_id、reason_code、reason_text |

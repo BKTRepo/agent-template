@@ -21,6 +21,7 @@ from applications.knowledge_base.services.document_pipeline import DocumentPipel
 from applications.knowledge_base.services.document_lock import document_lock
 from applications.knowledge_base.services.job_control import RetryableDeletionError, NonRetryableDeletionError
 from applications.knowledge_base.services.file_type import validate_file_type
+from applications.knowledge_base.services import knowledge_limits
 from applications.user.models.user_model import User
 from configure import PROJECT_CONFIG, LOGGER
 from enums import DocumentStatus
@@ -83,6 +84,7 @@ class KnowledgeService:
 
     async def stage(self, kb_id, files):
         saved = []
+        total_size = 0
         directory = PROJECT_CONFIG.upload_path / str(kb_id)
         directory.mkdir(parents=True, exist_ok=True)
         try:
@@ -104,8 +106,11 @@ class KnowledgeService:
                 saved.append({"filename": filename, "file_type": file_type, "file_path": str(path)})
                 digest, size = hashlib.sha256(), 0
                 async with await anyio.open_file(path, "xb") as stream:
-                    # 知识库定稿不设业务大小上限；分块写入，避免把整个文件读进内存。
+                    # 流式检查本次文件总量，超限即停止写入并清理暂存文件。
                     while chunk := await upload.read(1024 * 1024):
+                        total_size += len(chunk)
+                        if total_size > knowledge_limits.MAX_TOTAL_BYTES:
+                            raise KnowledgeError(knowledge_limits.TOTAL_SIZE_ERROR, "files")
                         digest.update(chunk); size += len(chunk)
                         await stream.write(chunk)
                 if not size:
@@ -162,6 +167,8 @@ class KnowledgeService:
                     active_ids = set(await Document.filter(knowledge_base_id=previous.id, is_deleted=False).values_list('id', flat=True))
                     if active_ids == {entry.id for entry in existing_docs} and all((getattr(previous, key) or '') == (getattr(form, key) or '') for key in
                            ('knowledge_name', 'description', 'tag', 'application', 'is_public')):
+                        if sum(doc.file_size for doc in existing_docs) > knowledge_limits.MAX_TOTAL_BYTES:
+                            raise KnowledgeError(knowledge_limits.TOTAL_SIZE_ERROR, "files")
                         return await self.detail(previous.id, user), []
                     raise KnowledgeError("这些任务已创建知识库，请刷新列表后继续编辑", "conversion_job_ids", 409)
         if creating and not files and not form.conversion_job_ids:
@@ -214,6 +221,10 @@ class KnowledgeService:
                     (d.filename, d.content_hash, None) for d in docs if d.id in retained}
                 final_files.update({unicodedata.normalize("NFKC", item["filename"]).casefold():
                     (item["filename"], item["content_hash"], i) for i, item in enumerate(staged)})
+                total_size = sum(staged[index]["file_size"] if index is not None else
+                    by_name[key].file_size for key, (_, _, index) in final_files.items())
+                if total_size > knowledge_limits.MAX_TOTAL_BYTES:
+                    raise KnowledgeError(knowledge_limits.TOTAL_SIZE_ERROR, "files")
                 seen_hashes = {}
                 for filename, digest, index in final_files.values():
                     if digest and digest in seen_hashes:
@@ -290,6 +301,9 @@ class KnowledgeService:
                     from .conversion_links import attach_conversions
                     adopted = await attach_conversions(user, form.conversion_job_ids, kb_id, conn)
                     jobs = [document_id for document_id in jobs if document_id not in adopted]
+                if not creating and (metadata_changed or files_changed):
+                    from applications.wrq.agent.services.knowledge_notification_service import notify_knowledge_update
+                    await notify_knowledge_update(kb, conn)
         except IntegrityError as exc:
             self.clean_files(staged)
             raise KnowledgeError("知识库名称或文档内容重复，请检查后重试", "knowledge_name") from exc
@@ -348,11 +362,16 @@ class KnowledgeService:
             "chunk_count": doc.chunk_count, "error_message": doc.error_message,
             "has_markdown": bool(doc.markdown), "updated_time": doc.updated_time.isoformat()}
 
-    async def list(self, user, search="", *, offset=0, limit=10):
+    async def list(self, user, search="", *, offset=0, limit=10, application="", maintainer=""):
         from applications.wrq.knowledge import knowledge_permissions
         qs = KnowledgeBase.filter(knowledge_permissions(user.id,None)['visible_filter'], state__not=1)
         if search.strip():
             qs = qs.filter(knowledge_name__icontains=search.strip())
+        if application.strip():
+            qs = qs.filter(application__in=[application.strip(), '*'])
+        if maintainer.strip():
+            from .list_filters import matching_maintainer_ids
+            qs = qs.filter(id__in=await matching_maintainer_ids(maintainer))
         total = await qs.count()
         rows = await qs.order_by("-updated_time", "-id").offset(max(0, offset)).limit(min(10, max(1, limit)))
         return [await self.detail(row.id, user) for row in rows], total
