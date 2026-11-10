@@ -55,6 +55,8 @@
 | POST | /publish-skill | JSON：skill_id；仍由服务端核验调试结果 |
 | POST | /register-debug-run | JSON：skill_id、run_id、build_id/skill_version_id 及原登记字段 |
 | GET | /get-debug-run | 查询参数：skill_id、run_id |
+| GET | /list-knowledge-tool-calls | 本人任务的 MCP 调用记录，查询参数 run_id、limit、offset |
+| GET | /get-knowledge-tool-call | 查询参数 search_id，对应调用记录 id。返回本人调用记录及召回、融合、重排明细，详见 [MCP 单次检索明细](KNOWLEDGE_MCP.md#单次检索明细) |
 | POST | /upload-resource-files | multipart：files、categories（JSON 数组字符串） |
 | GET | /download-resource-file | 查询参数：file_id |
 | POST | /upload-resource-version | 已停用旧功能，仅保留明确的停用提示；multipart：source_id、files、categories |
@@ -154,13 +156,5 @@ APPLICATION_CATALOG_CACHE_SECONDS 默认 60 秒。原 WRQ_PORTAL_APPLICATIONS_UR
 - 后端生成的 downloadUrl 已变更；当前前端会把缓存中的旧资源下载地址转换为新查询参数地址。
 - 前后端应同步部署；历史文档和旧验收脚本不能代替本文件的当前契约。
 - 同事的 `/realtime-test-case-gen` 沙箱接口及其他模块不在本次变更范围内。
-
-## 检查命令
-
-在保留本地验收脚本的开发目录中执行（测试文件不随本次业务代码发布）：
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest applications/wrq/tests/test_api_conventions.py -q
-```
 
 技能中心调用入口：POST `/skills/catalog/create-test-run`，form-data source JSON包含整数skill_id、build_id、request_id、conversation_input，可选documents；固定发布定义和资源由服务端读取。相同request_id仅创建/累计一次。

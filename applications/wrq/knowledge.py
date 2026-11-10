@@ -1,15 +1,18 @@
 """知识库运行范围与权限；本模块不接收模型提供的用户身份或知识库授权。"""
+import asyncio
 import hashlib
 import secrets
 import time
 from datetime import datetime, timedelta
 
+from configure import LOGGER
 from applications.knowledge_base.models.knowledge_base_model import KnowledgeBase, Document, DocumentChunk
 from applications.wrq.agent.models.agent_model import Skill, SkillVersion, SkillResourceBinding
 from applications.wrq.agent.services.developer_skill_crud import DeveloperError
 from applications.wrq.models.knowledge_execution_model import KnowledgeExecution, KnowledgeToolCall
 from enums import DocumentStatus
 from applications.wrq.agent.services.mcp_knowledge_retrieval import retrieve_mcp_chunks
+from applications.wrq.agent.services.mcp_search_trace import write_trace
 
 
 def knowledge_permissions(user_id, kb):
@@ -89,8 +92,9 @@ async def search(token, query, top_k=5):
         raise DeveloperError('检索问题或数量不合法', 422)
     call = await KnowledgeToolCall.create(run_id=context.run_id, owner_id=context.owner_id, query=query)
     started = time.monotonic()
+    trace = dict(schema_version=1, search_id=call.id, run_id=context.run_id, top_k=top_k, final_order=[])
     try:
-        chunks, retrieval = await retrieve_mcp_chunks(query, context.scope, top_k)
+        chunks, retrieval = await retrieve_mcp_chunks(query, context.scope, top_k, trace=trace)
         await authorized_execution(token)
         docs = {j: d for d in context.scope for j in d['jobs']}
         matches = []
@@ -106,12 +110,19 @@ async def search(token, query, top_k=5):
         call.status, call.matches = 'success', matches
         call.duration_ms = int((time.monotonic()-started)*1000)
         await call.save()
+        trace['final_order'] = [match['chunk_id'] for match in matches]
         return dict(search_id=call.id, trace_id=call.id, status='ok', matches=matches, retrieval=retrieval)
     except Exception as exc:
         call.status, call.error_type = 'failed', type(exc).__name__
         call.duration_ms = int((time.monotonic()-started)*1000)
         await call.save()
         raise DeveloperError('知识库检索失败，请查看后端调用记录', 503) from exc
+    finally:
+        trace.update(status=call.status, duration_ms=call.duration_ms, error_type=call.error_type)
+        try:
+            await asyncio.to_thread(write_trace, call.id, trace)
+        except Exception as exc:
+            LOGGER.warning('MCP检索明细写入失败 search_id={} error_type={}', call.id, type(exc).__name__)
 
 
 async def verify_evidence(run_id, receipts, required=False):

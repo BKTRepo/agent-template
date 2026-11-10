@@ -143,10 +143,6 @@ WRQ 入口不再覆盖这两个参数。每个进程分别建池，同一数据�
 
 services/resource_isolation.py 的 resolve_isolation_rule 当前实现公开或本人可读、仅本人可改。知识库维护、技能保存中的知识库校验和构建资源解析均调用该函数，后续接团队时可替换内部策略。技能目标仍限定本人创建。
 
-```powershell
-.\.venv\Scripts\python.exe -m pytest tests/test_conversion_knowledge_flow.py applications/wrq/tests/test_api_conventions.py -q
-```
-
 定向测试使用 SQLite 与显式外部服务替身；前端另有接口回归和浏览器交互验证。未连接生产数据库、模型或 Milvus，未执行迁移，不代表外部服务端到端验收。
 
 2026-11-05 连接池修复联调另行使用当前配置的真实 MySQL、Redis 和知识处理服务：

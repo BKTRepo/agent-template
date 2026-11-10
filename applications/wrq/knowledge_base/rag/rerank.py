@@ -4,6 +4,7 @@
 接入 naive_query 流水线: 向量检索之后、token 截断之前, 由重排器对分块重新打分。
 """
 
+import math
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -158,6 +159,8 @@ async def rerank_chunks(
         query: str,
         chunks: List[Dict[str, Any]],
         top_n: Optional[int] = None,
+        *,
+        diagnostics: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """按查询相关性对已检索分块重排。
 
@@ -167,11 +170,14 @@ async def rerank_chunks(
     :param query: 用户查询字符串。
     :param chunks: 分块字典列表 (每个须含 ``content``)。
     :param top_n: 重排后最多返回的分块数。
+    :param diagnostics: 可选 MCP 明细，记录分块编号、分数及降级原因。
     :return: 附带 ``rerank_score`` 字段、按相关性降序排列的分块; 失败时返回原始分块。
     """
     if not chunks:
         return []
 
+    if diagnostics is not None:
+        diagnostics.update(model=PROJECT_CONFIG.RERANK_MODEL, min_score=PROJECT_CONFIG.RERANK_MIN_SCORE)
     LOGGER.info(f"开始重排: 查询='{query[:80]}', 分块数={len(chunks)}")
 
     # 提取文档文本
@@ -196,20 +202,34 @@ async def rerank_chunks(
     try:
         results = await _rerank_api(query, documents_to_rank, top_n=top_n)
     except Exception as exc:
+        if diagnostics is not None:
+            diagnostics.update(reason="model_error", error_type=type(exc).__name__)
+            if isinstance(exc, httpx.HTTPStatusError):
+                diagnostics["http_status"] = exc.response.status_code
         LOGGER.warning(f"重排失败, 使用原始分块: {type(exc).__name__}: {exc}")
         return chunks
 
     if not results:
+        if diagnostics is not None:
+            diagnostics["reason"] = "model_empty_results"
         LOGGER.info("重排未返回结果, 使用原始分块")
         return chunks
 
     # 启用切块时, 将结果聚合回原始文档
-    if PROJECT_CONFIG.RERANK_ENABLE_CHUNKING and doc_indices:
+    if doc_indices:
         results = _aggregate_chunk_scores(
             results, doc_indices, len(document_texts)
         )
-        if original_top_n is not None and len(results) > original_top_n:
-            results = results[:original_top_n]
+
+    if diagnostics is not None:
+        diagnostics["model_order"] = [
+            {"chunk_id": chunks[item["index"]]["id"],
+             "score": float(item["relevance_score"]) if math.isfinite(item["relevance_score"]) else None}
+            for item in results if 0 <= item["index"] < len(chunks)
+        ]
+
+    if doc_indices and original_top_n is not None and len(results) > original_top_n:
+        results = results[:original_top_n]
 
     # 构建附带分数的重排结果列表
     reranked: List[Dict[str, Any]] = []
@@ -235,4 +255,6 @@ async def rerank_chunks(
         )
 
     LOGGER.info(f"重排完成: {len(reranked)} 个分块 (原 {len(chunks)} 个)")
+    if diagnostics is not None and not reranked:
+        diagnostics["reason"] = "below_min_score" if filtered_count == len(results) and results else "no_valid_scores"
     return reranked if reranked else chunks

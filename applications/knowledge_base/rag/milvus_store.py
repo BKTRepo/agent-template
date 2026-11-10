@@ -544,11 +544,17 @@ def hybrid_query_chunks(
         dense_top_k: int = 60,
         bm25_top_k: int = 60,
         filter_expr: str = "",
+        diagnostics: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """使用 Milvus 内置 BM25 + Dense + RRF 执行中英双语混合检索。"""
     if not query_vectors or not chinese_query.strip():
+        if diagnostics is not None:
+            diagnostics.update(mode="skipped", reason="empty_search_input")
         return []
 
+    rrf_k = 60
+    if diagnostics is not None:
+        diagnostics.update(mode="hybrid_rrf", rrf_k=rrf_k)
     output_fields = [
         "id", "content", "file_path", "file_name", "doc_id", "tokens",
         "modality", "chunk_order_index", "created_at", "language", *SECTION_METADATA_KEYS,
@@ -610,7 +616,7 @@ def hybrid_query_chunks(
         return client.hybrid_search(
             collection_name=_COLLECTION_NAME,
             reqs=requests,
-            ranker=RRFRanker(60),
+            ranker=RRFRanker(rrf_k),
             limit=top_k,
             output_fields=output_fields,
         )
@@ -619,6 +625,9 @@ def hybrid_query_chunks(
         results = _run_milvus_read_with_retry("混合检索", _hybrid_search)
     except Exception as exc:
         LOGGER.error(f"Milvus 混合检索失败: {type(exc).__name__}: {exc}")
+        if diagnostics is not None:
+            diagnostics.update(mode="dense_fallback", fallback_reason="hybrid_search_error",
+                               hybrid_error_type=type(exc).__name__)
         # 部分 Milvus 版本在 BM25 分路无命中、而 Dense 分路有命中时，
         # hybrid_search 会错误返回 ``unsupported ID type``。不能因此把
         # 整个问题判定为“无召回”：退回同一查询的 Dense 结果，后续仍由
@@ -633,6 +642,9 @@ def hybrid_query_chunks(
                 chunk["source"] = "milvus_dense_fallback"
             return fallback
         except Exception as fallback_exc:
+            if diagnostics is not None:
+                diagnostics.update(mode="failed", reason="dense_fallback_error",
+                                   dense_error_type=type(fallback_exc).__name__)
             LOGGER.error(
                 f"Milvus Dense 兜底检索也失败: "
                 f"{type(fallback_exc).__name__}: {fallback_exc}"

@@ -29,6 +29,7 @@ output/skill-scope-check/
 output/skill-upload-limit-verification/
 output/platform-integration/
 output/knowledge-parsed/
+output/mcp-search-traces/
 output/knowledge-queue-integration/
 output/knowledge-queue-migration/
 output/skill-engine-verification.json

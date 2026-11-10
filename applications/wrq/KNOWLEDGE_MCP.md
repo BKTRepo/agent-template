@@ -26,6 +26,7 @@ MCP 使用标准 stdio 协议，由容器内 SDK 启动受控桥接进程。知�
 
 - POST /skills/knowledge/search：仅使用本次运行的 Bearer 凭据；JSON 为 query、top_k，不接受客户端指定用户和知识库范围。
 - GET /skills/developer/list-knowledge-tool-calls?run_id=...&limit=20&offset=0：平台身份认证，仅本人查询。返回查询、命中文档分块、耗时、错误类型、工具编号和交付记录时间；不返回运行 Token。
+- GET /skills/developer/get-knowledge-tool-call?search_id=...：平台身份认证，仅调用记录与任务均属于本人时返回。传 MCP 响应的 `search_id`，或列表记录的 `id`（同一个 32 位小写十六进制编号）。`data` 返回该条调用记录及 `search_id`、`trace`。不存在或越权返回 404，历史或暂无明细的记录返回 `trace: null`，明细读取失败返回 503。
 
 查询为空和查询失败区分记录；有挂载知识库的任务至少需要一次成功且有命中的查询。知识库被更新、删除或撤权时，本次上下文失效，不静默查询其他批次。
 
@@ -43,6 +44,14 @@ POST /chat/stream 继续调用 knowledge_base/services/query_service.py 和 rag/
 MCP 响应保留 search_id、trace_id、status、matches，新增 retrieval.pipeline=mcp_hybrid_rerank、
 retrieval.candidate_count 和 retrieval.rerank（success/fallback/skipped）。成功重排的匹配项附 rerank_score。
 重排超时或服务失败时，按 RRF 顺序返回最多 top_k 条并明确标记 fallback；没有候选时跳过重排。
+
+## 单次检索明细
+
+明细使用现有 `keenrobot_knowledge_tool_calls.id` 关联。后端在 `OUTPUT_DIR/mcp-search-traces/<search_id>.json` 原子写入 JSON，无需迁移数据库。明细写入失败会记服务日志，MCP 响应和调用记录仍可使用。多实例部署需要共享并持久化此目录。
+
+- `retrieval` 记录召回模式、候选上限、降级原因和校验去重后的候选。每条候选包含顺序、知识库和文档编号、文档代次、索引任务及分块编号。分数使用 `score_type` 区分 RRF 融合分（`rrf`）和向量兜底余弦分（`cosine`）。Milvus 混合检索只返回融合结果。
+- `rerank.input_order` 是送重排前的分块顺序，`model_order` 包含模型打分后的顺序和分数，在切分模式下为聚合到原分块后的结果。模型排序采集在本地阈值过滤和截断之前，`output_order` 是实际采用的顺序，包含降级时沿用的候选顺序。
+- `final_order` 是再次校验权限、按 `top_k` 截断后实际返回给 MCP 的分块顺序。失败时保留已完成阶段和错误类型。JSON 明细仅保存标识、分数与诊断信息，原查询与返回文本继续由调用表保存。
 
 ## 部署
 

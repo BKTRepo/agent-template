@@ -6,6 +6,7 @@ summary recall, conversation memory or answer generation runs in this path.
 """
 import asyncio
 import json
+import math
 
 from configure import LOGGER
 from applications.knowledge_base.rag.embedding import embed_texts
@@ -15,37 +16,72 @@ from applications.wrq.knowledge_base.config import PROJECT_CONFIG
 from applications.wrq.knowledge_base.rag.rerank import rerank_chunks
 
 
-async def retrieve_mcp_chunks(query, scope, top_k):
+async def retrieve_mcp_chunks(query, scope, top_k, *, trace=None):
     metadata = dict(pipeline='mcp_hybrid_rerank', candidate_count=0, rerank='skipped')
-    allowed = {job: set(doc['chunk_ids']) for doc in scope for job in doc['jobs']}
-    if not allowed:
+    docs = {job: doc for doc in scope for job in doc['jobs']}
+    allowed = {job: set(doc['chunk_ids']) for job, doc in docs.items()}
+    recall = reranking = None
+    candidate_limit = max(top_k, PROJECT_CONFIG.RRF_TOP_K)
+    if trace is not None:
+        recall = trace['retrieval'] = dict(
+            status='skipped', candidate_limit=candidate_limit, candidates=[],
+            dense_top_k=PROJECT_CONFIG.HYBRID_DENSE_TOP_K, bm25_top_k=PROJECT_CONFIG.HYBRID_BM25_TOP_K,
+        )
+        reranking = trace['rerank'] = dict(status='skipped', input_order=[], model_order=[], output_order=[])
+    if not docs:
+        if recall is not None:
+            recall['reason'] = reranking['reason'] = 'empty_scope'
         return [], metadata
 
+    if recall is not None:
+        recall['status'] = 'embedding'
     vectors = await embed_texts([query])
+    if recall is not None:
+        recall['status'] = 'searching'
     # Retrieve a candidate pool before reranking; top_k limits final evidence only.
     chunks = await asyncio.to_thread(
         hybrid_query_chunks, vectors, query,
-        top_k=max(top_k, PROJECT_CONFIG.RRF_TOP_K),
+        top_k=candidate_limit,
         dense_top_k=PROJECT_CONFIG.HYBRID_DENSE_TOP_K,
         bm25_top_k=PROJECT_CONFIG.HYBRID_BM25_TOP_K,
         filter_expr='doc_id in ' + json.dumps(sorted(allowed)),
+        diagnostics=recall,
     )
     candidates, seen = [], set()
     for chunk in chunks:
         chunk_id = chunk['id']
         # Validate every candidate before any source text reaches the rerank API.
         if chunk_id not in allowed.get(chunk['doc_id'], set()):
+            if recall is not None:
+                recall.update(status='failed', reason='unauthorized_candidate')
+                reranking['reason'] = 'unauthorized_candidate'
             raise DeveloperError('检索结果不属于授权索引', 409)
         if chunk_id not in seen:
             candidates.append(chunk)
             seen.add(chunk_id)
     metadata['candidate_count'] = len(candidates)
+    if recall is not None:
+        recall['status'] = 'failed' if recall.get('mode') == 'failed' else 'complete'
+        for rank, chunk in enumerate(candidates, 1):
+            doc = docs[chunk['doc_id']]
+            score = chunk.get('distance')
+            recall['candidates'].append(dict(
+                rank=rank, chunk_id=chunk['id'], job_id=chunk['doc_id'],
+                knowledge_base_id=doc.get('knowledge_base_id'), document_id=doc.get('document_id'),
+                generation=doc.get('generation'),
+                score_type='cosine' if recall.get('mode') == 'dense_fallback' else 'rrf',
+                score=float(score) if score is not None and math.isfinite(score) else None,
+            ))
     if not candidates:
+        if reranking is not None:
+            reranking['reason'] = 'retrieval_failed' if recall['status'] == 'failed' else 'no_candidates'
         return [], metadata
 
+    if reranking is not None:
+        reranking['input_order'] = [chunk['id'] for chunk in candidates]
     try:
         ranked = await asyncio.wait_for(
-            rerank_chunks(query=query, chunks=candidates, top_n=top_k), timeout=20.0,
+            rerank_chunks(query=query, chunks=candidates, top_n=top_k, diagnostics=reranking), timeout=20.0,
         )
         # The shared reranker returns original candidates on service failure.
         if ranked and all('rerank_score' in chunk for chunk in ranked):
@@ -53,8 +89,17 @@ async def retrieve_mcp_chunks(query, scope, top_k):
         else:
             ranked = candidates
             metadata['rerank'] = 'fallback'
+            if reranking is not None:
+                reranking.setdefault('reason', 'no_valid_scores')
     except Exception as exc:
         LOGGER.warning('MCP知识库重排降级，保留RRF结果: {}', type(exc).__name__)
         ranked = candidates
         metadata['rerank'] = 'fallback'
+        if reranking is not None:
+            reranking.update(
+                reason='timeout' if isinstance(exc, asyncio.TimeoutError) else 'rerank_error',
+                error_type=type(exc).__name__,
+            )
+    if reranking is not None:
+        reranking.update(status=metadata['rerank'], output_order=[chunk['id'] for chunk in ranked])
     return ranked[:top_k], metadata
