@@ -1,0 +1,7 @@
+.skill-polish-progress { display:flex; align-items:center; gap:8px; }
+.skill-polish-field { margin-top:16px; }
+.skill-polish-field h3 { margin-bottom:8px; }
+.skill-polish-comparison { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.skill-polish-comparison > div { padding:12px; border:1px solid var(--platform-line); border-radius:8px; }
+.skill-polish-comparison pre { margin:8px 0 0; white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; }
+@media (max-width:600px) { .skill-polish-comparison { grid-template-columns:1fr; } }

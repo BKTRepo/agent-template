@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowRight, Check, LoaderCircle, Plus, RefreshCw } from 'lucide-react'
+import { ArrowRight, Check, LoaderCircle, Plus, RefreshCw, Sparkles } from 'lucide-react'
 import Dialog from '@/components/developer/Dialog'
 import ListPagination from '@/components/common/ListPagination'
 import DebugDialog from '@/components/developer/DebugDialog'
 import SkillFields from '@/components/developer/SkillFields'
+import SkillPolishDialog from '@/components/developer/SkillPolishDialog'
 import ImplementationSummaryCells, { implementationSummaryHeaders } from '@/components/developer/ImplementationSummaryCells'
 import SearchSelect from '@/components/developer/SearchSelect'
 import { restoreSkillUploads } from '@/api/skillArchive'
@@ -14,6 +15,7 @@ import { skillResourceExtensions, validateResourceFiles, validateSkillForm } fro
 import { checkSkillName, ensureSkill, readSkillDefinition, saveSkillDefinition, SkillApiError } from '@/api/skillClient'
 import { hasSkillSession, skillAccount, skillBackendEnabled } from '@/api/skillSession'
 import { generateSkill } from '@/api/developer'
+import { polishKeys, polishText, type SkillPolishText } from '@/api/skillPolish'
 import { getDeveloperSkill, persistSkillResources, createDeveloperSkill, deleteDeveloperSkill, offlineDeveloperSkill, publishDeveloperSkill, updateDeveloperSkill, emptyDeveloperFilters, developerSkillStatuses, type DeveloperFilters } from '@/api/developerCenter'
 import { useDeveloperStore } from '@/stores/developerStore'
 import { readBlob, saveBlobs } from '@/lib/resourceStorage'
@@ -33,6 +35,7 @@ export default function DeveloperPage() {
   const [uploads, setUploads] = useState<SkillUploads>({ references: [], scripts: [] })
   const [selectedId, setSelectedId] = useState<string>()
   const [form, setForm] = useState<ImplementationForm>(() => blankForm(team))
+  const [polishOriginal, setPolishOriginal] = useState<SkillPolishText>()
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState<'build' | 'debug' | 'read' | 'save' | 'offline' | 'delete' | null>(null)
   const [message, setMessage] = useState('')
@@ -129,7 +132,7 @@ export default function DeveloperPage() {
     setUploads(previous => ({ references: previous.references.filter(row => row.id !== id), scripts: previous.scripts.filter(row => row.id !== id) }))
     update('uploadedResources', form.uploadedResources?.filter(row => row.id !== id) ?? [])
   }
-  function closePanel() { if (!busy) { nameCheckSequence.current++; setPanel(null); setMessage(''); setOfflinePrompt(false); setDraftDeletePrompt(false) } }
+  function closePanel() { if (!busy) { nameCheckSequence.current++; setPanel(null); setPolishOriginal(undefined); setMessage(''); setOfflinePrompt(false); setDraftDeletePrompt(false) } }
   async function checkName() {
     const sequence = ++nameCheckSequence.current
     const localError = validateSkillForm(form, implementations, selectedId, true).name ?? ''
@@ -323,7 +326,9 @@ export default function DeveloperPage() {
     </section>
     {!panel && message && <p className="error-banner" role="alert">{message}</p>}
 
-    {panel === 'form' && <Dialog key="form" wide title={selected ? <>{readonly ? '实现类详情' : '编辑实现类'} · {selected.name}</> : '新建技能类'} onClose={closePanel} busy={!!busy} footer={<>
+    {panel === 'form' && <Dialog key="form" wide title={selected ? <>{readonly ? '实现类详情' : '编辑实现类'} · {selected.name}</> : '新建技能类'} onClose={closePanel} busy={!!busy}
+      headerActions={!selectedId && <button type="button" className="button small" disabled={!!busy || !polishKeys.some(key => form[key]?.trim())}
+        title="填写至少一个待润色字段后使用" onClick={() => setPolishOriginal(polishText(form))}><Sparkles size={14} />润色</button>} footer={<>
       {!!validationErrors.length && <div className="form-validation-summary" role="alert"><b>还有 {validationErrors.length} 项需要补充或修正：</b>{validationErrors.map(([key, value]) => <button key={key} type="button" onClick={() => focusField(key)}>{value}</button>)}</div>}
       {message && <p className="form-submit-error" role="alert">{message}</p>}
         {draftDeletePrompt ? <><span className="delete-confirm" role="alert">确认删除草稿“{selected?.name}”？删除后不可恢复。</span><button className="button" disabled={!!busy} onClick={() => setDraftDeletePrompt(false)}>取消删除</button><button className="button danger" disabled={!!busy} onClick={removeDraft}>{busy === 'delete' ? primaryBusy : '确认删除'}</button></> : <>
@@ -342,6 +347,19 @@ export default function DeveloperPage() {
       {selected?.status === '已下线' && <p className="helper-text">该技能已下线。可继续编辑，重新调试通过后重新上线。</p>}
       <div ref={formRoot}><SkillFields form={form} update={update} skillClasses={skillClasses} applications={applications} errors={errors} disabled={!!busy || readonly} editing={!!selected} activeIds={activeUploads.map(row => row.id)} onAdd={addFiles} onRemove={removeFile} /></div>
     </Dialog>}
+
+    {panel === 'form' && !selectedId && polishOriginal && <SkillPolishDialog original={polishOriginal}
+      onClose={() => setPolishOriginal(undefined)} onApply={suggestion => {
+        setPolishOriginal(undefined)
+        const current = polishText(form)
+        if (polishKeys.some(key => current[key] !== polishOriginal[key])) {
+          setMessage('表单内容已变更，请重新润色。')
+          return
+        }
+        for (const key of polishKeys) {
+          if (current[key].trim() && suggestion[key] !== current[key]) update(key, suggestion[key])
+        }
+      }} />}
 
     {debugSavePrompt && <Dialog title="保存修改后调试" onClose={() => setDebugSavePrompt(false)} busy={!!busy} footer={<><button className="button" disabled={!!busy} onClick={() => setDebugSavePrompt(false)}>取消</button><button className="button primary" disabled={!!busy} onClick={() => { setDebugSavePrompt(false); void build(true) }}>保存并调试</button></>}>
       <p>当前内容有未保存的修改，是否保存修改后进入调试？</p>
