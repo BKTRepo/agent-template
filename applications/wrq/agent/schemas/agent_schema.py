@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from datetime import datetime
-from typing import Any, Literal, Optional
+from typing import Annotated, Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -43,6 +43,21 @@ class SkillOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+SkillDescription = Annotated[str, Field(max_length=1024)]
+SkillInstructions = Annotated[str, Field(max_length=100000)]
+SkillResourceUsage = Annotated[str, Field(max_length=10000)]
+SkillCompatibility = Annotated[str, Field(max_length=500)]
+
+
+class SkillPolishFields(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    description: SkillDescription = ""
+    instructions: SkillInstructions = ""
+    resource_usage: SkillResourceUsage = ""
+    compatibility: SkillCompatibility = ""
+
+
 class DeveloperSkillForm(BaseModel):
     expected_revision: Optional[int] = Field(default=None, ge=1)
     """版本化表单；资源原件由独立上传接口保存。"""
@@ -50,11 +65,11 @@ class DeveloperSkillForm(BaseModel):
     class_id: int = Field(..., ge=1)
     application_paso: Optional[str] = Field(default=None, min_length=1, max_length=100)
     application_ids: list[str] = Field(default_factory=list)
-    description: str = Field(..., min_length=1, max_length=1024)
-    instructions: str = Field(..., min_length=1, max_length=100000)
+    description: SkillDescription = Field(min_length=1)
+    instructions: SkillInstructions = Field(min_length=1)
     resource_ids: list[str | int] = Field(default_factory=list)
-    resource_usage: str = Field(default="", max_length=10000)
-    compatibility: str = Field(default="", max_length=500)
+    resource_usage: SkillResourceUsage = ""
+    compatibility: SkillCompatibility = ""
     technical_name: str = Field(default="", max_length=128)
     uploaded_resources: list[dict[str, Any]] = Field(default_factory=list)
     knowledge_bases: list[dict[str, Any]] = Field(default_factory=list)

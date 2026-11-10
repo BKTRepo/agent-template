@@ -1,5 +1,11 @@
 # WRQ 接口开发规范与当前清单
 
+## 新建技能润色
+
+`POST /skills/developer/polish-form` 使用平台 token。JSON 请求体和响应 `data` 使用 `description`、`instructions`、`resource_usage`、`compatibility` 四个字符串字段。允许留空，至少填写一项。请求内容合计最多 12,000 个 UTF-8 字节，超过上限返回 422。字段长度沿用技能表单。
+
+接口复用现有模型连接，空白字段返回空字符串。超时返回 504，模型不可用或建议无效返回 502。建议只供用户预览和确认，应用后由原有草稿保存或调试流程提交表单。
+
 ## 悬浮对话台测试案例产出物联调
 
 以下接口以 `/assistant/artifacts` 为前缀，均使用平台 token，按登录人定位样例文件。仅配置 `ASSISTANT_ARTIFACT_MOCK_DIR` 时启用，不涉及 `chat_artifact` 或资产数据库表。
