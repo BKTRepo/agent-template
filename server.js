@@ -29,7 +29,7 @@ const backendRequest = backend.protocol === 'https:' ? https.request : http.requ
 const realtimeBackend = new URL(process.env.REALTIME_DEBUG_TARGET || BACKEND)
 
 // 需要反向代理到后端的路径前缀
-const PROXY_PREFIXES = ['/api', '/base', '/skills', '/knowledge-bases', '/health', '/docs', '/redoc', '/openapi.json', '/swagger-assets', '/realtime-test-case-gen']
+const PROXY_PREFIXES = ['/api', '/base', '/skills', '/overview', '/knowledge-bases', '/health', '/docs', '/redoc', '/openapi.json', '/swagger-assets', '/realtime-test-case-gen']
 
 // 不应逐跳转发的请求头
 const HOP_BY_HOP = new Set([
@@ -66,7 +66,7 @@ function buildProxyHeaders(req, target, realtime) {
   }
   headers.host = target.host
   if (!headers.token && realtime && process.env.REALTIME_DEBUG_TOKEN) headers.token = process.env.REALTIME_DEBUG_TOKEN
-  if (!headers.token && !realtime && (process.env.SKILL_API_TOKEN || process.env.REALTIME_DEBUG_TOKEN)) {
+  if (!headers.token && !realtime && !req.url.startsWith('/overview/') && (process.env.SKILL_API_TOKEN || process.env.REALTIME_DEBUG_TOKEN)) {
     headers.token = process.env.SKILL_API_TOKEN || process.env.REALTIME_DEBUG_TOKEN
   }
   return headers

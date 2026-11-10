@@ -108,6 +108,7 @@ export default defineConfig(({ mode }) => {
     proxy: {
       '/realtime-test-case-gen': realtimeProxy,
       '/skills': platformProxy,
+      '/overview': { target: platformProxy.target, changeOrigin: true },
       '/knowledge-bases': platformProxy,
       '/base': platformProxy,
       '/health': platformProxy,
@@ -139,6 +140,7 @@ export default defineConfig(({ mode }) => {
     proxy: {
       '/realtime-test-case-gen': realtimeProxy,
       '/skills': platformProxy,
+      '/overview': { target: platformProxy.target, changeOrigin: true },
       '/knowledge-bases': platformProxy,
       '/base': platformProxy,
       '/health': platformProxy,
