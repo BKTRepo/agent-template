@@ -113,7 +113,7 @@ export default function ArtifactDemo() {
         setExportChoice(undefined)
       })}>仅导出</button>
         <button type="button" className="button primary" disabled={busy || assetStatus?.recycled} onClick={() => void beginArchive(exportChoice, true)}>纳入资产并导出</button></>}>
-      <p>{assetStatus?.recycled ? '产出物已在回收站，可仅导出原件，或在资产管理中恢复。' : '当前产出物尚未纳入资产管理，是否将整份产出物纳入后再导出？'}</p>
+      <p>{assetStatus?.recycled ? '产出物已在回收站，可仅导出原件，或在资产管理中恢复。' : '是否将产出物纳入资产管理'}</p>
       {error && <p className="error-banner" role="alert">{error}</p>}
     </Dialog>}
     {form && <Dialog title="纳入资产管理" busy={busy} onClose={() => { setForm(undefined); setError('') }}
