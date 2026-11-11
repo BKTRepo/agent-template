@@ -7,9 +7,9 @@ from pathlib import Path
 from stat import S_IMODE
 from tempfile import NamedTemporaryFile
 
-from fastapi import HTTPException
 from filelock import FileLock, Timeout
 
+from applications.conversation.exceptions import ConversationBusinessError
 from configure import PROJECT_CONFIG
 
 MAX_FILE_BYTES = 10 * 1024 * 1024
@@ -45,12 +45,12 @@ def mock_artifact(owner_id: int, artifact_id: str | None = None, *, kind: str = 
     if artifact_id is not None:
         kind = next((key for key, spec in DEMO_FILES.items() if artifact_id == f"mock-{spec[0]}-{owner_id}"), "")
     if not configured or kind not in DEMO_FILES:
-        raise HTTPException(404, "产出物不存在或无权访问")
+        raise ConversationBusinessError("产出物不存在或无权访问")
     slug, name, filename, category = DEMO_FILES[kind]
     root = Path(configured).resolve()
     path = (root / str(owner_id) / filename).resolve()
     if path.parent != root / str(owner_id) or path.name != filename:
-        raise HTTPException(404, "产出物不存在或无权访问")
+        raise ConversationBusinessError("产出物不存在或无权访问")
     return Artifact(f"mock-{slug}-{owner_id}", name, path, kind, category)
 
 
@@ -59,17 +59,17 @@ def read_original(path: Path) -> bytes:
         with path.open("rb") as source:
             content = source.read(MAX_FILE_BYTES + 1)
     except FileNotFoundError as exc:
-        raise HTTPException(404, "原文件不存在，请重新打开产出物") from exc
+        raise ConversationBusinessError("原文件不存在，请重新打开产出物") from exc
     except OSError as exc:
-        raise HTTPException(503, "暂时无法读取原文件，请重试") from exc
+        raise ConversationBusinessError("暂时无法读取原文件，请重试") from exc
     if len(content) > MAX_FILE_BYTES:
-        raise HTTPException(413, "文件超过当前样例的处理上限")
+        raise ConversationBusinessError("文件超过当前样例的处理上限")
     return content
 
 
 def check_revision(content: bytes, base_hash: str) -> None:
     if sha256(content).hexdigest() != base_hash:
-        raise HTTPException(409, "原文件已更新，请重新打开产出物")
+        raise ConversationBusinessError("原文件已更新，请重新打开产出物")
 
 
 @contextmanager
@@ -78,9 +78,9 @@ def file_write_lock(path: Path):
         with FileLock(str(path) + ".lock", timeout=5):
             yield
     except Timeout as exc:
-        raise HTTPException(409, "原文件正在保存，请稍后重试") from exc
+        raise ConversationBusinessError("原文件正在保存，请稍后重试") from exc
     except OSError as exc:
-        raise HTTPException(503, "共享目录写入失败，请重试") from exc
+        raise ConversationBusinessError("共享目录写入失败，请重试") from exc
 
 
 def replace_original(path: Path, content: bytes) -> None:
@@ -101,7 +101,7 @@ def replace_original(path: Path, content: bytes) -> None:
 def asset_path(artifact: Artifact) -> Path:
     path = artifact.path.with_name(f"archived-{artifact.path.name}")
     if path.is_symlink():
-        raise HTTPException(503, "归档路径不可用")
+        raise ConversationBusinessError("归档路径不可用")
     return path
 
 
@@ -109,5 +109,5 @@ def asset_record_path(artifact: Artifact) -> Path:
     target = asset_path(artifact)
     path = target.with_suffix(".json") if artifact.kind == "test_cases" else target.with_name(target.name + ".meta.json")
     if path.is_symlink():
-        raise HTTPException(503, "归档路径不可用")
+        raise ConversationBusinessError("归档路径不可用")
     return path

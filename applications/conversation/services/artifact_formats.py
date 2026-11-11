@@ -7,10 +7,10 @@ import json
 import re
 
 from docx import Document
-from fastapi import HTTPException
 from openpyxl import Workbook
 from openpyxl.styles import Font
 
+from applications.conversation.exceptions import ConversationBusinessError
 from .artifact_documents import read_document
 from .artifact_spreadsheet import sheet_metadata
 
@@ -32,21 +32,21 @@ def _decode(content):
             try:
                 return content[len(bom):].decode(encoding), encoding, bom
             except UnicodeDecodeError as exc:
-                raise HTTPException(422, "文本编码无效") from exc
+                raise ConversationBusinessError("文本编码无效") from exc
     for encoding in ("utf-8", "gb18030"):
         try:
             return content.decode(encoding), encoding, b""
         except UnicodeDecodeError:
             continue
-    raise HTTPException(422, "文本编码无法识别")
+    raise ConversationBusinessError("文本编码无法识别")
 
 
 def _text(content):
     text, encoding, bom = _decode(content)
     if len(text) > MAX_TEXT_LENGTH:
-        raise HTTPException(413, "文本超过在线编辑上限")
+        raise ConversationBusinessError("文本超过在线编辑上限")
     if "\x00" in text:
-        raise HTTPException(422, "文件包含二进制内容，无法在线编辑")
+        raise ConversationBusinessError("文件包含二进制内容，无法在线编辑")
     return text, encoding, bom
 
 
@@ -57,12 +57,12 @@ def _invalid_json_constant(value):
 def save_text(content: bytes, text: str, file_type: str) -> bytes:
     original, encoding, bom = _text(content)
     if len(text) > MAX_TEXT_LENGTH or "\x00" in text:
-        raise HTTPException(422, "文本包含无效字符或超过编辑上限")
+        raise ConversationBusinessError("文本包含无效字符或超过编辑上限")
     if file_type == "json":
         try:
             json.loads(text, parse_constant=_invalid_json_constant)
         except (ValueError, RecursionError) as exc:
-            raise HTTPException(422, "JSON 格式有误，请检查后再保存") from exc
+            raise ConversationBusinessError("JSON 格式有误，请检查后再保存") from exc
     normalized = text.replace("\r\n", "\n").replace("\r", "\n")
     if normalized == original.replace("\r\n", "\n").replace("\r", "\n"):
         return content
@@ -71,7 +71,7 @@ def save_text(content: bytes, text: str, file_type: str) -> bytes:
     try:
         return bom + normalized.replace("\n", line_end).encode(encoding)
     except UnicodeEncodeError as exc:
-        raise HTTPException(422, "修改内容无法用原文件编码保存") from exc
+        raise ConversationBusinessError("修改内容无法用原文件编码保存") from exc
 
 
 def ordinary_detail(artifact, content):

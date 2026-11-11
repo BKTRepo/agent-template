@@ -6,9 +6,9 @@ import re
 from docx import Document
 from docx.oxml.ns import qn
 from docx.text.paragraph import Paragraph
-from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
+from applications.conversation.exceptions import ConversationBusinessError
 from .artifact_ooxml import check_package, rewrite_package
 
 MAX_PARAGRAPHS = 2000
@@ -34,7 +34,7 @@ def read_document(content: bytes):
     try:
         document = Document(BytesIO(content))
     except Exception as exc:
-        raise HTTPException(422, "DOCX 无法读取") from exc
+        raise ConversationBusinessError("DOCX 无法读取") from exc
     paragraphs = {}
     cells = {}
 
@@ -44,7 +44,7 @@ def read_document(content: bytes):
             if isinstance(block, Paragraph):
                 key = f"p{len(paragraphs)}"
                 if len(paragraphs) >= MAX_PARAGRAPHS:
-                    raise HTTPException(413, "DOCX 段落超过在线处理上限")
+                    raise ConversationBusinessError("DOCX 段落超过在线处理上限")
                 paragraphs[key] = block
                 style = block.style.name if block.style else ""
                 heading = re.fullmatch(r"Heading ([1-9])", style)
@@ -110,7 +110,7 @@ def save_document(content: bytes, edits: list[ParagraphEdit]) -> bytes:
     for edit in edits:
         paragraph = paragraphs.get(edit.id)
         if paragraph is None or edit.id in seen or not _editable(paragraph) or INVALID_TEXT.search(edit.text):
-            raise HTTPException(422, "段落已失效或含有不可编辑内容")
+            raise ConversationBusinessError("段落已失效或含有不可编辑内容")
         seen.add(edit.id)
         _replace_paragraph(paragraph, edit.text.replace("\r\n", "\n").replace("\r", "\n"))
     part_name = str(document.part.partname).lstrip("/")

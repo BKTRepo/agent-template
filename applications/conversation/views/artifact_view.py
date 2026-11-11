@@ -6,10 +6,11 @@ from mimetypes import guess_type
 from typing import Annotated
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
+from applications.conversation.exceptions import ConversationBusinessError
 from applications.conversation.services.artifact_case_groups import with_case_groups
 from applications.conversation.services.artifact_documents import MAX_PARAGRAPHS, ParagraphEdit, save_document
 from applications.conversation.services.artifact_formats import MAX_TEXT_LENGTH, make_demo_file, ordinary_detail, save_text
@@ -80,7 +81,7 @@ def _open_demo(artifact):
     try:
         artifact.path.parent.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        raise HTTPException(503, "共享目录不可写") from exc
+        raise ConversationBusinessError("共享目录不可写") from exc
     with file_write_lock(artifact.path):
         if not artifact.path.exists():
             content = make_demo_workbook() if artifact.kind == "test_cases" else make_demo_file(artifact.kind)
@@ -114,7 +115,7 @@ def read_sheet(artifact_id: ArtifactId, base_hash: Annotated[FileHash, Query()],
                current_user: User = DependAuth):
     artifact = mock_artifact(current_user.id, artifact_id)
     if artifact.kind != "xlsx":
-        raise HTTPException(422, "该文件使用其他预览方式")
+        raise ConversationBusinessError("该文件使用其他预览方式")
     content = read_original(artifact.path)
     check_revision(content, base_hash)
     return result(sheet_page(content, sheet_index, offset, column_offset, limit, column_limit))
@@ -136,7 +137,7 @@ def _apply_content(artifact, original, data):
         return save_sheet(original, data.cells)
     if artifact.file_type not in {"docx", "xlsx"} and isinstance(data, SaveText):
         return save_text(original, data.text, artifact.file_type)
-    raise HTTPException(422, "保存内容与产出物格式不匹配")
+    raise ConversationBusinessError("保存内容与产出物格式不匹配")
 
 
 def _save(artifact, data):
@@ -146,9 +147,9 @@ def _save(artifact, data):
         try:
             saved = _apply_content(artifact, original, data)
         except ValueError as exc:
-            raise HTTPException(422, "内容包含文件格式无法保存的字符") from exc
+            raise ConversationBusinessError("内容包含文件格式无法保存的字符") from exc
         if len(saved) > MAX_FILE_BYTES:
-            raise HTTPException(413, "修改后的文件超过当前样例的处理上限")
+            raise ConversationBusinessError("修改后的文件超过当前样例的处理上限")
         metadata = _describe(artifact, saved)
         check_revision(read_original(artifact.path), data.base_hash)
         if saved != original:
@@ -161,7 +162,7 @@ def download(artifact_id: ArtifactId, base_hash: FileHash | None = Query(default
              archived: bool = False, current_user: User = DependAuth):
     artifact = mock_artifact(current_user.id, artifact_id)
     if archived and not asset_record_path(artifact).is_file():
-        raise HTTPException(404, "归档文件不存在")
+        raise ConversationBusinessError("归档文件不存在")
     content = read_original(asset_path(artifact) if archived else artifact.path)
     if base_hash is not None:
         check_revision(content, base_hash)
@@ -179,7 +180,7 @@ def _asset_record(artifact) -> dict:
     except FileNotFoundError:
         return {"included": False}
     except (ValueError, OSError) as exc:
-        raise HTTPException(503, "暂时无法查询样例归档状态") from exc
+        raise ConversationBusinessError("暂时无法查询样例归档状态") from exc
 
 
 @artifact_router.get("/asset-status", summary="产出物-查询本地样例是否已归档")
@@ -191,11 +192,11 @@ def asset_status(artifact_id: ArtifactId, current_user: User = DependAuth):
 async def submit_to_assets(data: ArchiveArtifact, current_user: User = DependAuth):
     artifact = mock_artifact(current_user.id, data.artifact_id)
     if not data.name.strip():
-        raise HTTPException(422, "请填写资产名称")
+        raise ConversationBusinessError("请填写资产名称")
     try:
         await validate_application_async(data.application_identify)
     except ValueError as exc:
-        raise HTTPException(422, "请选择目录中的所属应用") from exc
+        raise ConversationBusinessError("请选择目录中的所属应用") from exc
     return result(await run_in_threadpool(_archive, artifact, data))
 
 

@@ -7,13 +7,13 @@ from posixpath import normpath
 from typing import Literal
 from zipfile import ZipFile
 
-from fastapi import HTTPException
 from lxml import etree
 from openpyxl import load_workbook
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE, MergedCell
 from openpyxl.utils.cell import coordinate_to_tuple, get_column_letter
 from pydantic import BaseModel, Field, StrictBool, StrictFloat, StrictInt, StrictStr
 
+from applications.conversation.exceptions import ConversationBusinessError
 from .artifact_ooxml import check_package, rewrite_package, xml_bytes, xml_root
 
 S = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
@@ -34,7 +34,7 @@ def _load(content):
     try:
         return load_workbook(BytesIO(content), data_only=False, rich_text=True)
     except Exception as exc:
-        raise HTTPException(422, "XLSX 无法读取") from exc
+        raise ConversationBusinessError("XLSX 无法读取") from exc
 
 
 def sheet_metadata(content):
@@ -48,7 +48,7 @@ def sheet_metadata(content):
 
 def _sheet(book, index):
     if index >= len(book.worksheets) or book.worksheets[index].sheet_state != "visible":
-        raise HTTPException(404, "工作表不可用")
+        raise ConversationBusinessError("工作表不可用")
     return book.worksheets[index]
 
 
@@ -120,7 +120,7 @@ def _set_value(cell, edit):
     elif edit.type == "formula" and isinstance(value, str) and value.startswith("=") and 1 < len(value) <= 8192 and not ILLEGAL_CHARACTERS_RE.search(value):
         insert("f", value[1:])
     else:
-        raise HTTPException(422, f"单元格 {edit.address} 的值与数据类型不匹配")
+        raise ConversationBusinessError(f"单元格 {edit.address} 的值与数据类型不匹配")
 
 
 def _patch_sheet(root, sheet, edits):
@@ -129,10 +129,10 @@ def _patch_sheet(root, sheet, edits):
     for edit in edits:
         row_number, column = coordinate_to_tuple(edit.address)
         if row_number > 1048576 or column > 16384:
-            raise HTTPException(422, "单元格超出工作表范围")
+            raise ConversationBusinessError("单元格超出工作表范围")
         original = sheet.cell(row_number, column)
         if not _cell_display(original, sheet.protection.sheet)["editable"]:
-            raise HTTPException(422, f"单元格 {edit.address} 当前为只读")
+            raise ConversationBusinessError(f"单元格 {edit.address} 当前为只读")
         row = rows.get(row_number)
         if row is None:
             row = etree.Element(S + "row", r=str(row_number))
@@ -148,7 +148,7 @@ def _patch_sheet(root, sheet, edits):
             row.insert(row.index(after) if after is not None else len(row), target)
         formula = target.find(S + "f")
         if formula is not None and formula.get("t") in {"shared", "array", "dataTable"}:
-            raise HTTPException(422, f"单元格 {edit.address} 含共享、数组或数据表公式，当前为只读")
+            raise ConversationBusinessError(f"单元格 {edit.address} 含共享、数组或数据表公式，当前为只读")
         _set_value(target, edit)
     dimension = root.find(S + "dimension")
     if dimension is not None:
@@ -166,7 +166,7 @@ def save_sheet(content: bytes, edits: list[CellEdit]) -> bytes:
         for edit in edits:
             addresses = grouped.setdefault(edit.sheet_index, {})
             if edit.address in addresses:
-                raise HTTPException(422, "单元格变更不能重复")
+                raise ConversationBusinessError("单元格变更不能重复")
             addresses[edit.address] = edit
         with ZipFile(BytesIO(content)) as archive:
             workbook = xml_root(archive.read(WORKBOOK))
@@ -179,7 +179,7 @@ def save_sheet(content: bytes, edits: list[CellEdit]) -> bytes:
                 sheet = _sheet(book, index)
                 path = by_name.get(sheet.title)
                 if not path or not path.startswith("xl/"):
-                    raise HTTPException(422, "工作表部件无法定位")
+                    raise ConversationBusinessError("工作表部件无法定位")
                 root = xml_root(archive.read(path))
                 _patch_sheet(root, sheet, addresses.values())
                 replacements[path] = xml_bytes(root)
@@ -201,6 +201,6 @@ def save_sheet(content: bytes, edits: list[CellEdit]) -> bytes:
                 replacements["[Content_Types].xml"] = xml_bytes(types)
         return rewrite_package(content, replacements, removed)
     except (KeyError, TypeError, ValueError, OverflowError, AttributeError, etree.XMLSyntaxError) as exc:
-        raise HTTPException(422, "工作表结构或单元格内容无法保存") from exc
+        raise ConversationBusinessError("工作表结构或单元格内容无法保存") from exc
     finally:
         book.close()

@@ -5,9 +5,9 @@ from collections import Counter
 from hashlib import sha256
 import json
 
-from fastapi import HTTPException
 from starlette.concurrency import run_in_threadpool
 
+from applications.conversation.exceptions import ConversationBusinessError
 from configure import LOGGER, PROJECT_CONFIG
 from .artifact_mock import Artifact, file_write_lock, read_original, replace_original
 
@@ -90,7 +90,7 @@ def _store_groups(path, artifact, source_hash, mode, groups):
                 "mode": mode, "groups": groups,
             }
             replace_original(path, json.dumps(record, ensure_ascii=False, indent=2).encode("utf-8"))
-    except (OSError, HTTPException):
+    except (OSError, ConversationBusinessError):
         LOGGER.warning("测试案例归纳结果暂未写入缓存")
 
 

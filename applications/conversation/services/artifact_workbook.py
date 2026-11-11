@@ -4,7 +4,7 @@ from hashlib import sha256
 from io import BytesIO
 from zipfile import ZipFile
 
-from fastapi import HTTPException
+from applications.conversation.exceptions import ConversationBusinessError, TestCaseWorkbookFormatError
 from openpyxl import Workbook, load_workbook
 from pydantic import BaseModel, Field
 
@@ -75,7 +75,7 @@ def read_workbook(content: bytes):
     try:
         with ZipFile(BytesIO(content)) as archive:
             if sum(entry.file_size for entry in archive.infolist()) > MAX_EXPANDED_BYTES:
-                raise HTTPException(413, "工作簿解压后超过处理上限")
+                raise ConversationBusinessError("工作簿解压后超过处理上限")
         book = load_workbook(BytesIO(content))
         cases = {}
         case_rows = {}
@@ -93,10 +93,10 @@ def read_workbook(content: bytes):
                 raise ValueError("duplicate step id")
             step_rows[case_id, key] = row
             cases[case_id].steps.append(step)
-    except HTTPException:
+    except ConversationBusinessError:
         raise
     except Exception as exc:
-        raise HTTPException(422, "工作簿不符合当前测试案例样例格式") from exc
+        raise TestCaseWorkbookFormatError("工作簿不符合当前测试案例样例格式") from exc
     return book, cases, case_rows, step_rows
 
 
@@ -125,12 +125,12 @@ def update_workbook(content: bytes, updated: list[TestCase]) -> bytes:
         for case in updated:
             if (case.id not in cases or case.id in kept_cases or
                     case.group != cases[case.id].group or not case.name.strip()):
-                raise HTTPException(422, "案例编号、分组或名称无效")
+                raise ConversationBusinessError("案例编号、分组或名称无效")
             kept_cases[case.id] = case
             for step in case.steps:
                 key = (case.id, step.id)
                 if key not in step_rows or key in kept_steps:
-                    raise HTTPException(422, "步骤编号无效")
+                    raise ConversationBusinessError("步骤编号无效")
                 kept_steps[key] = step
         case_sheet = book[CASE_SHEET]
         step_sheet = book[STEP_SHEET]

@@ -3,8 +3,9 @@
 from io import BytesIO
 from zipfile import BadZipFile, ZipFile
 
-from fastapi import HTTPException
 from lxml import etree
+
+from applications.conversation.exceptions import ConversationBusinessError
 
 MAX_EXPANDED_BYTES = 64 * 1024 * 1024
 
@@ -14,11 +15,11 @@ def check_package(content: bytes):
         with ZipFile(BytesIO(content)) as archive:
             members = archive.infolist()
             if sum(member.file_size for member in members) > MAX_EXPANDED_BYTES:
-                raise HTTPException(413, "Office 文件解压后超过在线处理上限")
+                raise ConversationBusinessError("Office 文件解压后超过在线处理上限")
             if len({member.filename for member in members}) != len(members):
                 raise ValueError("duplicate package part")
     except (BadZipFile, ValueError) as exc:
-        raise HTTPException(422, "Office 文件损坏或格式不支持") from exc
+        raise ConversationBusinessError("Office 文件损坏或格式不支持") from exc
 
 
 def xml_root(data: bytes):

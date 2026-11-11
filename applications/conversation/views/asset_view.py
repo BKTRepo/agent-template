@@ -5,11 +5,12 @@ from types import SimpleNamespace
 from typing import Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, Query, Response
 from pydantic import BaseModel, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import FileResponse
 
+from applications.conversation.exceptions import ConversationBusinessError, TestCaseWorkbookFormatError
 from applications.conversation.models.asset_model import AssetFile
 from applications.conversation.services import asset_service as service
 from applications.knowledge_base.services import document_preview as preview
@@ -60,7 +61,7 @@ def _result(data):
 async def _asset(user, asset_id):
     asset = await service.visible_assets(user).filter(id=asset_id).first()
     if asset is None:
-        raise HTTPException(404, "资产不存在或无权访问")
+        raise ConversationBusinessError("资产不存在或无权访问")
     return asset
 
 
@@ -68,7 +69,7 @@ async def _file(user, asset_id, file_id):
     await _asset(user, asset_id)
     file = await AssetFile.get_or_none(id=file_id, asset_id=asset_id)
     if file is None:
-        raise HTTPException(404, "附件不存在或无权访问")
+        raise ConversationBusinessError("附件不存在或无权访问")
     return file, service.file_path(file)
 
 
@@ -83,10 +84,8 @@ def _test_cases(file, path):
 
     try:
         return workbook_detail(SimpleNamespace(id=str(file.id), name=Path(file.file_name).stem), path.read_bytes())
-    except HTTPException as exc:
-        if exc.status_code == 422:
-            return None
-        raise
+    except TestCaseWorkbookFormatError:
+        return None
 
 
 @asset_router.get("/overview", summary="资产管理-查询可见资产数量和技能大类")
@@ -163,7 +162,7 @@ async def preview_file(asset_id: int = Query(..., gt=0), file_id: int = Query(..
                 return content.decode("utf-8-sig", errors="replace")
             data.update(text=await run_in_threadpool(read_text), truncated=file.size_bytes > 512 * 1024)
     except KnowledgeError as exc:
-        raise HTTPException(exc.status_code, str(exc)) from exc
+        raise ConversationBusinessError(str(exc)) from exc
     await _asset(current_user, asset_id)
     return _result(data)
 
@@ -174,7 +173,7 @@ async def preview_pdf(asset_id: int = Query(..., gt=0), file_id: int = Query(...
     try:
         pdf = await preview.render_pdf(path, _fingerprint(path))
     except KnowledgeError as exc:
-        raise HTTPException(exc.status_code, str(exc)) from exc
+        raise ConversationBusinessError(str(exc)) from exc
     await _asset(current_user, asset_id)
     return FileResponse(pdf, media_type="application/pdf", headers=PRIVATE)
 
@@ -185,11 +184,11 @@ async def preview_sheet(asset_id: int = Query(..., gt=0), file_id: int = Query(.
                         column_offset: int = Query(0, ge=0), current_user=DependAuth):
     _, path = await _file(current_user, asset_id, file_id)
     if path.suffix != ".xlsx":
-        raise HTTPException(422, "该文件不是 Excel 工作簿")
+        raise ConversationBusinessError("该文件不是 Excel 工作簿")
     try:
         data = await run_in_threadpool(preview.workbook_page, _fingerprint(path), sheet_index, offset, 100, column_offset, 50)
     except KnowledgeError as exc:
-        raise HTTPException(exc.status_code, str(exc)) from exc
+        raise ConversationBusinessError(str(exc)) from exc
     await _asset(current_user, asset_id)
     return _result(data)
 
@@ -204,7 +203,7 @@ async def download(asset_id: int = Query(..., gt=0), file_id: int = Query(..., g
 async def export(data: AssetSelection, current_user=DependAuth):
     rows = await service.visible_assets(current_user).filter(id__in=data.asset_ids).order_by("id")
     if len(rows) != len(data.asset_ids):
-        raise HTTPException(404, "资产不存在或无权访问")
+        raise ConversationBusinessError("资产不存在或无权访问")
     stream = StringIO(newline="")
     writer = csv.writer(stream)
     writer.writerow(["资产编号", "资产名称", "技能大类", "所属应用标识", "创建人", "创建时间"])

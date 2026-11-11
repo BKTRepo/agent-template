@@ -8,6 +8,8 @@
 
 ## 悬浮对话台测试案例产出物联调
 
+产出物和资产管理接口的业务异常使用平台默认失败响应（HTTP 200、业务码 `999999`、`status: "failure"`），具体原因见 `message`。源文件 SHA-256 与 `base_hash` 不一致时，提示重新打开产出物。
+
 以下接口以 `/assistant/artifacts` 为前缀，均使用平台 token，按登录人定位样例文件。仅配置 `ASSISTANT_ARTIFACT_MOCK_DIR` 时启用，不涉及 `chat_artifact` 或资产数据库表。
 
 平台悬浮窗的纳入状态与归档走 `/api/assets/source-status` 和 `/api/assets/create`。原样例的本地快照接口用于单独联调。正式资产查询及归档契约见 [资产管理接口](../../docs/asset-management.md#接口)。

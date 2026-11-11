@@ -2,7 +2,7 @@ from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import HTTPException
+from applications.conversation.exceptions import ConversationBusinessError
 from starlette.concurrency import run_in_threadpool
 from tortoise.exceptions import IntegrityError
 from tortoise.expressions import Q, Subquery
@@ -81,14 +81,14 @@ def storage_path(key):
     root = asset_root().resolve()
     path = root / key
     if path.parent != root or path.is_symlink():
-        raise HTTPException(404, "归档路径无效")
+        raise ConversationBusinessError("归档路径无效")
     return path
 
 
 def file_path(file):
     path = storage_path(file.storage_key)
     if not path.is_file():
-        raise HTTPException(404, "归档文件不存在")
+        raise ConversationBusinessError("归档文件不存在")
     return path
 
 
@@ -113,13 +113,13 @@ async def archive(user, data):
     if existing["included"]:
         return existing
     if existing["recycled"]:
-        raise HTTPException(409, "产出物已在回收站，请先恢复资产")
+        raise ConversationBusinessError("产出物已在回收站，请先恢复资产")
     if not await DeveloperSkillClass.filter(id=data.skill_classes_id, is_enabled=True).exists():
-        raise HTTPException(422, "请选择已启用的技能大类")
+        raise ConversationBusinessError("请选择已启用的技能大类")
     try:
         await validate_application_async(data.application_identify)
     except ValueError as exc:
-        raise HTTPException(422, "请选择目录中的所属应用") from exc
+        raise ConversationBusinessError("请选择目录中的所属应用") from exc
     source = await run_in_threadpool(source_snapshot, user.id, data.artifact_id, data.base_hash)
     key = uuid4().hex + Path(source.filename).suffix.lower()
     target = asset_root() / key
@@ -137,8 +137,8 @@ async def archive(user, data):
         if existing["included"]:
             return existing
         if existing["recycled"]:
-            raise HTTPException(409, "产出物已在回收站，请先恢复资产") from exc
-        raise HTTPException(409, "暂时无法归档此产出物，请重试") from exc
+            raise ConversationBusinessError("产出物已在回收站，请先恢复资产") from exc
+        raise ConversationBusinessError("暂时无法归档此产出物，请重试") from exc
     except Exception:
         await run_in_threadpool(target.unlink, missing_ok=True)
         raise
@@ -152,13 +152,13 @@ async def change_recycle_state(user, ids, *, restore):
         query = Asset.filter(id__in=ids, created_by=user.id).using_db(db)
         rows = await query.order_by("id").select_for_update()
         if len(rows) != len(ids):
-            raise HTTPException(404, "资产不存在或无权操作")
+            raise ConversationBusinessError("资产不存在或无权操作")
         if restore and any(row.deleted_at and row.deleted_at <= operation_time - recovery_period() for row in rows):
-            raise HTTPException(409, "资产已超过可恢复期限")
+            raise ConversationBusinessError("资产已超过可恢复期限")
         if restore:
             files = await AssetFile.filter(asset_id__in=ids).using_db(db)
             if any(not storage_path(file.storage_key).is_file() for file in files):
-                raise HTTPException(409, "归档文件已丢失，无法恢复")
+                raise ConversationBusinessError("归档文件已丢失，无法恢复")
             return await query.filter(deleted_at__isnull=False).update(deleted_at=None)
         return await query.filter(deleted_at__isnull=True).update(deleted_at=operation_time)
 
@@ -172,7 +172,7 @@ async def delete_recycled(ids, *, user=None, expired_before=None):
             query = query.filter(deleted_at__lte=expired_before)
         rows = await query.order_by("id").select_for_update()
         if user is not None and len(rows) != len(ids):
-            raise HTTPException(404, "只能彻底删除本人的回收站资产")
+            raise ConversationBusinessError("只能彻底删除本人的回收站资产")
         eligible = [row.id for row in rows]
         if not eligible:
             return 0
@@ -182,6 +182,6 @@ async def delete_recycled(ids, *, user=None, expired_before=None):
             for path in paths:
                 await run_in_threadpool(path.unlink, missing_ok=True)
         except OSError as exc:
-            raise HTTPException(503, "暂时无法删除归档文件，请稍后重试") from exc
+            raise ConversationBusinessError("暂时无法删除归档文件，请稍后重试") from exc
         await files.delete()
         return await query.filter(id__in=eligible).delete()

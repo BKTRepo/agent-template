@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from fastapi import HTTPException
+from applications.conversation.exceptions import ConversationBusinessError
 
 
 @dataclass(frozen=True)
@@ -17,7 +17,7 @@ def source_snapshot(owner_id: int, artifact_id: str, base_hash: str) -> SourceSn
 
     source = mock_artifact(owner_id, artifact_id)
     if not source.path.is_file():
-        raise HTTPException(404, "原产出物不存在")
+        raise ConversationBusinessError("原产出物不存在")
     with file_write_lock(source.path):
         content = read_original(source.path)
         check_revision(content, base_hash)

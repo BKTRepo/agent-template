@@ -4,6 +4,7 @@ import traceback
 from fastapi import APIRouter, Depends, Query
 from sse_starlette.sse import EventSourceResponse
 
+from applications.conversation.exceptions import ConversationBusinessError
 from applications.conversation.dependencies import get_conversation_crud
 from applications.conversation.schemas.conversation_schema import ChatRequest
 from applications.conversation.schemas.process_step_schema import ReasoningStep
@@ -35,19 +36,17 @@ async def resume_query(run_id: str = Query(..., min_length=1, max_length=32),
                        after: int = Query(default=0, ge=0), current_user: User = DependAuth):
     from applications.wrq.knowledge_base.models.query_model import KnowledgeQueryTurn
     from applications.wrq.knowledge_base.services.query_service import replay
-    from fastapi import HTTPException
     if not await KnowledgeQueryTurn.filter(id=run_id, owner_id=current_user.id).exists():
-        raise HTTPException(404, "问答任务不存在或无权限")
+        raise ConversationBusinessError("问答任务不存在或无权限")
     return EventSourceResponse(replay(run_id, current_user.id, after))
 
 
 @chat.get("/get-query-detail", summary="知识库问答-查询本人检索证据和执行状态")
 async def query_detail(run_id: str = Query(..., min_length=1, max_length=32), current_user: User = DependAuth):
     from applications.wrq.knowledge_base.models.query_model import KnowledgeQueryTurn
-    from fastapi import HTTPException
     turn = await KnowledgeQueryTurn.get_or_none(id=run_id, owner_id=current_user.id)
     if turn is None:
-        raise HTTPException(404, "问答任务不存在或无权限")
+        raise ConversationBusinessError("问答任务不存在或无权限")
     return SuccessResponse(data=dict(run_id=turn.id, status=turn.status, answer=turn.answer,
                                     retrieval=turn.retrieval, error=turn.error))
 
