@@ -1,18 +1,24 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getSheetPage, type PreviewMetadata, type SheetPage } from '@/api/knowledgePreview'
 
-export default function SpreadsheetFileViewer({ kbId, metadata, zoom }: { kbId: string; metadata: PreviewMetadata; zoom: number }) {
+type SheetLoader = (sheet: number, offset: number, columnOffset: number, signal: AbortSignal) => Promise<SheetPage>
+
+export default function SpreadsheetFileViewer({ kbId, metadata, zoom, loadPage }: {
+  kbId?: string; metadata: Pick<PreviewMetadata, 'id' | 'generation' | 'sheets'>; zoom: number; loadPage?: SheetLoader
+}) {
   const [sheet, setSheet] = useState(metadata.sheets[0]?.index ?? 0), [offset, setOffset] = useState(0), [columnOffset, setColumnOffset] = useState(0)
   const [data, setData] = useState<SheetPage>(), [error, setError] = useState(''), [loading, setLoading] = useState(false)
   useEffect(() => {
     const controller = new AbortController()
     setLoading(true); setError(''); setData(undefined)
-    void getSheetPage(kbId, String(metadata.id), metadata.generation, sheet, offset, columnOffset, controller.signal)
+    const request = loadPage ? loadPage(sheet, offset, columnOffset, controller.signal)
+      : getSheetPage(kbId!, String(metadata.id), metadata.generation, sheet, offset, columnOffset, controller.signal)
+    void request
       .then(value => { if (!controller.signal.aborted) setData(value) })
       .catch(reason => { if (!controller.signal.aborted) setError((reason as Error).message) })
       .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => controller.abort()
-  }, [kbId, metadata.id, metadata.generation, sheet, offset, columnOffset])
+  }, [kbId, metadata.id, metadata.generation, sheet, offset, columnOffset, loadPage])
   const merges = useMemo(() => {
     const result = new Map<string, { hidden: boolean; rowSpan: number; colSpan: number }>()
     if (data) for (const [r1, c1, r2, c2] of data.merges) {
