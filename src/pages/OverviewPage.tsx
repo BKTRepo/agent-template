@@ -16,28 +16,28 @@ const skillIdentity: Column[] = [['name', 'Skill 名称'], ['skill_class_name', 
 const skillState: Column[] = [['version', '线上版本号'], ['status', '当前状态', 'status']]
 const userIdentity: Column[] = [['department', '部门'], ['username', '用户名'], ['employee_no', '用户工号']]
 const cumulativeMetrics = [
-  { key: 'connected_users', field: 'connected_user_count', title: '用户接入数量', note: '累计去重，以登录过为准',
+  { key: 'connected_users', field: 'connected_user_count', title: '用户接入数量',
     columns: [...userIdentity, ['first_access_at', '首次接入时间', 'time'], ['last_login_at', '最近登录时间', 'time'], ['login_count', '累计登录次数']] },
-  { key: 'online_skills', field: 'online_skill_count', title: '在册 Skill 总数', note: '仅统计当前已上线的 Skill',
+  { key: 'online_skills', field: 'online_skill_count', title: '在册 Skill 总数',
     columns: [...skillIdentity, ['published_at', '上线时间', 'time'], ...skillState, ['call_count', '累计调用次数'], ['last_called_at', '最近调用时间', 'time']] },
-  { key: 'skill_calls', field: 'skill_call_count', title: '技能被调用次数', note: '平台累计 Skill 调用事件数',
+  { key: 'skill_calls', field: 'skill_call_count', title: '技能被调用次数',
     columns: [['skill_name', 'Skill 名称'], ['operator_login_name', '操作人工号'], ['called_at', '调用时间', 'time']] },
-  { key: 'knowledge_mounts', field: 'knowledge_mount_count', title: '知识库被挂载次数', note: '知识库成功挂载到 Skill 的次数',
+  { key: 'knowledge_mounts', field: 'knowledge_mount_count', title: '知识库被挂载次数',
     columns: [['knowledge_base_name', '知识库名称'], ['knowledge_base_version', '知识库版本'], ['target_name', '挂载目标名称'], ['operator_login_name', '操作人工号'], ['mounted_at', '挂载时间', 'time']] },
 ] satisfies Metric[]
 const periodMetrics = [
-  { key: 'active_users', field: 'active_user_count', title: '活跃用户数', note: '以期间内调用智能对话为准',
+  { key: 'active_users', field: 'active_user_count', title: '活跃用户数',
     columns: [...userIdentity, ['conversation_call_count', '智能对话调用次数'], ['first_called_at', '首次调用时间', 'time'], ['last_called_at', '近期调用时间', 'time']] },
-  { key: 'test_artifacts', field: 'test_artifact_count', title: 'AI 辅助测试产出物', note: '期间内成功生成的最终产出物',
+  { key: 'test_artifacts', field: 'test_artifact_count', title: 'AI 辅助测试产出物',
     columns: [['generated_at', '产出时间', 'time'], ['employee_no', '用户工号'], ['department', '所属部门'], ['artifact_type', '产出物类型'], ['skill_name', 'Skill 名称'], ['artifact_count', '产出物数量'], ['duration_ms', '生成耗时', 'duration'], ['status', '生成状态']] },
-  { key: 'new_skills', field: 'new_skill_count', title: '新增技能数', note: '期间内创建且当前已上线的 Skill',
+  { key: 'new_skills', field: 'new_skill_count', title: '新增技能数',
     columns: [...skillIdentity, ['created_time', '创建时间', 'time'], ['creator_login_name', '创建人工号'], ...skillState] },
-  { key: 'new_knowledge_bases', field: 'new_knowledge_base_count', title: '新增知识库数', note: '期间内创建成功的知识库',
+  { key: 'new_knowledge_bases', field: 'new_knowledge_base_count', title: '新增知识库数',
     columns: [['name', '知识库名称'], ['application_name', '所属应用'], ['creator_login_name', '创建人工号'], ['created_time', '创建时间', 'time'], ['version', '当前版本号'], ['file_count', '文件数量'], ['updated_at', '最近维护时间', 'time']] },
 ] satisfies Metric[]
 type CountField = 'connected_user_count' | 'online_skill_count' | 'skill_call_count' | 'knowledge_mount_count'
   | 'active_user_count' | 'test_artifact_count' | 'new_skill_count' | 'new_knowledge_base_count'
-type Metric = { key: string; field: CountField; title: string; note: string; columns: Column[] }
+type Metric = { key: string; field: CountField; title: string; columns: Column[] }
 type Counts = Partial<Record<CountField, number | null>>
 type PeriodSummary = Counts & { trend?: TrendData; top_skills?: RankedSkill[] | null }
 const dateFormatter = new Intl.DateTimeFormat('en-CA', {
@@ -88,7 +88,6 @@ function MetricCard({ metric, count, loading, error, onDetail }: {
         aria-label={`查看${metric.title}明细`}>明细</button>
     </div>
     <p className="overview-metric-value" aria-live="polite">{loading ? '加载中…' : error ? '—' : count?.toLocaleString('zh-CN') ?? fallback}</p>
-    <p className="helper-text">{metric.note}</p>
   </article>
 }
 
@@ -165,7 +164,7 @@ export default function OverviewPage() {
       <button className="button primary" type="submit">查询</button>
       {dateError && <p role="alert" className="overview-date-error">{dateError}</p>}
     </form>
-    <MetricSection title="累计指标" note="不随日期筛选变化" metrics={cumulativeMetrics} result={cumulative}
+    <MetricSection title="累计指标" note="（不随期间变化）" metrics={cumulativeMetrics} result={cumulative}
       onDetail={metric => setDetail({ metric })} />
     <MetricSection title="期间指标" note={`${period.start_date} 至 ${period.end_date}`} metrics={periodMetrics} result={selected}
       onDetail={metric => setDetail({ metric, period })} />

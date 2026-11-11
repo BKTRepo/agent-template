@@ -439,8 +439,17 @@ h1,h2,h3,p { margin:0; }
 .knowledge-history article>div { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; }
 .knowledge-history span { color:var(--platform-muted); font-size:12px; }
 .knowledge-history p { margin-top:10px; white-space:pre-wrap; overflow-wrap:anywhere; font-size:14px; line-height:1.8; }
-.assistant-trigger { position:fixed; right:26px; bottom:24px; width:56px; height:56px; border:0; border-radius:50%; color:white; background:var(--platform-blue); box-shadow:0 6px 22px #1670ff50; display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:85; }
-.assistant-trigger:hover { background:#0a62de; }
+.assistant-trigger { position:fixed; right:26px; bottom:24px; width:58px; height:58px; border:1px solid #dbeafe; border-radius:50%; background:#eef5ff; box-shadow:0 6px 18px rgba(22,119,255,.22); display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:85; }
+.assistant-trigger { touch-action:none; user-select:none; transition:transform .28s, box-shadow .28s; }
+.assistant-trigger:hover { transform:scale(1.07); box-shadow:0 10px 26px rgba(22,119,255,.3); }
+.assistant-trigger.dragging { cursor:grabbing; transform:none; }
+.assistant-trigger .assistant-eye { transform-origin:center; transition:transform .2s; }
+.assistant-trigger:hover .assistant-eye { transform:scaleY(1.18); }
+.assistant-tooltip { position:absolute; right:calc(100% + 12px); top:50%; transform:translateY(-50%); padding:8px 12px; border-radius:10px; background:#14263d; color:#fff; font-size:12px; white-space:nowrap; box-shadow:0 6px 20px #10243a33; opacity:0; pointer-events:none; transition:opacity .2s; }
+.assistant-tooltip span { margin-left:6px; opacity:.72; }
+.assistant-trigger.tip-right .assistant-tooltip { right:auto; left:calc(100% + 12px); }
+.assistant-trigger:hover .assistant-tooltip, .assistant-trigger:focus-visible .assistant-tooltip { opacity:1; }
+.assistant-trigger.dragging .assistant-tooltip { opacity:0; }
 .assistant-panel { position:fixed; right:26px; bottom:92px; width:430px; height:600px; max-width:calc(100vw - 32px); max-height:calc(100vh - 112px); max-height:calc(100dvh - 112px); display:flex; flex-direction:column; background:white; border:1px solid #dae5f5; border-radius:15px; overflow:hidden; box-shadow:0 12px 50px #071a3530; z-index:84; }
 .assistant-header { display:flex; align-items:center; gap:9px; padding:15px; border-bottom:1px solid var(--platform-line); color:var(--platform-text); flex-shrink:0; }
 .assistant-header>svg { color:var(--platform-blue); }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import type { PointerEvent } from 'react'
 import { Bot, LoaderCircle, Paperclip, Plus, Send, X } from 'lucide-react'
 import Dialog from '@/components/developer/Dialog'
 import SearchSelect from '@/components/developer/SearchSelect'
@@ -15,6 +16,49 @@ export default function FloatingAssistant() {
   const implementations = useDeveloperStore(state => state.implementations)
   const catalog = skillCatalog(implementations, true).filter(row => skillClasses.find(kind => kind.id === row.classId)?.enabled !== false)
   const [open, setOpen] = useState(false)
+  const [position, setPosition] = useState<{ x: number; y: number } | null>(null)
+  const [dragging, setDragging] = useState(false)
+  const drag = useRef<{ startX: number; startY: number; left: number; top: number; moved: boolean } | null>(null)
+  const suppressClick = useRef(false)
+
+  function startDrag(event: PointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    drag.current = { startX: event.clientX, startY: event.clientY, left: rect.left, top: rect.top, moved: false }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  function moveDrag(event: PointerEvent<HTMLButtonElement>) {
+    const active = drag.current
+    if (!active) return
+    const dx = event.clientX - active.startX
+    const dy = event.clientY - active.startY
+    if (!active.moved && Math.hypot(dx, dy) < 5) return
+    active.moved = true
+    setDragging(true)
+    const bounds = event.currentTarget.getBoundingClientRect()
+    setPosition({
+      x: Math.max(0, Math.min(window.innerWidth - bounds.width, active.left + dx)),
+      y: Math.max(0, Math.min(window.innerHeight - bounds.height, active.top + dy)),
+    })
+  }
+
+  function endDrag() {
+    suppressClick.current = drag.current?.moved ?? false
+    drag.current = null
+    setDragging(false)
+  }
+
+  useEffect(() => {
+    function keepVisible() {
+      setPosition(current => current && ({
+        x: Math.max(0, Math.min(window.innerWidth - (trigger.current?.offsetWidth ?? 58), current.x)),
+        y: Math.max(0, Math.min(window.innerHeight - (trigger.current?.offsetHeight ?? 58), current.y)),
+      }))
+    }
+    window.addEventListener('resize', keepVisible)
+    return () => window.removeEventListener('resize', keepVisible)
+  }, [])
   const [picking, setPicking] = useState(false)
   const [skillIds, setSkillIds] = useState<string[]>([])
   const [messages, setMessages] = useState<AssistantMessage[]>([])
@@ -53,7 +97,20 @@ export default function FloatingAssistant() {
   }
   const results = catalog.filter(row => row.name.toLowerCase().includes(applied.name.trim().toLowerCase()) && (!applied.classId || row.classId === applied.classId) && (!applied.application || (row.applicationIds ?? [row.system]).some(id => id === '*' || id === applied.application)) && (!applied.maintainer || row.creatorName === applied.maintainer))
   return <>
-    <button ref={trigger} className="assistant-trigger" aria-label={open ? '收起智能助手' : '打开智能助手'} aria-expanded={open} onClick={() => open ? close() : setOpen(true)}><Bot size={25} /></button>
+    <button ref={trigger} className={`assistant-trigger ${dragging ? 'dragging' : ''} ${position && position.x < 150 ? 'tip-right' : ''}`}
+      style={position ? { left: position.x, top: position.y, right: 'auto', bottom: 'auto' } : undefined}
+      aria-label={open ? '收起智能助手' : '打开智能助手'} aria-expanded={open}
+      onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag}
+      onPointerCancel={() => { drag.current = null; setDragging(false); suppressClick.current = false }}
+      onClick={() => { if (suppressClick.current) { suppressClick.current = false; return }; open ? close() : setOpen(true) }}><svg viewBox="0 0 100 100" width="46" height="46" aria-hidden="true">
+      <path d="M31 26 Q21 8 39 12 Q33 18 37 28 Z" fill="#fbfdfd" stroke="#d5e0dd" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M69 26 Q79 8 61 12 Q67 18 63 28 Z" fill="#fbfdfd" stroke="#d5e0dd" strokeWidth="1.5" strokeLinejoin="round" />
+      <ellipse cx="50" cy="55" rx="42" ry="39" fill="#f1f5f3" stroke="#d5e0dd" strokeWidth="1.5" />
+      <path d="M11 62 Q50 84 89 62 Q84 88 50 91 Q16 88 11 62 Z" fill="#dde7e4" />
+      <rect x="26" y="38" width="48" height="34" rx="16" fill="#22434b" />
+      <rect className="assistant-eye" x="39.5" y="45" width="9.5" height="20" rx="4.7" fill="#fff" />
+      <rect className="assistant-eye" x="51" y="45" width="9.5" height="20" rx="4.7" fill="#fff" />
+    </svg><span className="assistant-tooltip" aria-hidden="true"><b>AI 助手</b><span>就绪</span></span></button>
     {open && <aside className="assistant-panel" role="dialog" aria-label="AI 助手" aria-modal="false" onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); close() } }}>
       <header className="assistant-header"><Bot size={20} /><h2>AI 助手</h2><button className="button small" onClick={clear}>清空聊天</button><button className="icon-button" aria-label="收起助手" onClick={close}><X size={18} /></button></header>
       <div className="assistant-skills"><div className="field-heading"><span>已加载 Skill</span><button className="button small" onClick={() => setPicking(true)}><Plus size={13} />加载 Skill</button></div><div className="knowledge-selected">{skills.map(skill => { const contract = skillContract(skill); return <article className="assistant-loaded-skill" key={skill.id}><div className="field-heading"><b>{skill.name}</b><button className="icon-button" disabled={busy} aria-label={`卸载 ${skill.name}`} onClick={() => setSkillIds(previous => previous.filter(id => id !== skill.id))}><X size={12} /></button></div><p>{skill.description}</p><dl><dt>输入</dt><dd>{contract.input}</dd><dt>输出</dt><dd>{contract.output}</dd></dl></article> })}{!skills.length && <span className="helper-text">尚未加载，可从全量已上线技能中选择。</span>}</div></div>
