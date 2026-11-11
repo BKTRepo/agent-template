@@ -72,7 +72,7 @@ export default function AssetPreviewDialog({ assetId, onClose }: { assetId: numb
   return <Dialog title={asset?.name ?? '资产预览'} onClose={onClose} className={`asset-preview-drawer ${expanded ? 'expanded' : ''}`}
     footer={<><button className="button" onClick={onClose}>关闭</button>
       <button className="button primary" disabled={!file || downloading} onClick={() => void download()}>下载原文件</button></>}>
-    {asset && <div className="asset-preview-meta"><span>资产 #{asset.id}</span><span>{asset.class_name}</span><span>{asset.creator_name}</span><span>{asset.visibility === 'private' ? '仅本人' : '全平台'}</span></div>}
+    {asset && <div className="asset-preview-meta"><span>资产名称：{asset.name}</span><span>创建人：{asset.creator_name}</span><span>创建时间：{new Date(asset.created_time).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}</span></div>}
     <div className="asset-preview-toolbar">
       {file && <label>附件 <select value={file.id} onChange={event => setFileId(Number(event.target.value))}>
         {asset?.files.map(row => <option key={row.id} value={row.id}>{row.file_name}</option>)}</select></label>}

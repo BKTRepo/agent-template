@@ -595,3 +595,49 @@ h1,h2,h3,p { margin:0; }
   .assistant-composer-actions { flex-wrap:wrap; }
   .platform-toast { right:16px; bottom:84px; }
 }
+
+
+/* 资产管理页面 */
+.assets-page { display: grid; gap: 18px; }
+.asset-page-actions { display: flex; justify-content: flex-end; }
+.asset-overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 12px; }
+.asset-overview button { display: grid; gap: 9px; justify-items: start; text-align: left; min-height: 112px; padding: 14px; border-radius: 10px; border: 1px solid #dbe5f0; background: #fff; color: #16304d; cursor: pointer; }
+.asset-overview button svg { color: #176aff; }
+.asset-overview button strong { font-size: 26px; line-height: 1.15; }
+.asset-overview button[aria-pressed='true'] { background: #ecf4ff; border-color: #5a9dff; }
+.asset-overview button:focus-visible { outline: 2px solid #176aff; outline-offset: 2px; }
+.asset-list { min-width: 0; padding: 20px; }
+.asset-list h2 { margin: 0 0 16px; font-size: 17px; }
+.asset-bulk { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; padding: 8px 12px; margin-bottom: 12px; background: #eef5ff; border-radius: 8px; }
+.asset-table-wrap { overflow-x: auto; }
+.asset-table { border-collapse: collapse; width: 100%; font-size: 13px; min-width: 750px; }
+.asset-table th, .asset-table td { padding: 12px 10px; border-bottom: 1px solid #e6edf7; text-align: left; }
+.asset-table th { background: #f4f7fc; color: #526783; }
+.asset-table .empty-table { text-align: center; }
+.asset-table input { accent-color: #176aff; }
+.asset-text-button { border: 0; padding: 0; text-align: left; color: inherit; background: transparent; cursor: pointer; font: inherit; }
+.asset-text-button:hover { color: #176aff; text-decoration: underline; }
+.asset-row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.asset-preview-drawer.developer-dialog { position: fixed; inset: 0 0 0 auto; margin: 0; width: min(100%, 1090px); max-width: none; height: 100%; max-height: none; border-radius: 0; }
+.asset-preview-drawer.expanded.developer-dialog { width: 100%; }
+.asset-preview-meta, .asset-preview-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
+.asset-preview-meta { font-size: 13px; color: #526783; }
+.asset-preview-toolbar select { max-width: 100%; border: 1px solid #dbe5f0; padding: 7px; border-radius: 6px; }
+.asset-preview-toolbar label { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.asset-preview-content { min-height: 220px; }
+.asset-case-detail { position: relative; z-index: 1; max-width: 300px; background: #fff; border: 1px solid #dbe5f0; border-radius: 8px; margin-top: 6px; padding: 12px; overflow-wrap: anywhere; }
+.asset-case-detail p { margin: 5px 0; }
+.asset-preview-content .cm-editor { max-height: 66vh; }
+
+
+.assets-page .asset-overview button { position:relative; overflow:hidden; }
+.assets-page .asset-overview button::after { content:''; position:absolute; width:90px; height:90px; border-radius:50%; right:-40px; top:-38px; background:#eaf2ff; pointer-events:none; }
+.assets-page .asset-overview button[aria-pressed=true]::after { background:#d9eaff; }
+
+.assets-page .asset-table input[type=checkbox] { appearance:auto; width:16px; height:16px; padding:0; accent-color:#176aff; cursor:pointer; }
+
+.assets-page .asset-overview button::after { z-index:0; }
+.assets-page .asset-overview button > * { position:relative; z-index:1; }
+.assets-page .asset-overview-icon { display:grid; place-items:center; width:32px; height:32px; border-radius:10px; background:#eaf2ff; color:#176aff; }
+.assets-page .asset-overview-label { overflow-wrap:anywhere; }
+.assets-page .asset-overview button[aria-pressed=true] .asset-overview-icon { background:#d7e8ff; }

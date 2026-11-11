@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
-import { FileStack, Layers3, Trash2 } from 'lucide-react'
+import { LayoutGrid, Layers3, Trash2, List, Code2, Database, FileText, Target, CheckCircle2 } from 'lucide-react'
 import { changeAssetState, downloadAsset, exportAssets, getAsset, getAssetOverview, listAssets, type AssetAction, type AssetOverview, type AssetPageResult } from '@/api/assets'
 import { getKnowledgeMetadata } from '@/api/knowledge'
 import AssetPreviewDialog from '@/components/assets/AssetPreviewDialog'
 import ListPagination from '@/components/common/ListPagination'
 import Dialog from '@/components/developer/Dialog'
 import '@/components/assets/assets.css'
+
+const categoryIcons = [LayoutGrid, List, Code2, Database, FileText, Target, CheckCircle2]
 
 const emptyPage: AssetPageResult = { items: [], total: 0, page: 1, pages: 1 }
 const formatTime = (value: string) => new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })
@@ -87,10 +89,10 @@ export default function AssetsPage() {
       {recycle ? '返回资产列表' : <><Trash2 size={15} />回收站 {overview?.recycle_count ?? ''}</>}
     </button></div>
     {!recycle && overview && <section className="asset-overview" aria-label="资产概览">
-      {[{ id: undefined, name: '全部资产', count: overview.total }, ...overview.classes].map(row => <button type="button"
+      {[{ id: undefined, name: '全部资产', count: overview.total }, ...overview.classes].map((row, index) => <button type="button"
         key={row.id ?? 'all'} aria-pressed={filters.classId === row.id} disabled={busy}
         onClick={() => setFilters({ ...filters, classId: row.id, page: 1 })}>
-        {row.id ? <Layers3 size={16} /> : <FileStack size={16} />}<span>{row.name}</span><strong>{row.count.toLocaleString('zh-CN')}</strong>
+        <span className="asset-overview-icon">{(() => { const Icon = categoryIcons[index] ?? Layers3; return <Icon size={16} /> })()}</span><span className="asset-overview-label">{row.name}</span><strong>{row.count.toLocaleString('zh-CN')}</strong>
       </button>)}
     </section>}
     {overviewError && <p role="alert" className="error-banner">{overviewError} <button className="button small" onClick={() => setRefresh(value => value + 1)}>重试</button></p>}
@@ -113,17 +115,17 @@ export default function AssetsPage() {
         <th><input type="checkbox" aria-label="选择本页资产" disabled={locked || !result.items.length}
           checked={result.items.length > 0 && selected.length === result.items.length}
           onChange={event => setSelected(event.target.checked ? result.items.map(row => row.id) : [])} /></th>
-        <th scope="col">资产名称</th><th scope="col">技能大类</th><th scope="col">所属应用</th><th scope="col">创建人</th>
+        <th scope="col">资产名称</th><th scope="col">资产类型</th><th scope="col">内容数量</th><th scope="col">所属应用</th><th scope="col">创建人</th>
         {recycle ? <><th scope="col">回收时间</th><th scope="col">可恢复至</th></> : <th scope="col" aria-sort={filters.sort === 'asc' ? 'ascending' : 'descending'}>
           <button type="button" className="asset-text-button" disabled={busy} onClick={() => setFilters({ ...filters, page: 1, sort: filters.sort === 'asc' ? 'desc' : 'asc' })}>创建时间 {filters.sort === 'asc' ? '↑' : '↓'}</button></th>}
         <th scope="col">操作</th></tr></thead><tbody>
-        {loading ? <tr><td colSpan={recycle ? 8 : 7} className="empty-table">正在加载资产…</td></tr>
-          : !result.items.length ? <tr><td colSpan={recycle ? 8 : 7} className="empty-table">{recycle ? '回收站暂无可恢复的资产' : '没有匹配的资产'}</td></tr>
+        {loading ? <tr><td colSpan={recycle ? 9 : 8} className="empty-table">正在加载资产…</td></tr>
+          : !result.items.length ? <tr><td colSpan={recycle ? 9 : 8} className="empty-table">{recycle ? '回收站暂无可恢复的资产' : '没有匹配的资产'}</td></tr>
           : result.items.map(row => <tr key={row.id}>
             <td><input type="checkbox" aria-label={`选择 ${row.name}`} disabled={locked} checked={selected.includes(row.id)}
               onChange={event => setSelected(previous => event.target.checked ? [...previous, row.id] : previous.filter(id => id !== row.id))} /></td>
             <td>{recycle ? row.name : <button className="asset-text-button" onClick={() => setPreview(row.id)}>{row.name}</button>}</td>
-            <td>{row.class_name}</td><td>{applications[row.application_identify] || row.application_identify}</td><td>{row.creator_name}</td>
+            <td>{row.class_name}</td><td>—</td><td>{applications[row.application_identify] || row.application_identify}</td><td>{row.creator_name}</td>
             {recycle ? <><td>{formatTime(row.deleted_at!)}</td><td>{formatTime(row.restore_until!)}</td></> : <td>{formatTime(row.created_time)}</td>}
             <td><div className="asset-row-actions">{recycle ? <>
               <button className="button small" disabled={locked} onClick={() => setPending({ ids: [row.id], action: 'restore' })}>恢复</button>
