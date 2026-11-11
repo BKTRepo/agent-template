@@ -443,6 +443,11 @@ h1,h2,h3,p { margin:0; }
 .assistant-trigger { touch-action:none; user-select:none; transition:transform .28s, box-shadow .28s; }
 .assistant-trigger:hover { transform:scale(1.07); box-shadow:0 10px 26px rgba(22,119,255,.3); }
 .assistant-trigger.dragging { cursor:grabbing; transform:none; }
+.assistant-orb-bot, .assistant-orb-close { position:absolute; inset:0; display:grid; place-items:center; transition:opacity .28s, transform .28s; }
+.assistant-orb-close { color:#185fa5; opacity:0; transform:rotate(-70deg) scale(.6); }
+.assistant-trigger.is-open { background:#fff; border-color:#9ac4ff; }
+.assistant-trigger.is-open .assistant-orb-bot { opacity:0; transform:rotate(70deg) scale(.6); }
+.assistant-trigger.is-open .assistant-orb-close { opacity:1; transform:rotate(0) scale(1); }
 .assistant-trigger .assistant-eye { transform-origin:center; transition:transform .2s; }
 .assistant-trigger:hover .assistant-eye { transform:scaleY(1.18); }
 .assistant-tooltip { position:absolute; right:calc(100% + 12px); top:50%; transform:translateY(-50%); padding:8px 12px; border-radius:10px; background:#14263d; color:#fff; font-size:12px; white-space:nowrap; box-shadow:0 6px 20px #10243a33; opacity:0; pointer-events:none; transition:opacity .2s; }
