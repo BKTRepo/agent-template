@@ -51,6 +51,6 @@ export default function App() {
     <main className="platform-main"><header className="platform-topbar"><div className="topbar-title"><button className="mobile-menu icon-button" aria-label="打开导航" onClick={() => setMobileMenu(true)}><Menu size={20} /></button><span>{label}</span>{page === 'developer' && <span className="topbar-subtitle">技能新建、调试、上线全链路管理</span>}{page === 'knowledge' && <span className="topbar-subtitle">Skill 依赖与引用资源管理 · 团队权限隔离</span>}</div><div className="topbar-actions"><PlatformAccount /></div></header>
       <div className="platform-content" key={actor.id || "platform"}>{page === 'developer' ? <DeveloperPage /> : page === 'knowledge' ? <KnowledgePage /> : page === 'skills' ? <SkillsPage /> : <section className="module-placeholder"><h1>{label}</h1><div className="surface placeholder-body"><Layers3 size={36} /><h2>该模块暂未开放</h2><p>当前可使用开发者中心创建和调试 Skill。</p><button className="button primary" onClick={() => setPage('developer')}>进入开发者中心</button></div></section>}</div>
     </main>
-    <KnowledgeProcessingWorker /><FloatingAssistant key={actor.id || "platform"} />
+    <KnowledgeProcessingWorker /><FloatingAssistant key={actor.id || "platform"} contextLabel={label} />
   </div></ErrorBoundary>
 }
