@@ -31,6 +31,8 @@ output/platform-integration/
 output/knowledge-parsed/
 output/knowledge-queue-integration/
 output/knowledge-queue-migration/
+applications/chat/chat_results/
+applications/chat/chat_history/
 output/skill-engine-verification.json
 
 docling_offline/

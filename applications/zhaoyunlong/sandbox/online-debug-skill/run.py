@@ -45,10 +45,11 @@ def load_request() -> dict[str, Any]:
 def load_config() -> dict[str, object]:
     """读取经 Docker 环境变量传入的模型配置。"""
     api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    auth_token = os.environ.get("ANTHROPIC_AUTH_TOKEN", "").strip()
     base_url = os.environ.get("ANTHROPIC_BASE_URL", "").strip()
     model = os.environ.get("ANTHROPIC_MODEL", "").strip()
-    if not api_key or not base_url or not model:
-        raise DebugExecutionError("缺少 ANTHROPIC_BASE_URL、ANTHROPIC_API_KEY 或 ANTHROPIC_MODEL")
+    if not (api_key or auth_token) or not base_url or not model:
+        raise DebugExecutionError("缺少模型地址、模型名或网关鉴权信息")
     # 空值表示不向 Agent SDK 传入轮次限制（max_turns=None）。仍受容器、
     # 模型服务及系统超时约束；配置了正整数时才启用显式轮次上限。
     turns_raw = os.environ.get("CLAUDE_MAX_TURNS", "").strip()

@@ -624,7 +624,7 @@ def hybrid_query_chunks(
         # 整个问题判定为“无召回”：退回同一查询的 Dense 结果，后续仍由
         # RRF 外层和 rerank 统一排序。
         try:
-            fallback = query_chunks(query_vectors, top_k=top_k)
+            fallback = query_chunks(query_vectors, top_k=top_k, filter_expr=filter_expr)
             for chunk in fallback:
                 chunk["source"] = "milvus_dense_fallback"
             return fallback
@@ -662,7 +662,7 @@ def hybrid_query_chunks(
 
 
 def query_chunks(
-        query_vectors: List[List[float]], top_k: int = 60
+        query_vectors: List[List[float]], top_k: int = 60, *, filter_expr: str = ""
 ) -> List[Dict[str, Any]]:
     """按向量相似度从 Milvus 检索分块（接口设计参考 LightRAG）。
 
@@ -675,7 +675,7 @@ def query_chunks(
     try:
         return _run_milvus_read_with_retry(
             "向量检索",
-            lambda client: _search_chunks(client, query_vectors, top_k),
+            lambda client: _search_chunks(client, query_vectors, top_k, filter_expr=filter_expr),
         )
     except Exception as e:
         LOGGER.error(f"Milvus 查询分块失败: {e}")

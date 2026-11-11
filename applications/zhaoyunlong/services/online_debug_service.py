@@ -16,7 +16,7 @@ from typing import Any, Iterable
 from urllib.parse import quote
 
 from configure import PROJECT_CONFIG
-from dotenv import dotenv_values
+from services.model_gateway import default_model, model_environment
 
 from .docker_sandbox import DockerSandboxRunner, SandboxConfig, SandboxResult
 
@@ -37,16 +37,6 @@ _RESULT_MEDIA_TYPES = {
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ".pdf": "application/pdf",
 }
-_REQUIRED_MODEL_ENV_NAMES = (
-    "ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL",
-    "CLAUDE_CODE_SUBAGENT_MODEL",
-)
-_OPTIONAL_MODEL_ENV_NAMES = (
-    "CLAUDE_MAX_TURNS", "CLAUDE_MAX_BUDGET_USD", "CLAUDE_CODE_EFFORT_LEVEL",
-    "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
-)
 
 
 class OnlineDebugError(ValueError):
@@ -461,19 +451,11 @@ class OnlineDebugService:
 
     @staticmethod
     def _model_environment() -> dict[str, str]:
-        """读取 .env 或进程环境中的 Anthropic 兼容模型配置，不修改全局环境。"""
-        # .env 位于项目根目录，而 OUTPUT_DIR 位于项目根目录下的 output 目录。
-        env_file = Path(PROJECT_CONFIG.OUTPUT_DIR).resolve().parent / ".env"
-        file_values = dotenv_values(env_file) if env_file.is_file() else {}
-
-        def value(name: str) -> str:
-            return (os.environ.get(name) or file_values.get(name) or "").strip()
-
-        missing = [name for name in _REQUIRED_MODEL_ENV_NAMES if not value(name)]
-        if missing:
-            raise OnlineDebugError(f"模型配置缺少：{', '.join(missing)}；请在 .env 或进程环境中配置")
-        names = _REQUIRED_MODEL_ENV_NAMES + tuple(name for name in _OPTIONAL_MODEL_ENV_NAMES if value(name))
-        return {name: value(name) for name in names}
+        """在线调试与悬浮对话台使用同一套网关和默认模型配置。"""
+        try:
+            return model_environment(default_model())
+        except RuntimeError as exc:
+            raise OnlineDebugError(str(exc)) from exc
 
     @staticmethod
     def _extract_skill_result(stdout: str) -> tuple[str, dict[str, Any] | None]:

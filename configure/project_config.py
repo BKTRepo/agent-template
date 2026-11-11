@@ -288,7 +288,7 @@ class ProjectConfig(BaseSettings):
 
     # RAG 分块 / 检索全局默认值（.env 可选；不写则用下列 default）
     # - CHUNK_SIZE / CHUNK_OVERLAP：KnowledgeBase.chunk_* 为空时回退；仅影响新上传/重处理文档
-    # - RETRIEVAL_TOP_K：chroma_store.search(top_k=None) 时兜底；聊天链路以 ModelConfig.top_k 为准
+    # - RETRIEVAL_TOP_K：检索未指定 top_k 时使用的默认值
     CHUNK_SIZE: int = Field(
         default=500,
         description="分块大小(字符数)；知识库未配置时回退，建议 200-2000",
@@ -299,7 +299,7 @@ class ProjectConfig(BaseSettings):
     )
     RETRIEVAL_TOP_K: int = Field(
         default=5,
-        description="向量检索条数兜底；聊天以 ModelConfig.top_k(1-20) 为准",
+        description="向量检索条数默认值",
     )
 
     # 测试用例生成配置
@@ -433,6 +433,9 @@ class ProjectConfig(BaseSettings):
     REDIS_PORT: str = Field(default="", description="Redis端口")
     REDIS_USERNAME: str = Field(default="", description="Redis用户名")
     REDIS_PASSWORD: str = Field(default="", description="Redis密码")
+    CHAT_HISTORY_DIR: str = Field(default="", description="悬浮窗 JSONL 会话目录；留空使用 applications/chat/chat_history")
+    CHAT_MODEL_HEALTH_TTL_SECONDS: int = Field(default=60, ge=1, le=3600, description="模型健康状态缓存秒数")
+    CHAT_MODEL_HEALTH_FAILURE_TTL_SECONDS: int = Field(default=30, ge=1, le=3600, description="模型异常状态缓存秒数")
 
     @model_validator(mode="after")
     def validate_env_and_assemble_urls(self) -> Self:

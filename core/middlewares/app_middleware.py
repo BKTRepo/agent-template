@@ -238,6 +238,13 @@ async def logging_middleware(request: Request, call_next):
             except orjson.JSONDecodeError:
                 audit_log["response_params"] = response_body
 
+        # 会话内容由对话模块维护，避免审计表留存第二份无法随清空而清理的历史。
+        if request_router.startswith('/chat/'):
+            audit_log['request_header'] = {key: ('[REDACTED]' if key.lower() in {'token', 'authorization', 'cookie'} else value)
+                                           for key, value in request_header.items()}
+            audit_log['request_params'] = '<CHAT CONTENT REDACTED>'
+            audit_log['response_params'] = '<CHAT CONTENT REDACTED>'
+
         request_message: str = f"\n> > > > > > > > > > > > > > > > > > > >\n" \
                                f"请求时间：{audit_log.get('request_time')}\n" \
                                f"请求模块：{audit_log.get('request_tags')}\n" \
