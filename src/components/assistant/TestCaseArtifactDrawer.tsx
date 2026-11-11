@@ -68,22 +68,23 @@ export default function TestCaseArtifactDrawer({ artifact, onSave, onClose, tool
         <div className="artifact-case-toolbar">{toolbar(saved, dirty || blocked)}</div>
       </div>
       {(error || actionError) && <p className="error-banner artifact-case-error" role="alert">{error || actionError}</p>}
+      {saved.groupingError && <p className="error-banner" role="alert">{saved.groupingError}</p>}
       {!groups.length ? <p className="empty-table">暂无测试案例</p> : view === 'map' ?
         <CaseMindMap title={saved.name} groups={groups} selectedId={selectedId} disabled={blocked}
-          onSelect={id => setSelectedId(id === selectedId ? undefined : id)} actions={actions} /> :
+          onSelect={id => { setSelectedId(id); setEditing(cases.find(item => item.id === id)) }} actions={actions} /> :
         <div className="artifact-case-list">{groups.map(({ title, items }) => <section key={title}>
         <h3>{title}</h3>
         {items.map(item => <article key={item.id}>
           <header><h4>{item.name}</h4>{actions(item)}</header>
           <dl><dt>前置条件</dt><dd>{item.preconditions || '—'}</dd></dl>
           <ol>{item.steps.map(step => <li key={step.id}>{step.action}
-            {step.expected !== undefined && <p>预期结果 · {step.expected || '—'}</p>}</li>)}</ol>
-          {item.expected !== undefined && <dl><dt>预期结果</dt><dd>{item.expected || '—'}</dd></dl>}
+            {step.expected != null && <p>预期结果 · {step.expected || '—'}</p>}</li>)}</ol>
+          {item.expected != null && <dl><dt>预期结果</dt><dd>{item.expected || '—'}</dd></dl>}
         </article>)}
       </section>)}</div>}
     </Dialog>
 
-    {editing && <Dialog title="编辑测试案例" onClose={() => setEditing(undefined)}
+    {editing && <Dialog className="assistant-owned-dialog" title="编辑测试案例" onClose={() => setEditing(undefined)}
       footer={<><button type="button" className="button" onClick={() => setEditing(undefined)}>取消</button>
         <button type="submit" form="artifact-case-edit" className="button primary" disabled={!editing.name.trim()}>确认编辑</button></>}>
       <form id="artifact-case-edit" className="artifact-case-editor" onSubmit={event => {
@@ -93,18 +94,18 @@ export default function TestCaseArtifactDrawer({ artifact, onSave, onClose, tool
         setEditing(undefined)
       }}>
         <label>案例名称<input required value={editing.name} onChange={event => setEditing({ ...editing, name: event.target.value })} /></label>
-        <label>前置条件<textarea value={editing.preconditions} onChange={event => setEditing({ ...editing, preconditions: event.target.value })} /></label>
+        <label>前置条件<textarea aria-label="前置条件" value={editing.preconditions} onChange={event => setEditing({ ...editing, preconditions: event.target.value })} /></label>
         {editing.steps.map((step, index) => <fieldset key={step.id}>
           <legend>步骤 {index + 1}</legend>
-          <label>操作内容<textarea value={step.action} onChange={event => setEditing({ ...editing, steps: editing.steps.map((row, position) => position === index ? { ...row, action: event.target.value } : row) })} /></label>
-          {step.expected !== undefined && <label>本步骤预期结果<textarea value={step.expected} onChange={event => setEditing({ ...editing, steps: editing.steps.map((row, position) => position === index ? { ...row, expected: event.target.value } : row) })} /></label>}
+          <label>操作内容<textarea aria-label={`操作内容 ${index + 1}`} value={step.action} onChange={event => setEditing({ ...editing, steps: editing.steps.map((row, position) => position === index ? { ...row, action: event.target.value } : row) })} /></label>
+          {step.expected != null && <label>本步骤预期结果<textarea value={step.expected} onChange={event => setEditing({ ...editing, steps: editing.steps.map((row, position) => position === index ? { ...row, expected: event.target.value } : row) })} /></label>}
           <button type="button" className="button small" aria-label={`删除步骤 ${index + 1}`} onClick={() => setEditing({ ...editing, steps: editing.steps.filter((_, position) => position !== index) })}>删除步骤</button>
         </fieldset>)}
-        {editing.expected !== undefined && <label>预期结果<textarea aria-label="预期结果" value={editing.expected} onChange={event => setEditing({ ...editing, expected: event.target.value })} /></label>}
+        {editing.expected != null && <label>预期结果<textarea aria-label="预期结果" value={editing.expected} onChange={event => setEditing({ ...editing, expected: event.target.value })} /></label>}
       </form>
     </Dialog>}
 
-    {pendingDelete && <Dialog title="删除测试案例" onClose={() => setPendingDelete(undefined)}
+    {pendingDelete && <Dialog className="assistant-owned-dialog" title="删除测试案例" onClose={() => setPendingDelete(undefined)}
       footer={<><button type="button" className="button" onClick={() => setPendingDelete(undefined)}>取消</button>
         <button type="button" className="button primary" onClick={() => {
           setCases(previous => previous.filter(item => item.id !== pendingDelete.id))
@@ -114,7 +115,7 @@ export default function TestCaseArtifactDrawer({ artifact, onSave, onClose, tool
       <p>删除「{pendingDelete.name}」？点击「保存修改」后才会写入原文件。</p>
     </Dialog>}
 
-    {discard && <Dialog title="放弃未保存的修改" onClose={() => setDiscard(undefined)}
+    {discard && <Dialog className="assistant-owned-dialog" title="放弃未保存的修改" onClose={() => setDiscard(undefined)}
       footer={<><button type="button" className="button" onClick={() => setDiscard(undefined)}>继续编辑</button>
         <button type="button" className="button primary" onClick={() => {
           if (discard === 'close') { onClose(); return }

@@ -89,7 +89,7 @@ export default function ArtifactFileDrawer({ artifact, onClose, toolbar, actionB
           </Suspense>)}
       </div>
     </Dialog>
-    {discard && <Dialog title="放弃未保存的修改" onClose={() => setDiscard(undefined)}
+    {discard && <Dialog className="assistant-owned-dialog" title="放弃未保存的修改" onClose={() => setDiscard(undefined)}
       footer={<><button className="button" onClick={() => setDiscard(undefined)}>继续编辑</button>
         <button className="button primary" onClick={() => {
           if (discard === 'close') onClose()

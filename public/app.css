@@ -93,17 +93,12 @@
   --ease-out: cubic-bezier(0, 0, 0.2, 1);
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   --animate-pulse: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  --blur-sm: 8px;
   --blur-md: 12px;
   --default-transition-duration: 150ms;
   --default-transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
   --default-font-family: var(--font-sans);
   --default-mono-font-family: var(--font-mono);
   --shadow-overlay: var(--overlay-shadow);
-  --color-field: var(--field-background, var(--default));
-  --color-field-rgb: 24 24 27;
-  --color-field-hover: var(--field-hover);
-  --radius-field: var(--field-radius, calc(var(--radius) * 1.5));
   --border-width-field: var(--field-border-width, var(--border-width));
   --ease-smooth: ease;
   --ease-out-quad: cubic-bezier(0.25, 0.46, 0.45, 0.94);
@@ -17631,6 +17626,49 @@ h1:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#
   50% {
     transform: translateY(-1px) scale(1.035);
   }
+}
+.aip-resize-handle:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 16px;
+  height: 16px;
+  z-index: 6;
+  border: 0;
+  color: #7a8ba3;
+  background: transparent;
+  cursor: nw-resize;
+  font-size: 12px;
+}
+.aip-session-tools:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid #e4ecf7;
+}
+.aip-session-tools:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) input {
+  width: 100%;
+  min-width: 0;
+  margin-bottom: 6px;
+}
+.aip-session-select:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.aip-session-drawer:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) .delete {
+  opacity: 1;
+}
+.assistant-owned-dialog:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) .artifact-case-editor label input[type=radio] {
+  width: auto;
+  margin-right: 8px;
+}
+.assistant-owned-dialog:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#)>div>label {
+  display: block;
+  margin: 12px 0;
 }
 @property --tw-rotate-x {
   syntax: "*";

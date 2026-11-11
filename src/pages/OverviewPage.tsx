@@ -39,7 +39,7 @@ type CountField = 'connected_user_count' | 'online_skill_count' | 'skill_call_co
   | 'active_user_count' | 'test_artifact_count' | 'new_skill_count' | 'new_knowledge_base_count'
 type Metric = { key: string; field: CountField; title: string; columns: Column[] }
 type Counts = Partial<Record<CountField, number | null>>
-type PeriodSummary = Counts & { trend?: TrendData; top_skills?: RankedSkill[] | null }
+type PeriodSummary = Counts & { data_notes?: string[]; trend?: TrendData; top_skills?: RankedSkill[] | null }
 const dateFormatter = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
 })
@@ -168,6 +168,7 @@ export default function OverviewPage() {
       onDetail={metric => setDetail({ metric })} />
     <MetricSection title="期间指标" note={`${period.start_date} 至 ${period.end_date}`} metrics={periodMetrics} result={selected}
       onDetail={metric => setDetail({ metric, period })} />
+    {selected.data?.data_notes?.map(note => <p className="helper-text" key={note}>{note}</p>)}
     <div className="overview-analytics">
       <OverviewTrend data={selected.data?.trend} loading={selected.loading} error={selected.error} />
       <OverviewRanking data={selected.data?.top_skills} loading={selected.loading} error={selected.error} />

@@ -18,8 +18,9 @@ export async function getCatalogMetadata(signal?: AbortSignal): Promise<CatalogM
 export function getCatalogClass(classId: string, signal?: AbortSignal) {
   return request<ClassDefinition>(`/skills/catalog/get-class?${new URLSearchParams({ class_id: classId })}`, { signal })
 }
-export async function listCatalogSkills(filters: CatalogFilters, page = 1, signal?: AbortSignal) {
+export async function listCatalogSkills(filters: CatalogFilters, page = 1, signal?: AbortSignal, onlineOnly = false) {
   const params = new URLSearchParams({ name: filters.name, application: filters.system, maintainer: filters.maintainer, page: String(page), page_size: '10' })
+  if (onlineOnly) params.set('online_only', 'true')
   if (filters.classId) params.set('class_id', filters.classId)
   const result = await request<{ items: CatalogRow[]; total: number; pages: number; page: number }>(`/skills/catalog/list-skills?${params}`, { signal })
   return { ...result, items: result.items.map(map) }

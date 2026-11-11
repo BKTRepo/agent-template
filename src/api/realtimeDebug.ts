@@ -108,18 +108,19 @@ export async function mountedDebugFiles(item: Implementation): Promise<File[]> {
 }
 
 function resultDocumentUrl(runId: string, document: RealtimeDocument) {
-  const expectedPath = `${base}/runs/${encodeURIComponent(runId)}/document`
+  const expectedPath = `${base}/runs/document`
   const separator = document.download_url.indexOf('?')
   const path = separator < 0 ? document.download_url : document.download_url.slice(0, separator)
   const query = separator < 0 ? '' : document.download_url.slice(separator + 1)
   if (path !== expectedPath) throw new Error(`结果文档“${document.filename}”的下载地址不属于当前任务。`)
+  if (new URLSearchParams(query).get('run_id') !== runId) throw new Error('结果文档下载地址的任务编号不匹配。')
   const filename = new URLSearchParams(query).get('filename')
   if (!filename || filename !== document.filename) throw new Error(`结果文档“${document.filename}”的下载地址缺少匹配的 filename。`)
   return document.download_url
 }
 
 export async function downloadRealtimeDocument(runId: string, skillName: string, signal?: AbortSignal, document?: RealtimeDocument) {
-  const path = document ? resultDocumentUrl(runId, document) : `${base}/runs/${encodeURIComponent(runId)}/document`
+  const path = document ? resultDocumentUrl(runId, document) : `${base}/runs/document?${new URLSearchParams({ run_id: runId })}`
   const response = await authFetch(path, { headers: authHeaders(), signal, cache: 'no-store' })
   if (!response.ok) throw new Error(await errorMessage(response, '调试结果文档下载失败，请重试下载。'))
   const type = response.headers.get('content-type') ?? ''
@@ -182,13 +183,13 @@ async function taskResponse(response: Response, skillId: string): Promise<Realti
 }
 
 export async function getRealtimeRun(skillId: string, runId: string, signal?: AbortSignal) {
-  const response = await authFetch(`${base}/runs/${encodeURIComponent(runId)}`, { headers: authHeaders(), signal, cache: 'no-store' })
+  const response = await authFetch(`${base}/runs/get?${new URLSearchParams({ run_id: runId })}`, { headers: authHeaders(), signal, cache: 'no-store' })
   const task = await taskResponse(response, skillId)
   if (task.run_id !== runId) throw new Error('调试接口返回了其他任务编号，已停止处理。')
   return task
 }
 export async function getLatestRealtimeRun(skillId: string, signal?: AbortSignal) {
-  const response = await authFetch(`${base}/skills/${encodeURIComponent(skillId)}/latest-run`, { headers: authHeaders(), signal, cache: 'no-store' })
+  const response = await authFetch(`${base}/skills/latest-run?${new URLSearchParams({ skill_id: skillId })}`, { headers: authHeaders(), signal, cache: 'no-store' })
   if (response.status === 404) return null
   return taskResponse(response, skillId)
 }

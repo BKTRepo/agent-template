@@ -1,3 +1,4 @@
+import { useAssistantPageObject } from '@/stores/assistantContextStore'
 import { useEffect, useState } from 'react'
 import { ArrowRight, Plus } from 'lucide-react'
 import Dialog from '@/components/developer/Dialog'
@@ -37,6 +38,7 @@ export default function KnowledgePage() {
   const [historyId, setHistoryId] = useState<string>()
   const [mountId, setMountId] = useState<string>()
   const [preview, setPreview] = useState<{kb: KnowledgeBase; id: string}>()
+  useAssistantPageObject('knowledge', 'knowledge_base', detailId || editing || historyId || mountId)
   const [uploads, setUploads] = useState<{ id: string; file: File }[]>([])
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [message, setMessage] = useState('')

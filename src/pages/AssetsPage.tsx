@@ -1,3 +1,4 @@
+import { useAssistantPageObject } from '@/stores/assistantContextStore'
 import { useEffect, useState } from 'react'
 import { LayoutGrid, Layers3, Trash2, List, Code2, Database, FileText, Target, CheckCircle2 } from 'lucide-react'
 import { changeAssetState, downloadAsset, exportAssets, getAsset, getAssetOverview, listAssets, type AssetAction, type AssetOverview, type AssetPageResult } from '@/api/assets'
@@ -23,6 +24,7 @@ export default function AssetsPage() {
   const [selected, setSelected] = useState<number[]>([])
   const [preview, setPreview] = useState<number>()
   const [pending, setPending] = useState<{ ids: number[]; action: AssetAction }>()
+  useAssistantPageObject('assets', 'asset', preview)
   const [refresh, setRefresh] = useState(0)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -103,7 +105,7 @@ export default function AssetsPage() {
         <button className="button primary" disabled={busy}>搜索</button><button type="button" className="button" disabled={busy} onClick={reset}>重置</button>
       </form>}
       {selected.length > 0 && <div className="asset-bulk"><span>已选 {selected.length} 项</span>
-        {!recycle && <button className="button small" disabled={locked} onClick={() => void run(() => exportAssets(selected))}>导出清单</button>}
+        {!recycle && <button className="button small" disabled={locked} onClick={() => void run(() => exportAssets(selected))}>批量导出</button>}
         <button className="button small" disabled={locked || selectedForChange.length !== selected.length}
           onClick={() => setPending({ ids: selectedForChange, action: recycle ? 'restore' : 'move' })}>{recycle ? '恢复' : '移入回收站'}</button>
         {recycle && <button className="button small" disabled={locked} onClick={() => setPending({ ids: selected, action: 'delete' })}>彻底删除</button>}
@@ -125,7 +127,7 @@ export default function AssetsPage() {
             <td><input type="checkbox" aria-label={`选择 ${row.name}`} disabled={locked} checked={selected.includes(row.id)}
               onChange={event => setSelected(previous => event.target.checked ? [...previous, row.id] : previous.filter(id => id !== row.id))} /></td>
             <td>{recycle ? row.name : <button className="asset-text-button" onClick={() => setPreview(row.id)}>{row.name}</button>}</td>
-            <td>{row.class_name}</td><td>—</td><td>{applications[row.application_identify] || row.application_identify}</td><td>{row.creator_name}</td>
+            <td>{row.class_name}</td><td>{row.content_quantity}</td><td>{applications[row.application_identify] || row.application_identify}</td><td>{row.creator_name}</td>
             {recycle ? <><td>{formatTime(row.deleted_at!)}</td><td>{formatTime(row.restore_until!)}</td></> : <td>{formatTime(row.created_time)}</td>}
             <td><div className="asset-row-actions">{recycle ? <>
               <button className="button small" disabled={locked} onClick={() => setPending({ ids: [row.id], action: 'restore' })}>恢复</button>

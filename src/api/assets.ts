@@ -6,7 +6,7 @@ import type { TestCase } from '@/types/assistantArtifact'
 const root = '/api/assets'
 
 export interface AssetRow {
-  id: number; name: string; skill_classes_id: number; class_name: string
+  id: number; name: string; skill_classes_id: number; class_name: string; content_quantity: string
   application_identify: string; creator_name: string; visibility: 'private' | 'platform'; can_manage: boolean
   created_time: string; deleted_at: string | null; restore_until: string | null
 }
@@ -79,7 +79,7 @@ export async function downloadAsset(assetId: number, file: AssetFile) {
 }
 
 export async function exportAssets(ids: number[]) {
-  downloadBlob(await binary('/export', post({ asset_ids: ids })), '资产清单.csv')
+  downloadBlob(await binary('/export', post({ asset_ids: ids })), '资产原文件.zip')
 }
 
 const assetActions = { move: '/move-to-recycle-bin', restore: '/restore', delete: '/delete-recycled' } as const

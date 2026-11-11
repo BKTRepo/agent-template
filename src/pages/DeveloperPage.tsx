@@ -1,3 +1,4 @@
+import { useAssistantPageObject } from '@/stores/assistantContextStore'
 import { useEffect, useRef, useState } from 'react'
 import { ArrowRight, Check, LoaderCircle, Plus, RefreshCw, Sparkles } from 'lucide-react'
 import Dialog from '@/components/developer/Dialog'
@@ -48,6 +49,7 @@ export default function DeveloperPage() {
   const [draftDeletePrompt, setDraftDeletePrompt] = useState(false)
   const [debugSavePrompt, setDebugSavePrompt] = useState(false)
   const formDirty = useRef(false)
+  useAssistantPageObject('developer', 'skill', panel ? selectedId : undefined)
   const record = implementations.find(item => item.id === selectedId)
   const selected = record ? { ...record, ...preview } : undefined
   // 列表接口已按当前登录人过滤，服务端负责最终的本人编辑权限校验。

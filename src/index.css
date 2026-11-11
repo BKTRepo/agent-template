@@ -719,3 +719,12 @@ h1,h2,h3,p { margin:0; }
 .aip-session-drawer article { padding:7px 8px; }
 .aip-session-drawer article.active { box-shadow:inset 2px 0 0 #1677ff; }
 @keyframes aip-breathe { 0%,100% { transform:translateY(0) scale(1); } 50% { transform:translateY(-1px) scale(1.035); } }
+
+/* Assistant controls share the existing message/session layout. */
+.aip-resize-handle { position:absolute; left:0; top:0; width:16px; height:16px; z-index:6; border:0; color:#7a8ba3; background:transparent; cursor:nw-resize; font-size:12px; }
+.aip-session-tools { flex-shrink:0; padding:8px 12px; border-bottom:1px solid #e4ecf7; }
+.aip-session-tools input { width:100%; min-width:0; margin-bottom:6px; }
+.aip-session-select { display:block; width:100%; padding:0; border:0; background:transparent; text-align:left; cursor:pointer; }
+.aip-session-drawer .delete { opacity:1; }
+.assistant-owned-dialog .artifact-case-editor label input[type=radio] { width:auto; margin-right:8px; }
+.assistant-owned-dialog>div>label { display:block; margin:12px 0; }

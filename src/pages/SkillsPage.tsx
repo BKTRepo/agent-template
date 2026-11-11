@@ -1,3 +1,4 @@
+import { useAssistantPageObject } from '@/stores/assistantContextStore'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import SkillCatalogGroup from '@/components/skills/SkillCatalogGroup'
 import Dialog from '@/components/developer/Dialog'
@@ -26,6 +27,7 @@ export default function SkillsPage() {
   const [detail, setDetail] = useState<Implementation | null>(null)
   const [classDetail, setClassDetail] = useState<ClassDefinition | null>(null)
   const [debugItem, setDebugItem] = useState<Implementation | null>(null)
+  useAssistantPageObject('skills', 'skill', detail?.id || debugItem?.id)
   const [busy, setBusy] = useState<string>()
   const [error, setError] = useState('')
   const generation = useRef(0)

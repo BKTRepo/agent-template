@@ -49,9 +49,10 @@ export function toKnowledge(row: ServerKnowledge): KnowledgeBase {
 export const KNOWLEDGE_PAGE_SIZE = 10
 export interface KnowledgeFilters { application: string; maintainer: string }
 export const emptyKnowledgeFilters: KnowledgeFilters = { application: '', maintainer: '' }
-export async function listKnowledgeBasesPage(page = 1, search = '', signal?: AbortSignal, filters: Partial<KnowledgeFilters> = {}) {
+export async function listKnowledgeBasesPage(page = 1, search = '', signal?: AbortSignal, filters: Partial<KnowledgeFilters> = {}, readyOnly = false) {
   const requestedPage = Math.max(1, Math.floor(page))
   const params = new URLSearchParams({ search: search.trim(), offset: String((requestedPage - 1) * KNOWLEDGE_PAGE_SIZE), limit: String(KNOWLEDGE_PAGE_SIZE) })
+  if (readyOnly) params.set('ready_only', 'true')
   if (filters.application?.trim()) params.set('application', filters.application.trim())
   if (filters.maintainer?.trim()) params.set('maintainer', filters.maintainer.trim())
   const result = await knowledgeRequest<ServerKnowledge[]>(`/knowledge-bases/list?${params}`, { signal })

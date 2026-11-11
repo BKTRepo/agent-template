@@ -18,6 +18,7 @@ export interface TestCase {
 }
 
 export interface TestCaseArtifact extends ArtifactFile {
+  groupingError?: string
   editor: 'cases'
   cases: TestCase[]
   groups: { title: string; caseIds: string[] }[]
@@ -37,7 +38,8 @@ export interface SheetInfo { index: number; name: string; rows: number; columns:
 export interface SheetArtifact extends ArtifactFile { editor: 'sheet'; sheets: SheetInfo[] }
 export interface TextArtifact extends ArtifactFile { editor: 'text'; text: string; encoding: string }
 export type OrdinaryArtifact = WordArtifact | SheetArtifact | TextArtifact
-export type AssistantArtifact = TestCaseArtifact | OrdinaryArtifact
+export interface DownloadArtifact extends ArtifactFile { editor: 'download' }
+export type AssistantArtifact = TestCaseArtifact | OrdinaryArtifact | DownloadArtifact
 
 export type CellValue = string | number | boolean | null
 export type EditableCellType = 'text' | 'number' | 'boolean' | 'formula' | 'blank'
