@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import sys
+from contextlib import suppress
 from contextlib import asynccontextmanager
 
 # 云 MySQL 要求 TLS。asyncmy 在 Windows 的 ProactorEventLoop 下执行 TLS
@@ -37,12 +38,16 @@ except ImportError:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     online_debug_scheduler = None
+    chat_cleanup_task = None
     try:
         try:
             await register_database(app)
         except DBConnectionError as exc:
             raise RuntimeError(f"数据库连接失败，请检查连接配置: {exc}") from exc
         await init_database_table(app)
+
+        from applications.chat.services.cleanup import cleanup_loop
+        chat_cleanup_task = asyncio.create_task(cleanup_loop(), name="chat-cleanup")
 
         for route in app.routes:
             if isinstance(route, APIRoute):
@@ -53,8 +58,16 @@ async def lifespan(app: FastAPI):
         online_debug_scheduler.start()
         yield
     finally:
+        from applications.chat.services.model_health import close_health_cache
+        from applications.chat.services.history_files import close_history_workers
+        await close_health_cache()
+        if chat_cleanup_task is not None:
+            chat_cleanup_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await chat_cleanup_task
         if online_debug_scheduler is not None:
             online_debug_scheduler.shutdown(wait=False)
+        await close_history_workers()
         await Tortoise.close_connections()
 
 

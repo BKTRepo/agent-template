@@ -5,7 +5,7 @@
 """
 import asyncio
 import sys
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -24,6 +24,7 @@ async def lifespan(app):
     if PROJECT_CONFIG.aerich_should_run_on_startup:
         raise RuntimeError("完整项目本地启动要求关闭 DATABASE_AUTO_MIGRATION")
     online_debug_scheduler = None
+    chat_cleanup_task = None
     try:
         await Tortoise.init(config={
             "connections": wrq_connections(PROJECT_CONFIG.DATABASE_CONNECTIONS),
@@ -54,9 +55,19 @@ async def lifespan(app):
         online_debug_scheduler = create_online_debug_cleanup_scheduler()
         register_asset_cleanup(online_debug_scheduler)
         online_debug_scheduler.start()
+        from applications.chat.services.cleanup import cleanup_loop
+        chat_cleanup_task = asyncio.create_task(cleanup_loop(), name="chat-cleanup")
         yield
     finally:
         try:
+            if chat_cleanup_task is not None:
+                chat_cleanup_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await chat_cleanup_task
+            from applications.chat.services.model_health import close_health_cache
+            from applications.chat.services.history_files import close_history_workers
+            await close_health_cache()
+            await close_history_workers()
             if online_debug_scheduler is not None:
                 online_debug_scheduler.shutdown(wait=False)
         finally:

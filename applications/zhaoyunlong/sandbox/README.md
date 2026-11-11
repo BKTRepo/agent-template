@@ -18,6 +18,10 @@ applications/zhaoyunlong/sandbox_results/
 
 模型执行默认不设时长上限，容器会等待模型自然结束。若生产运维需要兜底保护，可设置 `ZHAOYUNLONG_SANDBOX_TIMEOUT_SECONDS` 为正数秒数；设置为 `0` 或不设置时表示无限等待。
 
+## 模型网关
+
+在线调试沙箱与悬浮对话台共用项目 `.env` 中的模型网关配置。`CHAT_GATEWAY_MODE=direct`（默认）使用 `ANTHROPIC_BASE_URL`、`ANTHROPIC_API_KEY`；`CHAT_GATEWAY_MODE=ccr` 使用行内 CCR 的 `CHAT_CCR_BASE_URL`、`CHAT_CCR_AUTH_MODE`、`CHAT_CCR_API_KEY`。可通过 `CHAT_MODEL_REGISTRY` 自定义模型清单及公网、行内映射，默认模型由 `CHAT_DEFAULT_MODEL` 指定。兼容原有 `CHAT_MODEL_*` 和 `CHAT_CCR_MODEL_*` 映射，详见 [悬浮对话台模型配置](../../chat/README.md#模型配置) 与项目 `.env.example`。实际 CCR 的网络、路由、鉴权和模型功能需要在行内验证。
+
 ## 接口
 
 所有接口都需要在请求头传入登录令牌：`token: <access_token>`。

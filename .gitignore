@@ -32,6 +32,8 @@ output/knowledge-parsed/
 output/mcp-search-traces/
 output/knowledge-queue-integration/
 output/knowledge-queue-migration/
+applications/chat/chat_results/
+applications/chat/chat_history/
 output/skill-engine-verification.json
 
 docling_offline/
