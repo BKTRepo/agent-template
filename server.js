@@ -29,7 +29,7 @@ const backendRequest = backend.protocol === 'https:' ? https.request : http.requ
 const realtimeBackend = new URL(process.env.REALTIME_DEBUG_TARGET || BACKEND)
 
 // 需要反向代理到后端的路径前缀
-const PROXY_PREFIXES = ['/api', '/base', '/skills', '/overview', '/knowledge-bases', '/assistant', '/health', '/docs', '/redoc', '/openapi.json', '/swagger-assets', '/realtime-test-case-gen']
+const PROXY_PREFIXES = ['/api', '/base', '/skills', '/overview', '/knowledge-bases', '/assistant', '/health', '/chat', '/docs', '/redoc', '/openapi.json', '/swagger-assets', '/realtime-test-case-gen']
 
 // 不应逐跳转发的请求头
 const HOP_BY_HOP = new Set([

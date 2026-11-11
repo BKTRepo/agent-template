@@ -57,7 +57,7 @@ function appCssReload(): Plugin {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   // 默认将两类接口代理到同一个后端；保留各自 TARGET 变量，供确有拆分部署时覆盖。
-  const backendTarget = env.BACKEND_URL || 'http://127.0.0.1:8000'
+  const backendTarget = env.BACKEND_URL || 'http://127.0.0.1:8519'
   const platformProxy: ProxyOptions = {
     target: env.SKILL_BACKEND_TARGET || backendTarget,
     changeOrigin: true,
@@ -107,6 +107,7 @@ export default defineConfig(({ mode }) => {
     port: 5174,
     proxy: {
       '/realtime-test-case-gen': realtimeProxy,
+      '/chat': platformProxy,
       '/skills': platformProxy,
       '/overview': { target: platformProxy.target, changeOrigin: true },
       '/knowledge-bases': platformProxy,
@@ -140,6 +141,7 @@ export default defineConfig(({ mode }) => {
     port: 4173,
     proxy: {
       '/realtime-test-case-gen': realtimeProxy,
+      '/chat': platformProxy,
       '/skills': platformProxy,
       '/overview': { target: platformProxy.target, changeOrigin: true },
       '/knowledge-bases': platformProxy,
