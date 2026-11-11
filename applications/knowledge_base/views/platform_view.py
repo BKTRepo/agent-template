@@ -143,9 +143,9 @@ async def name_availability(name: str = Query(min_length=1, max_length=128), exc
 @knowledge.get("/list", summary="知识库-按名称、所属应用和维护人筛选公开及本人知识库")
 async def list_knowledge(search: str = Query('', max_length=128), offset: int = Query(0, ge=0), limit: int = Query(10, ge=1, le=10),
                          application: str = Query('', max_length=128), maintainer: str = Query('', max_length=64),
-                         current_user: User = DependAuth, service=Depends(get_knowledge_service)):
+                         ready_only: bool = False, current_user: User = DependAuth, service=Depends(get_knowledge_service)):
     try:
-        items, total = await service.list(current_user, search, offset=offset, limit=limit, application=application, maintainer=maintainer)
+        items, total = await service.list(current_user, search, offset=offset, limit=limit, application=application, maintainer=maintainer, ready_only=ready_only)
         return SuccessResponse(data=items, total=total)
     except Exception:
         LOGGER.exception("知识库查询失败")

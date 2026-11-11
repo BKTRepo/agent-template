@@ -88,7 +88,7 @@ async def create_catalog_test(data, documents, user):
             if token:
                 payload['_knowledge_token'] = token
             task = await OnlineDebugRun.create(using_db=db, skill_id=str(skill.id), run_id=data.request_id,
-                                               status='queued', debugger=(user.alias or user.username)[:64])
+                                               status='queued', debugger=(user.alias or user.username)[:64], owner_id=user.id)
             await SkillDebugRun.create(using_db=db, run_id=data.request_id, skill_id=skill.id,
                 skill_version_id=version.id, build_id=data.build_id, conversation_input=data.conversation_input,
                 request_document_count=len(documents), resource_manifest_hash=version.manifest_hash,

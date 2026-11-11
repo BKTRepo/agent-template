@@ -44,7 +44,7 @@ class OnlineDebugRunService:
             skill_id=int(payload["skill_id"]),
             run_id=run_id,
             status="queued",
-            debugger=debugger[:64],
+            debugger=debugger[:64], owner_id=owner_id,
         )
         task = asyncio.create_task(
             cls._execute(record.id, run_id, payload, owner_id),
@@ -123,6 +123,48 @@ class OnlineDebugRunService:
         return record
 
     @classmethod
+    async def authorize_record(cls, record, owner_id, is_superuser):
+        if is_superuser or record.owner_id == owner_id:
+            return record
+        if record.owner_id is None:
+            # Legacy ownership comes from trusted run metadata or an exact task association, never a display alias.
+            from applications.wrq.agent.models.agent_model import SkillDebugRun
+            from applications.user.models.user_model import User
+            owner = await User.get_or_none(id=owner_id)
+            if owner and await SkillDebugRun.filter(run_id=record.run_id, create_user_login_name=owner.username).exists():
+                return record
+            try:
+                service = OnlineDebugService()
+                metadata = await asyncio.to_thread(service._read_metadata, service.runs_dir / record.run_id)
+                if metadata.get('owner_id') == owner_id:
+                    return record
+            except OnlineDebugError:
+                pass
+        raise OnlineDebugRunNotFoundError('在线调试任务不存在或无权访问')
+
+    @classmethod
+    async def get_authorized_run(cls, run_id, owner_id, is_superuser):
+        if not re.fullmatch(r'[0-9a-f]{32}', run_id):
+            raise OnlineDebugRunNotFoundError('在线调试任务不存在或无权访问')
+        return await cls.authorize_record(await cls.get_run(run_id), owner_id, is_superuser)
+
+    @classmethod
+    async def get_authorized_latest(cls, skill_id, owner_id, is_superuser):
+        query = OnlineDebugRunModel.filter(skill_id=skill_id)
+        if is_superuser:
+            return await cls.get_latest_run(skill_id)
+        from tortoise.expressions import Q, Subquery
+        from applications.user.models.user_model import User
+        from applications.wrq.agent.models.agent_model import SkillDebugRun
+        owner = await User.get(id=owner_id)
+        legacy = SkillDebugRun.filter(create_user_login_name=owner.username).values('run_id')
+        query = query.filter(Q(owner_id=owner_id) | (Q(owner_id__isnull=True) & Q(run_id__in=Subquery(legacy))))
+        record = await query.order_by('-id').first()
+        if record is None:
+            raise OnlineDebugRunNotFoundError('该技能暂无可访问的调试任务')
+        return await cls.authorize_record(record, owner_id, is_superuser)
+
+    @classmethod
     async def get_document_path(
         cls,
         run_id: str,
@@ -131,7 +173,7 @@ class OnlineDebugRunService:
         filename: str | None = None,
     ) -> tuple[Path, str, str]:
         """校验任务状态、权限和有效期后返回指定结果文件路径。"""
-        record = await cls.get_run(run_id)
+        record = await cls.get_authorized_run(run_id, owner_id, is_superuser)
         if record.status != "completed":
             raise OnlineDebugError("调试任务尚未完成，暂不能下载结果文档")
         # 使用与数据库过期时间一致的时区，兼容带时区及不带时区的时间。

@@ -4,6 +4,9 @@ import asyncio
 import json
 import shutil
 import socket
+from pydantic import ValidationError
+from applications.chat.schemas.chat_schema import PageContext
+from applications.chat.services.page_context import resolve_page_context, request_snapshots
 from datetime import datetime
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
@@ -25,6 +28,7 @@ from services.model_gateway import configured_model_registry, model_ids
 from applications.user.models.user_model import User
 from core.responses import SuccessResponse
 from services import DependAuth
+from applications.conversation.services.artifact_source import artifact_reference
 
 chat_router = APIRouter()
 
@@ -81,7 +85,30 @@ async def list_messages(conversation_id: str, before_id: int | None = Query(None
         rows = [event['data'] for event in events if event.get('type') == 'message']
         if before_id is not None:
             rows = [row for row in rows if row['id'] < before_id]
-        return SuccessResponse(data=rows[-limit:])
+        visible = rows[-limit:]
+        tasks = await ChatTask.filter(conversation_id=conversation.id, generation=conversation.generation,
+            status="success", assistant_message_id__in=[row["id"] for row in visible])
+        by_task = {task.id: task.assistant_message_id for task in tasks}
+        artifacts = {}
+        for item in await ChatArtifact.filter(task_id__in=list(by_task)).order_by("id"):
+            artifacts.setdefault(by_task[item.task_id], []).append(artifact_reference(item))
+        all_tasks = await ChatTask.filter(conversation_id=conversation.id, generation=conversation.generation).order_by('id')
+        task_by_message = {}
+        for task in all_tasks:
+            task_by_message.setdefault(task.user_message_id, task)
+            task_by_message[task.assistant_message_id] = task
+        feedback = {item.message_id: item for item in await ChatFeedback.filter(user_id=user.id, message_id__in=[row['id'] for row in visible])}
+        snapshots = request_snapshots(events, conversation.generation)
+        data = []
+        for row in visible:
+            task = task_by_message.get(row['id'])
+            vote = feedback.get(row['id'])
+            snapshot = snapshots.get(task.id, {}) if task else {}
+            data.append({**row, 'artifacts': artifacts.get(row['id'], []), 'task_id': task.id if task else None,
+                'task_status': task.status if task else None, 'feedback': vote.rating if vote else None,
+                'feedback_reason': vote.reason if vote else None, 'context': snapshot.get('context'),
+                'attachments': snapshot.get('attachments', []) if row['role'] == 'user' else []})
+        return SuccessResponse(data=data)
     raise HTTPException(503, '会话文件不存在，无法读取消息')
 
 
@@ -232,25 +259,41 @@ async def count_failures(limit: int = Query(50, ge=1, le=100), user: User = Depe
 
 @chat_router.post('/send', summary='悬浮窗-发送消息')
 async def send(body: SendInput, user: User = DependAuth):
-    return await submit_message(body.conversation_id, body.content, body.model, user)
+    return await submit_message(body.conversation_id, body.content, body.model, user, context=body.context, source_task_id=body.source_task_id)
 
 
 @chat_router.post('/send-with-files', summary='悬浮窗-发送消息和临时附件')
 async def send_with_files(conversation_id: str = Form(..., min_length=1, max_length=64),
                           content: str = Form('', max_length=40000),
                           model: str | None = Form(None, max_length=128),
-                          files: list[UploadFile] = File(...), user: User = DependAuth):
+                          files: list[UploadFile] = File(...), context: str | None = Form(None), source_task_id: int | None = Form(None, gt=0), user: User = DependAuth):
     original = await require_conversation(conversation_id, user.id)
+    try:
+        parsed_context = PageContext.model_validate_json(context) if context else None
+    except ValidationError:
+        raise HTTPException(422, '页面上下文格式不正确') from None
     directory = await save_uploads(files)
-    return await submit_message(conversation_id, content, model, user, directory, original.generation)
+    return await submit_message(conversation_id, content, model, user, directory, original.generation,
+                                context=parsed_context, source_task_id=source_task_id)
 
 
-async def submit_message(conversation_id, content, selected_model, user, directory=None, expected_generation=None):
+async def submit_message(conversation_id, content, selected_model, user, directory=None, expected_generation=None, *, context=None, source_task_id=None):
     content = content.strip()
     if not content and not directory:
         raise HTTPException(400, '消息和附件不能同时为空')
     adopted = None
     try:
+        page_context = await resolve_page_context(context, user)
+        source_snapshot = None
+        if source_task_id:
+            source = await require_task(source_task_id, user)
+            source_events = await asyncio.to_thread(history_store().read, user.id, source.conversation_id)
+            source_snapshot = request_snapshots(source_events, source.generation).get(source.id)
+            if not source_snapshot:
+                raise HTTPException(409, '原请求缺少上下文快照，请重新选择资源发送')
+            page_context = source_snapshot.get('context')
+            if page_context:
+                await resolve_page_context(PageContext.model_validate(page_context), user)
         async with in_transaction() as conn:
             conversation = await require_conversation(conversation_id, user.id, connection=conn)
             if expected_generation is not None and conversation.generation != expected_generation:
@@ -281,6 +324,13 @@ async def submit_message(conversation_id, content, selected_model, user, directo
             task = await ChatTask.create(conversation_id=conversation.id, generation=conversation.generation,
                                          user_message_id=message.id, assistant_message_id=assistant.id,
                                          model=model, worker_host=socket.gethostname() if directory else None, using_db=conn)
+            snapshot = source_snapshot or {'context': page_context, 'skills': list(conversation.skills or []),
+                                            'knowledge_bases': list(conversation.knowledge_bases or [])}
+            snapshot = {**snapshot, 'attachments': [file.name for file in directory.glob('*/*')] if directory else []}
+            from applications.wrq.models.overview_event_model import OverviewEvent
+            await OverviewEvent.get_or_create(event_key=f'chat:{task.id}', using_db=conn, defaults={'kind': 'chat_request', 'occurred_at': datetime.now(), 'operator_login_name': user.username, 'data': {'task_id': task.id, 'user_id': user.id, 'username': user.alias or user.username}})
+            await write_history_events(user.id, conversation.id, [{'type': 'request_snapshot',
+                'generation': conversation.generation, 'task_id': task.id, 'data': snapshot}])
             if directory:
                 target = task_upload_dir(task.id)
                 if target.exists():
@@ -308,16 +358,19 @@ async def require_task(task_id, user):
     return task
 
 
-async def task_data(task):
+async def task_data(task, contents=None):
     message = await ChatMessage.get_or_none(id=task.assistant_message_id)
     conversation = await ChatConversation.get(id=task.conversation_id)
-    contents = await asyncio.to_thread(history_store().message_contents, conversation.user_id, conversation.id, task.generation)
+    if contents is None:
+        contents = await asyncio.to_thread(history_store().message_contents, conversation.user_id, conversation.id, task.generation)
     duration = None
     if task.started_at and task.finished_at:
         duration = max(0, round((task.finished_at - task.started_at).total_seconds() * 1000))
     return {'task_id': task.id, 'status': task.status, 'message_id': task.assistant_message_id,
             'content': contents.get(message.id, '') if message else '', 'model': task.model,
-            'error': task.error, 'duration_ms': duration}
+            'error': task.error, 'duration_ms': duration,
+            'artifacts': [artifact_reference(item) for item in
+                await ChatArtifact.filter(task_id=task.id).order_by('id')] if task.status == 'success' else []}
 
 
 @chat_router.get('/task', summary='悬浮窗-任务状态')
@@ -380,15 +433,13 @@ async def retry_task(old, user, directory=None):
         async with in_transaction() as conn:
             conversation = await require_conversation(old.conversation_id, user.id, connection=conn)
             latest = await ChatTask.filter(conversation_id=conversation.id, generation=conversation.generation).using_db(conn).order_by('-id').first()
-            if not latest or latest.id != old.id or old.status not in ('success', 'failed', 'cancelled'):
-                raise HTTPException(409, '只能重试已结束的最新一次回复')
+            if old.status not in ('success', 'failed', 'cancelled') or (latest and latest.status in ('pending', 'running', 'cancelling', 'recovering')):
+                raise HTTPException(409, '请等待当前会话任务结束后再重试')
             original_message = await ChatMessage.filter(id=old.user_message_id).using_db(conn).first()
             contents = await asyncio.to_thread(history_store().message_contents, user.id, conversation.id, conversation.generation)
             if not directory and (not original_message or not contents.get(original_message.id, '').strip()):
                 raise HTTPException(400, '原消息没有文本，请重新上传附件重试')
-            # 原回复从对话中移除，防止重试后再次进入模型上下文。
-            if old.assistant_message_id:
-                await ChatMessage.filter(id=old.assistant_message_id).using_db(conn).delete()
+            # Preserve the original request and response for history/traceability.
             assistant = await ChatMessage.create(conversation_id=conversation.id, generation=conversation.generation,
                                                  role='assistant', using_db=conn)
             await write_history_events(user.id, conversation.id, [
@@ -397,6 +448,14 @@ async def retry_task(old, user, directory=None):
                 user_message_id=old.user_message_id, assistant_message_id=assistant.id,
                 retry_of_task_id=old.id, model=old.model,
                 worker_host=socket.gethostname() if directory else None, using_db=conn)
+            events = await asyncio.to_thread(history_store().read, user.id, conversation.id)
+            snapshot = request_snapshots(events, conversation.generation).get(old.id,
+                {'context': None, 'skills': list(conversation.skills or []), 'knowledge_bases': list(conversation.knowledge_bases or [])})
+            snapshot = {**snapshot, 'attachments': [file.name for file in directory.glob('*/*')] if directory else []}
+            from applications.wrq.models.overview_event_model import OverviewEvent
+            await OverviewEvent.get_or_create(event_key=f'chat:{task.id}', using_db=conn, defaults={'kind': 'chat_request', 'occurred_at': datetime.now(), 'operator_login_name': user.username, 'data': {'task_id': task.id, 'user_id': user.id, 'username': user.alias or user.username}})
+            await write_history_events(user.id, conversation.id, [{'type': 'request_snapshot',
+                'generation': conversation.generation, 'task_id': task.id, 'data': snapshot}])
             if directory:
                 target = task_upload_dir(task.id)
                 if target.exists():
@@ -414,3 +473,21 @@ async def retry_task(old, user, directory=None):
     schedule_history(user.id, conversation.id)
     return SuccessResponse(data={'task_id': task.id, 'message_id': assistant.id, 'status': task.status,
                                  'attachments_supplied': bool(directory)})
+
+
+@chat_router.get('/tasks', summary='悬浮窗-当前用户的后台任务及最近结果')
+async def list_tasks(user: User = DependAuth):
+    from tortoise.expressions import F
+    rows = await ChatTask.filter(conversation__user_id=user.id, conversation__state=0,
+        generation=F('conversation__generation')).order_by('-id').limit(100)
+    data, contents_by_conversation = [], {}
+    for row in rows:
+        key = (row.conversation_id, row.generation)
+        if key not in contents_by_conversation:
+            try:
+                contents_by_conversation[key] = await asyncio.to_thread(history_store().message_contents, user.id, row.conversation_id, row.generation)
+            except (OSError, ValueError):
+                contents_by_conversation[key] = {}
+        item = await task_data(row, contents_by_conversation[key])
+        data.append({**item, 'conversation_id': row.conversation_id})
+    return SuccessResponse(data=data)

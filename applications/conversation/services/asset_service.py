@@ -46,8 +46,17 @@ async def overview(user):
 async def serialize(rows, user):
     classes = await DeveloperSkillClass.in_bulk({row.skill_classes_id for row in rows})
     owners = await User.in_bulk({row.created_by for row in rows})
+    from .asset_quantity import content_quantity
+    quantities = {}
+    files = await AssetFile.filter(asset_id__in=[row.id for row in rows])
+    for row in rows:
+        try:
+            quantities[row.id] = await run_in_threadpool(content_quantity,
+                [file for file in files if file.asset_id == row.id], row.skill_classes_id, storage_path)
+        except Exception:
+            quantities[row.id] = '统计失败'
     return [{
-        "id": row.id, "name": row.name, "skill_classes_id": row.skill_classes_id,
+        "content_quantity": quantities[row.id], "id": row.id, "name": row.name, "skill_classes_id": row.skill_classes_id,
         "class_name": classes[row.skill_classes_id].name if row.skill_classes_id in classes else "历史技能类",
         "application_identify": row.application_identify,
         "creator_name": owners[row.created_by].alias if row.created_by in owners else "历史用户",
@@ -120,7 +129,7 @@ async def archive(user, data):
         await validate_application_async(data.application_identify)
     except ValueError as exc:
         raise ConversationBusinessError("请选择目录中的所属应用") from exc
-    source = await run_in_threadpool(source_snapshot, user.id, data.artifact_id, data.base_hash)
+    source = await source_snapshot(user.id, data.artifact_id, data.base_hash)
     key = uuid4().hex + Path(source.filename).suffix.lower()
     target = asset_root() / key
     try:

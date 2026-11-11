@@ -1,5 +1,7 @@
-import csv
-from io import StringIO
+import tempfile
+import zipfile
+import re
+from starlette.background import BackgroundTask
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Literal
@@ -199,18 +201,34 @@ async def download(asset_id: int = Query(..., gt=0), file_id: int = Query(..., g
     return FileResponse(path, filename=file.file_name, media_type="application/octet-stream", headers=PRIVATE)
 
 
-@asset_router.post("/export", summary="资产管理-导出所选资产清单")
+@asset_router.post("/export", summary="资产管理-打包导出所选资产原文件")
 async def export(data: AssetSelection, current_user=DependAuth):
     rows = await service.visible_assets(current_user).filter(id__in=data.asset_ids).order_by("id")
     if len(rows) != len(data.asset_ids):
         raise ConversationBusinessError("资产不存在或无权访问")
-    stream = StringIO(newline="")
-    writer = csv.writer(stream)
-    writer.writerow(["资产编号", "资产名称", "技能大类", "所属应用标识", "创建人", "创建时间"])
-    for row in await service.serialize(rows, current_user):
-        values = [row[key] for key in ("id", "name", "class_name", "application_identify", "creator_name", "created_time")]
-        writer.writerow(["'" + value if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")) else value
-                         for value in values])
-    return Response(stream.getvalue().encode("utf-8-sig"), media_type="text/csv", headers={
-        **PRIVATE, "Content-Disposition": f"attachment; filename*=UTF-8''{quote('资产清单.csv')}",
-    })
+    files = await AssetFile.filter(asset_id__in=data.asset_ids).order_by('asset_id', 'id')
+    if not files or sum(file.size_bytes for file in files) > 200 * 1024 * 1024:
+        raise ConversationBusinessError("请选择有文件且合计不超过200MB的资产")
+    def package():
+        directory = service.asset_root() / '.exports'
+        directory.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=directory, suffix='.zip', delete=False) as temporary:
+            target = Path(temporary.name)
+        try:
+            with zipfile.ZipFile(target, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+                for file in files:
+                    name = re.sub(r'[\\/\x00-\x1f\x7f]', '_', file.file_name)
+                    archive.write(service.storage_path(file.storage_key), f'{file.asset_id}/{file.id}-{name}')
+            return target
+        except Exception:
+            target.unlink(missing_ok=True)
+            raise
+    target = await run_in_threadpool(package)
+    try:
+        if await service.visible_assets(current_user).filter(id__in=data.asset_ids).count() != len(data.asset_ids):
+            raise ConversationBusinessError("资产权限或状态已变化，请重新选择")
+        return FileResponse(target, filename='资产原文件.zip', media_type='application/zip', headers=PRIVATE,
+                            background=BackgroundTask(target.unlink, missing_ok=True))
+    except BaseException:
+        target.unlink(missing_ok=True)
+        raise

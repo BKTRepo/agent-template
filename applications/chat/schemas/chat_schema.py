@@ -31,7 +31,15 @@ class FeedbackInput(BaseModel):
     reason: str | None = Field(default=None, max_length=2000)
 
 
+class PageContext(BaseModel):
+    module: Literal['overview', 'skills', 'developer', 'knowledge', 'assets', 'workflow', 'mcp']
+    object_type: Literal['skill', 'knowledge_base', 'asset'] | None = None
+    object_id: int | None = Field(default=None, gt=0)
+
+
 class SendInput(ConversationId):
+    context: PageContext | None = None
+    source_task_id: int | None = Field(default=None, gt=0)
     content: str = Field(min_length=1, max_length=40000)
     model: str | None = Field(default=None, max_length=128)
 

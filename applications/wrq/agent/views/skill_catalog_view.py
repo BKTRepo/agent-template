@@ -46,9 +46,9 @@ async def class_detail(class_id: int = Query(..., ge=1), current_user=DependAuth
 @skill_catalog.get('/catalog/list-skills', summary='技能中心-分页筛选已上线及已下线的发布实现')
 async def list_skills(name: str = Query('', max_length=128), class_id: int | None = Query(None, ge=1),
                       application: str = Query('', max_length=100), maintainer: str = Query('', max_length=10),
-                      page: int = Query(1, ge=1), page_size: int = Query(10, ge=1, le=10), current_user=DependAuth):
+                      page: int = Query(1, ge=1), page_size: int = Query(10, ge=1, le=10), online_only: bool = False, current_user=DependAuth):
     return success(await catalog.list(name=name, class_id=class_id, application=application,
-                                      maintainer=maintainer, page=page, page_size=page_size))
+                                      maintainer=maintainer, page=page, page_size=page_size, online_only=online_only))
 
 
 @skill_catalog.get('/catalog/get-skill', summary='技能中心-查询实现发布版本详情')

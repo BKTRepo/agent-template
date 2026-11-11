@@ -333,6 +333,11 @@ class DeveloperSkillCrud:
             return skill
 
     async def record_debug_result(self,skill_id,user,data):
+        from applications.zhaoyunlong.services.online_debug_run_service import OnlineDebugRunService, OnlineDebugRunNotFoundError
+        try:
+            await OnlineDebugRunService.get_authorized_run(data.run_id, int(user.id), bool(user.is_superuser))
+        except OnlineDebugRunNotFoundError as exc:
+            raise DeveloperError('调试任务不存在或无权访问', 404) from exc
         # queued/running即可登记；不相信浏览器传来的成功状态或结果文件。
         result=await self.sandbox.get(data.run_id,skill_id)
         try:

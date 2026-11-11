@@ -197,6 +197,7 @@ async def _sync_history_locked(user_id, conversation_id, conversation, rows, fee
         events.extend({'type': 'message_content', 'generation': conversation.generation,
                        'message_id': msg_id, 'content': content}
                       for msg_id, content in contents.items() if msg_id not in visible_ids)
+        events.extend(entry for entry in previous if entry.get('type') == 'request_snapshot' and entry.get('generation') == conversation.generation)
         events.extend({'type': 'feedback', 'data': {key: _json_value(value) for key, value in row.items()}} for row in feedback)
         if create:
             await asyncio.to_thread(store.ensure, user_id, conversation_id, events[0]['data'])

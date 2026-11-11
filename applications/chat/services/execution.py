@@ -41,8 +41,11 @@ def start_task(task_id):
 
 async def build_request(task, conversation):
     user = await User.get(id=conversation.user_id)
-    skills, knowledge_ids, packages = [], set(conversation.knowledge_bases or []), []
-    for skill_id in conversation.skills or []:
+    from applications.chat.services.page_context import request_snapshots
+    snapshot_events = await asyncio.to_thread(history_store().read, conversation.user_id, conversation.id)
+    snapshot = request_snapshots(snapshot_events, task.generation).get(task.id, {})
+    skills, knowledge_ids, packages = [], set(snapshot.get('knowledge_bases', conversation.knowledge_bases) or []), []
+    for skill_id in snapshot.get('skills', conversation.skills) or []:
         catalog = SkillCatalogService()
         skill, version, form = await catalog.published(skill_id, online=True)
         instructions = read_markdown(form.skill_markdown_path) if form.skill_markdown_path else form.instructions
@@ -90,7 +93,7 @@ async def build_request(task, conversation):
         messages.append({'id': row.id, 'role': row.role, 'content': content})
         remaining -= len(content)
     metadata = next((entry['data'] for entry in events if entry.get('type') == 'created'), {})
-    return {'model': task.model, 'skills': skills, 'knowledge': knowledge, 'messages': list(reversed(messages)),
+    return {'page_context': snapshot.get('context'), 'model': task.model, 'skills': skills, 'knowledge': knowledge, 'messages': list(reversed(messages)),
             'summary': metadata.get('summary') or '', 'older_messages': list(reversed(older))}, packages
 
 
@@ -148,7 +151,9 @@ async def _read_events(process, task, assistant_id, skill_ids, user_id):
         elif event.get('type') == 'skill_call' and event.get('skill_id') in skill_ids:
             call_id = event.get('call_id')
             if isinstance(call_id, str) and len(call_id) <= 64:
-                record, _ = await ChatSkillCall.get_or_create(call_id=call_id, defaults={'task_id': task.id, 'skill_id': event['skill_id']})
+                owner = await User.get(id=user_id)
+                invoked = await SkillCatalogService().detail(event['skill_id'])
+                record, _ = await ChatSkillCall.get_or_create(call_id=call_id, defaults={'task_id': task.id, 'skill_id': event['skill_id'], 'operator_login_name': owner.username, 'skill_name_snapshot': invoked['name']})
                 if record.task_id != task.id or record.skill_id != event['skill_id']:
                     raise RuntimeError('技能调用标识冲突')
                 process.stdin.write((json.dumps({'call_id': call_id}) + '\n').encode())
@@ -307,6 +312,7 @@ async def execute_task(task_id):
                 # 用例按 Excel 有效行统计，其他格式不能猜测条数。
                 raise RuntimeError('测试用例产物必须使用 Excel 格式')
             staged.append((filename, key, kind))
+        generated_artifact_ids = []
         async with in_transaction() as conn:
             current = await ChatConversation.filter(id=conversation.id).using_db(conn).select_for_update().first()
             running = await ChatTask.filter(id=task.id, status='running').using_db(conn).select_for_update().first()
@@ -320,11 +326,16 @@ async def execute_task(task_id):
                     {'type': 'message_content', 'generation': task.generation, 'message_id': existing.id, 'content': answer}])
                 await existing.save(using_db=conn, update_fields=['unread'])
             for filename, key, kind in staged:
-                await ChatArtifact.create(task_id=task.id, file_name=filename, storage_key=key,
+                artifact = await ChatArtifact.create(task_id=task.id, file_name=filename, storage_key=key,
                                           artifact_type=kind, using_db=conn)
+                if kind == "test_case":
+                    generated_artifact_ids.append(artifact.id)
             running.status = 'success'; running.finished_at = datetime.now()
             await running.save(using_db=conn, update_fields=['status', 'finished_at'])
             final_dir = None
+        from applications.conversation.services.artifact_case_groups import prepare_generated_case_groups
+        for artifact_id in generated_artifact_ids:
+            await prepare_generated_case_groups(artifact_id)
         schedule_history(conversation.user_id, conversation.id)
     except Exception as exc:
         LOGGER.warning('悬浮窗任务执行失败: task_id={}, type={}', task_id, type(exc).__name__)

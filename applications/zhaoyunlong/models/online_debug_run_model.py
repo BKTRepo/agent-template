@@ -11,6 +11,7 @@ class OnlineDebugRun(ScaffoldModel):
 
     id = fields.IntField(pk=True, description="数据库自增任务编号")
     # 按用户要求同步实际列类型，执行器及既有接口契约不变。
+    owner_id = fields.BigIntField(null=True, index=True, description="实际发起调试的登录用户编号")
     skill_id = fields.IntField(index=True, description="被调试技能的整数编号")
     # 对外返回的随机任务编号，用于查询状态和下载对应结果文件。
     run_id = fields.CharField(max_length=32, unique=True, index=True, description="在线调试任务编号")

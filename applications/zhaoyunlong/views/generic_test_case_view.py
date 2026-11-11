@@ -59,18 +59,18 @@ async def create_online_debug_run(
 
 
 @realtime_test_case_router.get(
-    "/runs/{run_id}",
+    "/runs/get",
     summary="查询在线调试任务状态",
     description="根据 run_id 查询任务的 queued、running、completed 或 failed 状态及结果文档信息。",
 )
 async def get_online_debug_run(
-    run_id: str,
+    run_id: str = Query(..., min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$"),
     current_user: User = DependAuth,
 ) -> dict[str, Any]:
     """【查询调试任务接口】供前端每隔一段时间轮询当前任务状态。"""
     try:
-        record = await OnlineDebugRunService.get_run(
-            run_id,
+        record = await OnlineDebugRunService.get_authorized_run(
+            run_id, int(current_user.id), bool(current_user.is_superuser),
         )
         return await OnlineDebugRunService.as_response(record)
     except OnlineDebugRunNotFoundError as exc:
@@ -78,18 +78,18 @@ async def get_online_debug_run(
 
 
 @realtime_test_case_router.get(
-    "/skills/{skill_id}/latest-run",
+    "/skills/latest-run",
     summary="查询技能最近一次在线调试任务",
     description="弹窗重新打开时，根据 skill_id 找回该技能最近一次调试的状态和结果。",
 )
 async def get_latest_online_debug_run(
-    skill_id: int,
+    skill_id: int = Query(..., gt=0),
     current_user: User = DependAuth,
 ) -> dict[str, Any]:
     """【查询技能最新任务接口】用于恢复已关闭调试弹窗的展示状态。"""
     try:
-        record = await OnlineDebugRunService.get_latest_run(
-            skill_id,
+        record = await OnlineDebugRunService.get_authorized_latest(
+            skill_id, int(current_user.id), bool(current_user.is_superuser),
         )
         return await OnlineDebugRunService.as_response(record)
     except OnlineDebugRunNotFoundError as exc:
@@ -99,12 +99,12 @@ async def get_latest_online_debug_run(
 
 
 @realtime_test_case_router.get(
-    "/runs/{run_id}/document",
+    "/runs/document",
     summary="下载在线调试结果文件",
     description="仅当调试任务 completed 时下载结果文件；多个结果时传 filename 下载指定文件。",
 )
 async def download_online_debug_document(
-    run_id: str,
+    run_id: str = Query(..., min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$"),
     filename: str | None = Query(default=None, description="多个结果文件时指定要下载的文件名"),
     current_user: User = DependAuth,
 ) -> FileResponse:

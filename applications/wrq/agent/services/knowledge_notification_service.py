@@ -46,6 +46,14 @@ async def sync_mounts(skill, previous_version_id, db):
         if not kb:
             continue
         previous = old.get(kb.id)
+        if previous is None:
+            from applications.wrq.models.overview_event_model import OverviewEvent
+            from datetime import datetime
+            await OverviewEvent.get_or_create(event_key=f'mount:{skill.current_version_id}:{kb.id}', using_db=db,
+                defaults={'kind': 'knowledge_mount', 'occurred_at': datetime.now(),
+                    'operator_login_name': skill.update_user_login_name or skill.create_user_login_name,
+                    'data': {'knowledge_base_id': kb.id, 'knowledge_base_name': kb.knowledge_name,
+                        'knowledge_base_version': next_version(kb.revision), 'target_id': skill.id, 'target_name': skill.name}})
         baseline = previous.knowledge_mount_revision if previous else None
         if baseline is None:
             baseline = kb.revision

@@ -68,7 +68,7 @@ class SkillCatalogService:
                 'description': row.description or '', 'input_schema': row.input_schema,
                 'output_schema': row.output_schema, 'template': row.template}
 
-    async def list(self, *, name='', class_id=None, application='', maintainer='', page=1, page_size=10):
+    async def list(self, *, name='', class_id=None, application='', maintainer='', page=1, page_size=10, online_only=False):
         page_size = max(1, min(page_size, 10))
         # 分类和应用取发布表单，避免当前草稿更换分类后污染目录。
         form_query = SkillForm.all()
@@ -80,6 +80,8 @@ class SkillCatalogService:
         if application:
             form_query = form_query.filter(application_paso__in=['*', application])
         query = self.visible().filter(published_version_id__in=Subquery(form_query.values('skill_version_id')))
+        if online_only:
+            query = query.filter(display_status='ONLINE')
         if maintainer:
             query = query.filter(Q(update_user_login_name=maintainer) |
                                  ((Q(update_user_login_name__isnull=True) | Q(update_user_login_name='')) & Q(create_user_login_name=maintainer)))

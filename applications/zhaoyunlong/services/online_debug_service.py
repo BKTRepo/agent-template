@@ -74,13 +74,13 @@ class OnlineDebugDocument:
 
     def as_response(self, run_id: str, expires_at: str) -> dict[str, Any]:
         """转换为前端下载文件列表中的单个文件信息。"""
-        suffix = f"/document?filename={quote(self.filename)}"
+        suffix = f"/runs/document?run_id={quote(run_id)}&filename={quote(self.filename)}"
         return {
             "filename": self.filename,
             "format": Path(self.filename).suffix.removeprefix(".").lower(),
             "size_bytes": self.size_bytes,
             "media_type": self.media_type,
-            "download_url": f"/realtime-test-case-gen/runs/{run_id}{suffix}",
+            "download_url": f"/realtime-test-case-gen{suffix}",
             "expires_at": expires_at,
         }
 

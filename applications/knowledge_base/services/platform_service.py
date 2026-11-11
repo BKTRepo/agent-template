@@ -8,7 +8,7 @@ import shutil
 
 import anyio
 from tortoise.exceptions import IntegrityError
-from tortoise.expressions import Q
+from tortoise.expressions import Q, F, Subquery
 from tortoise.transactions import in_transaction
 
 from applications.wrq.platform_catalog import validate_application_async
@@ -362,7 +362,7 @@ class KnowledgeService:
             "chunk_count": doc.chunk_count, "error_message": doc.error_message,
             "has_markdown": bool(doc.markdown), "updated_time": doc.updated_time.isoformat()}
 
-    async def list(self, user, search="", *, offset=0, limit=10, application="", maintainer=""):
+    async def list(self, user, search="", *, offset=0, limit=10, application="", maintainer="", ready_only=False):
         from applications.wrq.knowledge import knowledge_permissions
         qs = KnowledgeBase.filter(knowledge_permissions(user.id,None)['visible_filter'], state__not=1)
         if search.strip():
@@ -372,6 +372,25 @@ class KnowledgeService:
         if maintainer.strip():
             from .list_filters import matching_maintainer_ids
             qs = qs.filter(id__in=await matching_maintainer_ids(maintainer))
+        if ready_only:
+            # Conversion status can finish without the management page ever being opened.
+            from applications.knowledge_base.models.rag_document_model import RagDocument
+            from .conversion_links import sync_conversion
+            pending_docs = Document.filter(is_deleted=False, knowledge_base_id__in=Subquery(qs.values('id'))).exclude(
+                status=DocumentStatus.COMPLETED, indexed_generation=F('generation'))
+            for job in await RagDocument.filter(status__in=['complete', 'failed', 'delete_failed'],
+                    knowledge_document_id__in=Subquery(pending_docs.values('id'))):
+                await sync_conversion(job)
+            # Apply readiness before counting/paging; don't filter a single management page in the browser.
+            completed = Document.filter(is_deleted=False, status=DocumentStatus.COMPLETED)
+            unavailable = Document.filter(Q(is_deleted=False) & (Q(status__not=DocumentStatus.COMPLETED) |
+                ~Q(indexed_generation=F("generation"))))
+            cleanup_blocked = Document.filter(is_deleted=True).filter(
+                Q(status__in=[DocumentStatus.PROCESSING, DocumentStatus.DELETING, DocumentStatus.FAILED, DocumentStatus.DELETE_FAILED]) |
+                Q(deletion_retryable=False))
+            qs = qs.filter(id__in=Subquery(completed.values("knowledge_base_id"))).exclude(
+                id__in=Subquery(unavailable.values("knowledge_base_id"))).exclude(
+                id__in=Subquery(cleanup_blocked.values("knowledge_base_id")))
         total = await qs.count()
         rows = await qs.order_by("-updated_time", "-id").offset(max(0, offset)).limit(min(10, max(1, limit)))
         return [await self.detail(row.id, user) for row in rows], total

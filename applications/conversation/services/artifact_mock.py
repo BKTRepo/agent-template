@@ -12,7 +12,7 @@ from filelock import FileLock, Timeout
 from applications.conversation.exceptions import ConversationBusinessError
 from configure import PROJECT_CONFIG
 
-MAX_FILE_BYTES = 10 * 1024 * 1024
+MAX_FILE_BYTES = 20 * 1024 * 1024
 DEMO_FILES = {
     "test_cases": ("credit-card", "信用卡开户测试用例", "credit-card-cases.xlsx", "case"),
     "docx": ("report", "信用卡开户测试报告", "test-report.docx", "report"),
@@ -63,7 +63,7 @@ def read_original(path: Path) -> bytes:
     except OSError as exc:
         raise ConversationBusinessError("暂时无法读取原文件，请重试") from exc
     if len(content) > MAX_FILE_BYTES:
-        raise ConversationBusinessError("文件超过当前样例的处理上限")
+        raise ConversationBusinessError("文件超过在线处理上限")
     return content
 
 

@@ -1,4 +1,4 @@
-"""Assistant artifact endpoints backed by the opt-in shared directory mock."""
+"""Artifact preview/edit/download shared by real outputs and opt-in samples."""
 
 import json
 from hashlib import sha256
@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
 from applications.conversation.exceptions import ConversationBusinessError
+from applications.conversation.services.artifact_source import resolve_artifact
 from applications.conversation.services.artifact_case_groups import with_case_groups
 from applications.conversation.services.artifact_documents import MAX_PARAGRAPHS, ParagraphEdit, save_document
 from applications.conversation.services.artifact_formats import MAX_TEXT_LENGTH, make_demo_file, ordinary_detail, save_text
@@ -91,7 +92,7 @@ def _open_demo(artifact):
 
 @artifact_router.get("/detail", summary="产出物-读取当前文件和预览数据")
 async def detail(artifact_id: ArtifactId, current_user: User = DependAuth):
-    artifact = mock_artifact(current_user.id, artifact_id)
+    artifact = await resolve_artifact(current_user.id, artifact_id)
     metadata = await run_in_threadpool(_read_detail, artifact)
     return await _present(artifact, metadata)
 
@@ -109,22 +110,27 @@ async def _present(artifact, metadata):
 
 
 @artifact_router.get("/sheet", summary="产出物-分页读取普通 XLSX 工作表")
-def read_sheet(artifact_id: ArtifactId, base_hash: Annotated[FileHash, Query()], sheet_index: int = Query(ge=0),
+async def read_sheet(artifact_id: ArtifactId, base_hash: Annotated[FileHash, Query()], sheet_index: int = Query(ge=0),
                offset: int = Query(default=0, ge=0, le=1048575), column_offset: int = Query(default=0, ge=0, le=16383),
                limit: int = Query(default=25, ge=1, le=50), column_limit: int = Query(default=12, ge=1, le=20),
                current_user: User = DependAuth):
-    artifact = mock_artifact(current_user.id, artifact_id)
+    artifact = await resolve_artifact(current_user.id, artifact_id)
     if artifact.kind != "xlsx":
         raise ConversationBusinessError("该文件使用其他预览方式")
-    content = read_original(artifact.path)
-    check_revision(content, base_hash)
-    return result(sheet_page(content, sheet_index, offset, column_offset, limit, column_limit))
+    def read():
+        content = read_original(artifact.path)
+        check_revision(content, base_hash)
+        return sheet_page(content, sheet_index, offset, column_offset, limit, column_limit)
+    return result(await run_in_threadpool(read))
 
 
 @artifact_router.post("/save-content", summary="产出物-按原格式覆盖保存文件")
 async def save_content(data: SaveArtifact | SaveWord | SaveSpreadsheet | SaveText, current_user: User = DependAuth):
-    artifact = mock_artifact(current_user.id, data.artifact_id)
+    artifact = await resolve_artifact(current_user.id, data.artifact_id)
     metadata = await run_in_threadpool(_save, artifact, data)
+    if not artifact.id.startswith('mock-'):
+        from applications.chat.services.artifacts import count_artifact
+        await count_artifact(int(artifact.id), refresh=True)
     return await _present(artifact, metadata)
 
 
@@ -149,7 +155,7 @@ def _save(artifact, data):
         except ValueError as exc:
             raise ConversationBusinessError("内容包含文件格式无法保存的字符") from exc
         if len(saved) > MAX_FILE_BYTES:
-            raise ConversationBusinessError("修改后的文件超过当前样例的处理上限")
+            raise ConversationBusinessError("修改后的文件超过在线处理上限")
         metadata = _describe(artifact, saved)
         check_revision(read_original(artifact.path), data.base_hash)
         if saved != original:
@@ -158,12 +164,14 @@ def _save(artifact, data):
 
 
 @artifact_router.get("/download", summary="产出物-下载整份原格式文件")
-def download(artifact_id: ArtifactId, base_hash: FileHash | None = Query(default=None),
+async def download(artifact_id: ArtifactId, base_hash: FileHash | None = Query(default=None),
              archived: bool = False, current_user: User = DependAuth):
-    artifact = mock_artifact(current_user.id, artifact_id)
+    artifact = await resolve_artifact(current_user.id, artifact_id)
     if archived and not asset_record_path(artifact).is_file():
         raise ConversationBusinessError("归档文件不存在")
-    content = read_original(asset_path(artifact) if archived else artifact.path)
+    if archived and not artifact_id.startswith("mock-"):
+        raise ConversationBusinessError("已归档原件请从资产管理下载")
+    content = await run_in_threadpool(read_original, asset_path(artifact) if archived else artifact.path)
     if base_hash is not None:
         check_revision(content, base_hash)
     media_type = guess_type(artifact.path.name)[0] or "application/octet-stream"

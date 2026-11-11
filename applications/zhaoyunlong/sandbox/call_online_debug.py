@@ -172,7 +172,7 @@ def _create_run(base_url: str, token: str, args: argparse.Namespace) -> dict[str
 def _get_latest_run(base_url: str, token: str, skill_id: str) -> dict[str, Any]:
     """调用 GET /skills/{skill_id}/latest-run，模拟调试弹窗重新打开。"""
     request = Request(
-        url=f"{base_url}/realtime-test-case-gen/skills/{skill_id}/latest-run",
+        url=f"{base_url}/realtime-test-case-gen/skills/latest-run?skill_id={skill_id}",
         headers={"token": token},
         method="GET",
     )
@@ -187,7 +187,7 @@ def _wait_for_completion(
     deadline = None if wait_seconds == 0 else time.monotonic() + wait_seconds
     while deadline is None or time.monotonic() < deadline:
         request = Request(
-            url=f"{base_url}/realtime-test-case-gen/runs/{run_id}",
+            url=f"{base_url}/realtime-test-case-gen/runs/get?run_id={run_id}",
             headers={"token": token},
             method="GET",
         )

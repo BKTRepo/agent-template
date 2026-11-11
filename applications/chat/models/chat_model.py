@@ -98,6 +98,8 @@ class ChatArtifact(models.Model):
 
 
 class ChatSkillCall(models.Model):
+    operator_login_name = fields.CharField(max_length=32, null=True)
+    skill_name_snapshot = fields.CharField(max_length=128, null=True)
     id = fields.BigIntField(pk=True, description="技能调用记录ID")
     task_id = fields.BigIntField(index=True, description="触发调用的对话任务ID")
     skill_id = fields.IntField(index=True, description="实际调用的技能ID")
@@ -110,6 +112,8 @@ class ChatSkillCall(models.Model):
 
 
 class ChatArtifactCount(models.Model):
+    generated_at = fields.DatetimeField(null=True, index=True)
+    details = fields.JSONField(null=True)
     id = fields.BigIntField(pk=True, description="产物统计记录ID")
     artifact_id = fields.BigIntField(unique=True, description="原产物ID，用于统计去重")
     quantity = fields.IntField(null=True, description="计入的产物数量，统计失败时为空")

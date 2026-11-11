@@ -3,6 +3,7 @@ from datetime import date, datetime, time, timedelta
 
 import httpx
 from tortoise import timezone
+from tortoise.functions import Count, Max
 from tortoise.transactions import in_transaction
 
 from applications.wrq.agent.models.agent_model import DeveloperSkillClass, Skill, SkillDisplayStatus, SkillForm, SkillVersion
@@ -35,6 +36,8 @@ async def skill_details(query, *, by_creation: bool, page: int, page_size: int):
         page = min(page, pages)
         skills = await query.order_by(order, '-id').offset((page - 1) * page_size).limit(page_size)
 
+    from applications.chat.models.chat_model import ChatSkillCall
+    calls = {row['skill_id']: row for row in await ChatSkillCall.filter(skill_id__in=[skill.id for skill in skills]).group_by('skill_id').annotate(total=Count('id'), recent=Max('created_time')).values('skill_id', 'total', 'recent')}
     items = []
     if skills:
         version_ids = [skill.published_version_id for skill in skills if skill.published_version_id is not None]
@@ -65,7 +68,7 @@ async def skill_details(query, *, by_creation: bool, page: int, page_size: int):
                 'created_time': skill.created_time,
                 'creator_login_name': skill.create_user_login_name,
                 # The formal invocation event provider is separate from catalog test counts.
-                'call_count': None,
-                'last_called_at': None,
+                'call_count': calls.get(skill.id, {}).get('total', 0),
+                'last_called_at': calls.get(skill.id, {}).get('recent'),
             })
     return dict(items=items, total=total, page=page, page_size=page_size, pages=pages)

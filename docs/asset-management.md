@@ -1,7 +1,7 @@
 ---
 title: 资产管理接入与验收
 status: implemented
-last_updated: 2026-11-09
+last_updated: 2026-11-11
 ---
 
 资产管理复用 `keenrobot_skill_classes`，概览按可见资产统计总数及各大类数量。列表按创建时间和编号稳定分页，每页 10 项，支持资产名称及创建人姓名或账号搜索。创建人才能移入回收站、恢复和彻底删除。
@@ -12,7 +12,7 @@ last_updated: 2026-11-09
 - 归档文件放在 `OUTPUT_DIR/assets`。容器部署时把 `OUTPUT_DIR` 挂到持久化存储，多实例需要共享同一份文件。
 - `.env` 配置 `ASSET_RECYCLE_RETENTION_DAYS=30`。恢复截止时间按回收时间加配置天数计算，修改后重启服务生效。到期后不可恢复，后台启动时和每 5 分钟清理过期记录及归档原件。
 - Word 预览复用 `DOCUMENT_PREVIEW_CONVERTER_URL`。Excel 工作表、PDF 及脚本均读取归档文件。测试案例使用产出物已有的工作簿解析及导图分组服务。
-- 联调使用 `ASSISTANT_ARTIFACT_MOCK_DIR` 和前端 `VITE_ASSISTANT_ARTIFACT_MOCK=true`。正式接入替换 `applications/conversation/services/asset_source.py` 的来源适配，复用同事产出物 ID、鉴权及内容读取契约。当前来源 ID 按不透明字符串处理。
+- 正式来源已接通 `ChatArtifact`，通过本人当前会话及成功任务验证读取原件；不增加 `chat_artifacts` 字段。样例只在显式配置 mock 目录和前端开关后可用。详见 [集成契约](assistant-integration.md)。
 
 ## 接口
 
@@ -27,7 +27,7 @@ last_updated: 2026-11-09
 | POST | `/create` | `artifact_id`、`base_hash`、`name`、`skill_classes_id`、`application_identify`、`visibility`，归档原文件快照，同来源幂等 |
 | GET | `/preview`、`/preview-pdf`、`/download` | `asset_id`、`file_id`，每次检查资产权限及附件归属 |
 | GET | `/preview-sheet` | `asset_id`、`file_id`、`sheet_index`、`offset`、`column_offset`，每次最多 100 行和 50 列 |
-| POST | `/export` | `asset_ids`，下载所选资产 CSV 清单 |
+| POST | `/export` | `asset_ids`，下载所选资产原文件 ZIP，校验全部权限，保留文件字节与格式 |
 | GET | `/recycle-bin` | `page`，返回本人可恢复资产及截止时间 |
 | POST | `/move-to-recycle-bin`、`/restore`、`/delete-recycled` | `asset_ids`，限创建人操作，彻底删除限回收站资产 |
 

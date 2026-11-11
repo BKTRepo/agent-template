@@ -83,6 +83,8 @@ def ordinary_detail(artifact, content):
         return {**result, "editor": "word", "blocks": read_document(content)[2]}
     if artifact.file_type == "xlsx":
         return {**result, "editor": "sheet", "sheets": sheet_metadata(content)}
+    if artifact.file_type not in {"txt", "md", "csv", "json", "py", "js", "ts", "sh", "bash", "sql", "java", "go", "rb", "yaml", "yml", "xml", "html", "css"}:
+        return {**result, "editor": "download"}
     text, encoding, _ = _text(content)
     return {**result, "editor": "text", "text": text, "encoding": encoding}
 

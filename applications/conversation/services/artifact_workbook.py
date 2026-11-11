@@ -1,4 +1,4 @@
-"""Reader and writer for the mock case workbook. Replace this adapter for the real output format."""
+"""Case workbook adapters; edits preserve the source workbook's layout."""
 
 from hashlib import sha256
 from io import BytesIO
@@ -71,12 +71,57 @@ def _read_sheet(book, title, header):
     return [(number, values) for number, values in enumerate(rows, 2) if any(value is not None for value in values)]
 
 
+FLAT_HEADERS = {
+    "id": {"用例编号", "案例编号", "case_id", "test_case_id"},
+    "name": {"案例名称", "用例名称", "测试用例名称", "用例标题", "标题", "title", "name"},
+    "preconditions": {"前置条件", "前提条件", "preconditions"},
+    "steps": {"步骤", "操作步骤", "测试步骤", "操作内容", "steps"},
+    "expected": {"预期结果", "预期", "expected", "expected_result"},
+    "group": {"场景分组", "场景类型", "用例类型", "分组", "group"},
+}
+
+
+def _read_flat(book):
+    for sheet in book.worksheets:
+        if sheet.max_row > MAX_ROWS + 20:
+            continue
+        for header_row in sheet.iter_rows(max_row=min(sheet.max_row, 20)):
+            columns = {}
+            for field, aliases in FLAT_HEADERS.items():
+                hits = [cell.column for cell in header_row if str(cell.value or "").strip() in aliases]
+                if len(hits) == 1:
+                    columns[field] = hits[0]
+            if not {"id", "name", "preconditions", "steps", "expected"}.issubset(columns):
+                continue
+            cases, case_rows, step_rows = {}, {}, {}
+            for number in range(header_row[0].row + 1, sheet.max_row + 1):
+                def value(field):
+                    return str(sheet.cell(number, columns[field]).value if sheet.cell(number, columns[field]).value is not None else "") if field in columns else ""
+                key = value("id").strip()
+                if not key:
+                    continue
+                if key in cases or sheet.cell(number, columns['id']).data_type == 'f':
+                    raise ValueError("invalid case id")
+                steps = [CaseStep(id=str(i), action=line) for i, line in
+                         enumerate((line for line in value("steps").splitlines() if line.strip()), 1)]
+                cases[key] = TestCase(id=key, name=value("name"), group=value("group"),
+                    preconditions=value("preconditions"), expected=value("expected"), steps=steps)
+                case_rows[key] = number
+                step_rows.update({(key, step.id): number for step in steps})
+            book._artifact_flat_layout = (sheet.title, columns)
+            return book, cases, case_rows, step_rows
+    raise ValueError("unsupported case workbook")
+
+
 def read_workbook(content: bytes):
     try:
         with ZipFile(BytesIO(content)) as archive:
             if sum(entry.file_size for entry in archive.infolist()) > MAX_EXPANDED_BYTES:
                 raise ConversationBusinessError("工作簿解压后超过处理上限")
         book = load_workbook(BytesIO(content))
+        if (CASE_SHEET not in book.sheetnames or STEP_SHEET not in book.sheetnames or
+                tuple(cell.value for cell in book[CASE_SHEET][1][:len(CASE_HEADER)]) != CASE_HEADER):
+            return _read_flat(book)
         cases = {}
         case_rows = {}
         for row, (key, group, name, preconditions, expected) in _read_sheet(book, CASE_SHEET, CASE_HEADER):
@@ -96,7 +141,7 @@ def read_workbook(content: bytes):
     except ConversationBusinessError:
         raise
     except Exception as exc:
-        raise TestCaseWorkbookFormatError("工作簿不符合当前测试案例样例格式") from exc
+        raise TestCaseWorkbookFormatError("无法识别测试案例表头，请使用案例编号、案例名称、操作步骤和预期结果列") from exc
     return book, cases, case_rows, step_rows
 
 
@@ -132,6 +177,18 @@ def update_workbook(content: bytes, updated: list[TestCase]) -> bytes:
                 if key not in step_rows or key in kept_steps:
                     raise ConversationBusinessError("步骤编号无效")
                 kept_steps[key] = step
+        flat = getattr(book, '_artifact_flat_layout', None)
+        if flat:
+            sheet_name, columns = flat
+            sheet = book[sheet_name]
+            for key, case in kept_cases.items():
+                for field in ('name', 'preconditions', 'expected', 'steps'):
+                    if field in columns:
+                        text = '\n'.join(step.action for step in case.steps) if field == 'steps' else getattr(case, field) or ''
+                        _write_text(sheet, case_rows[key], columns[field], text)
+            for row in sorted((row for key, row in case_rows.items() if key not in kept_cases), reverse=True):
+                sheet.delete_rows(row)
+            return _bytes(book)
         case_sheet = book[CASE_SHEET]
         step_sheet = book[STEP_SHEET]
         for key, case in kept_cases.items():
