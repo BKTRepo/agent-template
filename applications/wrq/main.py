@@ -7,6 +7,8 @@ if sys.platform == 'win32':
 from fastapi import FastAPI
 from tortoise import Tortoise
 from applications.wrq.agent.views import skills_router
+from applications.wrq.agent.views.overview_view import overview_router
+from applications.wrq.auth import DependAuth
 from applications.wrq.database import wrq_connections
 from configure import PROJECT_CONFIG
 
@@ -22,6 +24,7 @@ async def lifespan(app):
 
 app=FastAPI(title='WRQ 开发者中心',lifespan=lifespan)
 app.include_router(skills_router,prefix='/skills')
+app.include_router(overview_router, prefix='/overview', tags=['总览'], dependencies=[DependAuth])
 from applications.wrq.agent.views.knowledge_view import search_router
 app.include_router(search_router,prefix='/skills')
 

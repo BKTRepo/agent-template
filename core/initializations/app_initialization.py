@@ -172,6 +172,7 @@ def register_routers(app: FastAPI) -> None:
     from applications.conversation.views import chat_router, history_router
     from applications.knowledge_base.views import knowledge_router
     from applications.model_config.views import model_router
+    from applications.wrq.agent.views.overview_view import overview_router
 
     # 挂在路由蓝图
     app.include_router(router=base_public, prefix="/base", tags=["基础服务"])
@@ -186,6 +187,7 @@ def register_routers(app: FastAPI) -> None:
     from applications.wrq.agent.views.knowledge_view import search_router
     app.include_router(search_router, prefix="/skills", tags=["知识库MCP"])
     app.include_router(router=skills_router, prefix="/skills", tags=["开发者中心-Agent技能"], dependencies=[DependAuth])
+    app.include_router(overview_router, prefix="/overview", tags=["总览"], dependencies=[DependAuth])
     app.include_router(router=knowledge_router, prefix="/knowledge-bases", tags=["知识库与文件管理"], dependencies=[DependAuth])
     from applications.knowledge_base.views.conversion_view import conversion_router
     app.include_router(conversion_router, prefix="/api", tags=["知识库-文件处理"], dependencies=[DependAuth])

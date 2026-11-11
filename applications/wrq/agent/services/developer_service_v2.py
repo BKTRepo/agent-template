@@ -416,7 +416,7 @@ class DeveloperSkillCrud:
         total=await query.count()
         return await query.offset((page-1)*page_size).limit(page_size), total
 
-    async def output(self,skill,user,knowledge_update_count=None):
+    async def output(self,skill,user,knowledge_update_count=None,*,include_markdown:bool=True):
         if knowledge_update_count is None:
             from .knowledge_notification_service import counts
             knowledge_update_count = (await counts(user, [skill.id])).get(skill.id, 0)
@@ -455,7 +455,7 @@ class DeveloperSkillCrud:
             'instructions':form.instructions,'resource_ids':[k['id'] for k in knowledge],
             'resource_usage':form.resource_usage or '','compatibility':form.compatibility or '',
             'technical_name':form.technical_name,'uploaded_resources':files,'knowledge_bases':knowledge,
-            'skill_markdown':display_skill_version(read_markdown(form.skill_markdown_path), version.version) if form.skill_markdown_path else '', 'version':version.version,'current_revision':version.revision,
+            'skill_markdown':display_skill_version(read_markdown(form.skill_markdown_path), version.version) if include_markdown and form.skill_markdown_path else '', 'version':version.version,'current_revision':version.revision,
             'skill_version_id':version.id,'status':page_status,'creator_login_name':skill.create_user_login_name,'updater_login_name':skill.update_user_login_name,
             'creator_name':user.alias or user.username,'updated_at':skill.updated_time,'backend_skill_id':skill.id,
             'build_id':version.build_id,'build_origin':'backend' if version.build_id else None,'debug':debug}

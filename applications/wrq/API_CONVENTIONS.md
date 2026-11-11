@@ -23,7 +23,7 @@
 |---|---|---|
 | GET | /get-current-user | 当前登录身份 |
 | GET | /get-form-metadata | 技能类、应用、资源用途字典；filter_skill_classes 包含停用技能类供列表筛选，statuses 返回状态代码与名称 |
-| GET | /list-skills | 本人技能分页；page、page_size、name、class_id、status、application 为查询参数 |
+| GET | /list-skills | 本人技能分页；page、page_size、name、class_id、status、application 为查询参数。列表中的 `skill_markdown` 为空字符串，原文通过详情接口获取 |
 | GET | /get-skill | 按 skill_id 查询本人技能及当前知识库引用；只读、不递增修订或改变技能状态 |
 | POST | /create-skill-draft | JSON：DeveloperSkillForm；新建必选所属应用（application_ids 选择一个有效 identify，或 application_paso），缺失/空白返回 application_paso 字段错误；已有历史技能不补写默认应用 |
 | POST | /save-skill | JSON：skill_id + 原表单，包括 expected_revision |
@@ -131,6 +131,32 @@ APPLICATION_CATALOG_CACHE_SECONDS 默认 60 秒。原 WRQ_PORTAL_APPLICATIONS_UR
 - 后端生成的 downloadUrl 已变更；当前前端会把缓存中的旧资源下载地址转换为新查询参数地址。
 - 前后端应同步部署；历史文档和旧验收脚本不能代替本文件的当前契约。
 - 同事的 `/realtime-test-case-gen` 沙箱接口及其他模块不在本次变更范围内。
+
+## 总览页面查询
+
+| 方法 | 路径 | 查询参数与返回 |
+| --- | --- | --- |
+| GET | /overview/cumulative-summary | 返回 `connected_user_count`、`online_skill_count`、`skill_call_count`、`knowledge_mount_count` |
+| GET | /overview/period-summary | `start_date`、`end_date`。返回日期、`active_user_count`、`test_artifact_count`、`new_skill_count`、`new_knowledge_base_count`、`trend`、`top_skills` |
+| GET | /overview/metric-detail | `metric`、`page`、`page_size`。期间指标须带日期。返回 `items`、`total`、`page`、`page_size`、`pages` |
+
+两个 Skill 指标只统计当前有效且已上线的 Skill。日期使用 `YYYY-MM-DD`，按北京时间包含结束日全天。新增按首次创建时间筛选，计数和明细共用筛选条件。
+
+- `null` 表示对应数据源尚未接入，`0` 或空数组表示成功查询且没有记录。当前真实指标为 `online_skill_count` 和 `new_skill_count`。其他指标的明细查询返回 HTTP 503，接入后使用下表字段。
+- `trend` 包含 `bucket_days` 和 `points`。按包含首尾的自然日数分组，14 天内为 1 天，15–30 天为 2 天，超过 30 天为 7 天。每组从所选开始日顺次切分，最后一组截到结束日。每个数据点返回 `start_date`、`end_date`、`artifact_count`、`skill_call_count`，按日期升序。一个系列尚未接入时对应值为 `null`。
+- `top_skills` 每项包含 `skill_id`、`name`、`call_count`、`artifact_count`。按调用量降序、产出物数量降序、技能 ID 升序返回前五名。
+- 明细的时间值以 ISO 日期时间返回，优先带时区偏移。多行可属于同一个 Skill 时，每行提供独立的 `id`。
+
+| metric | 明细字段 |
+| --- | --- |
+| `connected_users` | `department`、`username`、`employee_no`、`first_access_at`、`last_login_at`、`login_count` |
+| `online_skills` | `skill_id`、`name`、`skill_class_name`、`application_name`、`published_at`、`version`、`status`、`call_count`、`last_called_at`。正式调用数据源接入前最后两项为 `null` |
+| `skill_calls` | `skill_name`、`operator_login_name`、`called_at` |
+| `knowledge_mounts` | `knowledge_base_name`、`knowledge_base_version`、`target_name`、`operator_login_name`、`mounted_at` |
+| `active_users` | `department`、`username`、`employee_no`、`conversation_call_count`、`first_called_at`、`last_called_at` |
+| `test_artifacts` | `generated_at`、`employee_no`、`department`、`artifact_type`、`skill_name`、`artifact_count`、`duration_ms`、`status` |
+| `new_skills` | `skill_id`、`name`、`skill_class_name`、`application_name`、`created_time`、`creator_login_name`、`version`、`status` |
+| `new_knowledge_bases` | `name`、`application_name`、`creator_login_name`、`created_time`、`version`、`file_count`、`updated_at` |
 
 ## 检查命令
 

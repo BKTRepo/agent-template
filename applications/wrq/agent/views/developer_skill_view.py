@@ -58,7 +58,10 @@ async def list_skills(page: int = Query(default=1, ge=1), page_size: int = Query
         rows,total=await crud.list(current_user,page=page,page_size=page_size,**filters)
     from applications.wrq.agent.services.knowledge_notification_service import counts
     update_counts = await counts(current_user, [r.id for r in rows])
-    result=SuccessResponse(data={'items':[await crud.output(r,current_user,knowledge_update_count=update_counts.get(r.id,0)) for r in rows], 'total':total,
+    result=SuccessResponse(data={'items':[
+        await crud.output(r,current_user,knowledge_update_count=update_counts.get(r.id,0),include_markdown=False)
+        for r in rows
+    ], 'total':total,
         'page':page, 'page_size':page_size, 'pages':pages})
     result.headers['Cache-Control'] = 'no-store, max-age=0'
     result.headers['Pragma'] = 'no-cache'
