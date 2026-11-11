@@ -48,7 +48,4 @@ GET /chat/get-query-detail?run_id=... 查询本人任务、回答及检索详情
 
 ## 核验边界
 
-    .venv/Scripts/python.exe -m pytest applications/wrq/tests/test_query_migration.py applications/wrq/tests/query_test_answer_evidence_retry.py applications/wrq/tests/query_test_structured_table_retrieval.py applications/wrq/tests/test_api_conventions.py -q
-
-这些测试执行查询编排、重排 HTTP、分数/引用入上下文、子问题缓存、记忆裁剪/摘要、证据重试、断连后后台完成与持久化续传。外部生成/向量服务采用明确测试替身，不代表真实模型端到端通过。
 真实验收必须使用已处理完成的知识库调用 /chat/stream，并从 get-query-detail 确认各阶段和 rerank_score，同时检查回答引用、长对话记忆和断线续传。

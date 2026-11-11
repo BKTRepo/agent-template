@@ -8,8 +8,8 @@
 - POST 的编号及业务参数全部放入请求体：普通请求使用 JSON，上传使用 multipart/form-data；不使用 POST 查询参数。
 - 请求体通过 Pydantic 请求模型校验；权限仍由后端检查。调整传输契约不得改变版本、状态转换和权限等业务规则。
 - 技能主键使用有符号 INT(11) 自增，所有 skill_id 引用使用相同整数类型；JSON 编号使用数字，GET/multipart 文本由后端校验为正整数。MySQL 8 可能省略显示宽度并显示为 INT。
-- 路由变更必须同步前端调用、后端生成的下载地址、接口文档及相关契约测试。
+- 路由变更必须同步前端调用、后端生成的下载地址和接口文档。
 - 不擅自改动同事的沙箱模块及 `/realtime-test-case-gen` 接口。其外部契约由双方约定。
-- 详细接口清单和调用示例见 `API_CONVENTIONS.md`。提交前运行本目录的 `tests/test_api_conventions.py`。
+- 详细接口清单和调用示例见 `API_CONVENTIONS.md`。
 
 本规范覆盖 WRQ 接口；不能据此批量改写其他同事负责的模块。

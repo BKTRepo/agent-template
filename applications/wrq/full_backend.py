@@ -11,6 +11,7 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from configure import LOGGER, PROJECT_CONFIG, ROUTER_SUMMARY, ROUTER_TAGS
+from applications.conversation.services.asset_cleanup import register_asset_cleanup
 from applications.wrq.database import wrq_connections
 from applications.zhaoyunlong.services.online_debug_cleanup_scheduler import (
     create_online_debug_cleanup_scheduler,
@@ -51,6 +52,7 @@ async def lifespan(app):
             ROUTER_TAGS[route.path] = route.tags
         LOGGER.info("完整项目已加载 {} 条业务路由；启动不改表、不造用户", len(routes))
         online_debug_scheduler = create_online_debug_cleanup_scheduler()
+        register_asset_cleanup(online_debug_scheduler)
         online_debug_scheduler.start()
         yield
     finally:

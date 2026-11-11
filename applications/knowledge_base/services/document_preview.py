@@ -104,11 +104,15 @@ async def metadata(doc):
 
 async def converted_pdf(doc):
     path = original_path(doc)
+    return await render_pdf(path, fingerprint(doc))
+
+
+async def render_pdf(path, file_fingerprint):
     if path.suffix.lower() == '.pdf':
         return path
     if path.suffix.lower() != '.docx':
         raise KnowledgeError('该格式不支持 PDF 预览', 'preview', 400)
-    key = hashlib.sha256(json.dumps(fingerprint(doc)).encode()).hexdigest()
+    key = hashlib.sha256(json.dumps(file_fingerprint).encode()).hexdigest()
     cache = Path(PROJECT_CONFIG.DOCUMENT_PREVIEW_CACHE_DIR).resolve()
     cache.mkdir(parents=True, exist_ok=True)
     target = cache / (key + '.pdf')

@@ -1,5 +1,34 @@
 # WRQ 接口开发规范与当前清单
 
+## 新建技能润色
+
+`POST /skills/developer/polish-form` 使用平台 token。JSON 请求体和响应 `data` 使用 `description`、`instructions`、`resource_usage`、`compatibility` 四个字符串字段。允许留空，至少填写一项。请求内容合计最多 12,000 个 UTF-8 字节，超过上限返回 422。字段长度沿用技能表单。
+
+接口复用现有模型连接，空白字段返回空字符串。超时返回 504，模型不可用或建议无效返回 502。建议只供用户预览和确认，应用后由原有草稿保存或调试流程提交表单。
+
+## 悬浮对话台测试案例产出物联调
+
+以下接口以 `/assistant/artifacts` 为前缀，均使用平台 token，按登录人定位样例文件。仅配置 `ASSISTANT_ARTIFACT_MOCK_DIR` 时启用，不涉及 `chat_artifact` 或资产数据库表。
+
+平台悬浮窗的纳入状态与归档走 `/api/assets/source-status` 和 `/api/assets/create`。原样例的本地快照接口用于单独联调。正式资产查询及归档契约见 [资产管理接口](../../docs/asset-management.md#接口)。
+
+| 方法 | 路径后缀 | 参数与行为 |
+|---|---|---|
+| POST | /create-demo | JSON 可选 `kind`，默认 `test_cases`，支持 `docx`、`xlsx`、`py`、`js`、`ts`、`sh`、`sql`、`md`、`json`。已存在时打开当前原件 |
+| GET | /detail | 查询 `artifact_id`。返回 `is_test_case`、格式和 `base_hash`。测试案例返回案例与分组，普通文件返回 `editor` 及对应的 `blocks`、`sheets` 或 `text` |
+| GET | /sheet | 查询 `artifact_id`、`base_hash`、`sheet_index`、行列偏移与上限，返回普通 XLSX 工作表的一页单元格 |
+| POST | /save-content | JSON `artifact_id`、`base_hash`，另传 `cases`、`paragraphs`、`cells` 或 `text` 四者之一。锁内校验原文件哈希，冲突返回 409 |
+| GET | /download | 查询 `artifact_id`、可选 `base_hash`、可选 `archived`。下载整份原格式文件或归档快照 |
+| GET | /asset-status | 查询 `artifact_id`。返回样例是否已归档 |
+| POST | /submit-to-assets | JSON `artifact_id`、`base_hash`、`name`、`application_identify`。重复提交返回已有样例归档 |
+
+样例 XLSX 有「测试案例」「操作步骤」两张表，分别按案例编号和案例编号加步骤编号定位。写回前校验生成后的工作簿，在原文件所在目录用临时文件替换原件。已归档快照独立保存。正式接入时用同事的产出物查询替换 mock 元数据，用真实输出样本确定工作簿适配方式，再将样例归档替换为正式资产查询和创建接口。
+
+导图按验证目标归纳，支持把不同场景的相似案例合入同一测试要点。归纳结果单独放在共享目录的 `.case-groups/<用户ID>/<产出物ID>.json`。其中记录 `schema_version`、`artifact_id`、`source_sha256`、`mode` 和 `groups`，文件哈希变化时重新生成。默认使用样例规则，设置 `ASSISTANT_ARTIFACT_MODEL_GROUPING=true` 后复用现有模型配置，验证模型覆盖全部原案例且每条只出现一次。模型失败时回退到样例规则。JSON 不写入 XLSX，也不参与导出或归档。
+
+普通文件编辑使用同一原文件定位与保存事务。DOCX 按段落编号修改正文及表格内文本，复杂段落只读，保留其他文档部件。XLSX 按 `sheet_index` 和 `address` 修改单元格，支持文本、数字、布尔、普通公式和清空，保留原工作表样式与未修改部件，复杂公式和合并区域的从属格只读。文本支持 UTF-8、带 BOM 的 UTF-16 和 GB18030，保存保留编码、BOM 和原换行风格；JSON 写入前检查语法。样例原文件最大 10 MiB，文本最多 2 Mi 字符，Office 解压最多 64 MiB。
+
+
 知识库附件预览：GET `/knowledge-bases/documents/preview?kb_id=1&doc_id=2` 返回格式与文档代次；GET `/knowledge-bases/documents/preview-pdf?kb_id=1&doc_id=2&generation=1` 返回原PDF/Word转换PDF；GET `/knowledge-bases/documents/preview-sheet?kb_id=1&doc_id=2&generation=1&sheet_index=0&offset=0&limit=100&column_offset=0&column_limit=50` 返回Excel分页。原下载接口增加可选generation。平台token均在请求头。详见 [附件预览](../../docs/document-preview.md)。
 
 2026-11-06 知识库更新提醒新增：GET `/skills/developer/get-knowledge-update-summary`，GET `/skills/developer/get-knowledge-updates?skill_id=14`，POST `/skills/developer/mark-knowledge-updates-read`（JSON：`skill_id`、`items:[{notification_id,seen_revision}]`）。均验证平台身份及本人技能，列表增加批量查询的 `knowledge_update_count`；已读仅确认用户看到的版本，不修改技能修订号或发布状态。完整语义和显式迁移见 [知识库更新提醒](../../docs/knowledge-integration.md#知识库更新的持久化提醒)。
@@ -32,6 +61,8 @@
 | POST | /publish-skill | JSON：skill_id；仍由服务端核验调试结果 |
 | POST | /register-debug-run | JSON：skill_id、run_id、build_id/skill_version_id 及原登记字段 |
 | GET | /get-debug-run | 查询参数：skill_id、run_id |
+| GET | /list-knowledge-tool-calls | 本人任务的 MCP 调用记录，查询参数 run_id、limit、offset |
+| GET | /get-knowledge-tool-call | 查询参数 search_id，对应调用记录 id。返回本人调用记录及召回、融合、重排明细，详见 [MCP 单次检索明细](KNOWLEDGE_MCP.md#单次检索明细) |
 | POST | /upload-resource-files | multipart：files、categories（JSON 数组字符串） |
 | GET | /download-resource-file | 查询参数：file_id |
 | POST | /upload-resource-version | 已停用旧功能，仅保留明确的停用提示；multipart：source_id、files、categories |
@@ -161,9 +192,5 @@ APPLICATION_CATALOG_CACHE_SECONDS 默认 60 秒。原 WRQ_PORTAL_APPLICATIONS_UR
 ## 检查命令
 
 在保留本地验收脚本的开发目录中执行（测试文件不随本次业务代码发布）：
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest applications/wrq/tests/test_api_conventions.py -q
-```
 
 技能中心调用入口：POST `/skills/catalog/create-test-run`，form-data source JSON包含整数skill_id、build_id、request_id、conversation_input，可选documents；固定发布定义和资源由服务端读取。相同request_id仅创建/累计一次。

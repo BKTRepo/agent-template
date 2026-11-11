@@ -3,13 +3,14 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from fastapi import APIRouter, File, Form, Query, UploadFile
 from starlette.responses import FileResponse
 from applications.wrq.http import WrqRoute
-from applications.wrq.agent.schemas.agent_schema import DeveloperDebugResult, DeveloperSkillForm, OfflineSkillRequest
+from applications.wrq.agent.schemas.agent_schema import DeveloperDebugResult, DeveloperSkillForm, OfflineSkillRequest, SkillPolishFields
 from applications.wrq.agent.schemas.api_request_schema import (
     DeveloperSkillSaveRequest, OfflineSkillBody, RegisterDebugRunRequest,
     SkillIdRequest, business_payload,
 )
 from applications.wrq.agent.services.developer_skill_crud import DeveloperSkillCrud, DeveloperError
 from applications.wrq.agent.services.source_service import SourceService
+from applications.wrq.agent.services.skill_polish import polish_skill_form
 from core.responses import SuccessResponse
 from applications.wrq.auth import DependAuth, user_login_name
 from applications.wrq.agent.models.agent_model import SkillDisplayStatus
@@ -108,6 +109,13 @@ async def mark_knowledge_updates_read(data: KnowledgeUpdatesRead, current_user=D
     response = SuccessResponse(data=await mark_read(data.skill_id, data.items, current_user))
     response.headers['Cache-Control'] = 'no-store, max-age=0'
     return response
+
+@developer_skills.post('/developer/polish-form', summary='开发者中心-AI润色新建技能表单')
+async def polish_form(data: SkillPolishFields, current_user=DependAuth):
+    response = SuccessResponse(data=await polish_skill_form(data))
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
 
 @developer_skills.post('/developer/create-skill-draft',summary='开发者中心-创建技能草稿')
 async def create(data:DeveloperSkillForm,current_user=DependAuth):

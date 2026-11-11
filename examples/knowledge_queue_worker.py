@@ -2,8 +2,6 @@
 from examples.knowledge_queue_environment import install_worker_database
 install_worker_database()
 from celery_scheduler.celery_worker import celery
-from examples.knowledge_queue_probe import register
-register(celery)
 celery.conf.imports = ("celery_scheduler.tasks.task_knowledge",)
 
 if __name__ == "__main__":
