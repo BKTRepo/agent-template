@@ -11,3 +11,5 @@ output/
 .env.*.local
 .env
 *.log
+# JetBrains（PyCharm / IntelliJ）本机项目配置
+.idea/
