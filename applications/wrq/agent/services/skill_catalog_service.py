@@ -101,11 +101,18 @@ class SkillCatalogService:
         skill, version, form = await self.published(skill_id)
         knowledge = await current_knowledge_references(await SkillResourceBinding.filter(
             skill_version_id=version.id, source_type='knowledge_base').order_by('sort_order', 'id'))
+        skill_markdown = ''
+        if form.skill_markdown_path:
+            try:
+                skill_markdown = display_skill_version(read_markdown(form.skill_markdown_path), version.version)
+            except FileNotFoundError:
+                # 对话台加载 Skill 仍需要其资源绑定；定义原件缺失不应阻断该只读元数据。
+                skill_markdown = ''
         return {**self.summary(skill, version, form), 'instructions': form.instructions,
                 'technical_name': form.technical_name, 'compatibility': form.compatibility or '',
                 'resource_usage': form.resource_usage or '', 'resource_ids': [row['id'] for row in knowledge],
                 'knowledge_bases': knowledge, 'uploaded_resources': [],
-                'skill_markdown': display_skill_version(read_markdown(form.skill_markdown_path), version.version) if form.skill_markdown_path else ''}
+                'skill_markdown': skill_markdown}
 
     async def package(self, skill_id, build_id, *, online=False):
         skill, version, _ = await self.published(skill_id, online=online)
