@@ -25,12 +25,45 @@ const suggestions = [['用例', '为当前对象生成正向 / 异常 / 边界�
 const serverId = (value?: string) => { const id = Number(value); return Number.isInteger(id) && id > 0 ? id : undefined }
 const statusOf = (task: ChatTask): ReplyStatus => task.status === 'success' ? 'completed' : task.status === 'cancelled' ? 'stopped' : task.status === 'failed' ? 'failed' : 'generating'
 
+function knowledgeSources(skillIds: string[], catalog: Implementation[]) {
+  const sources = new Map<string, string[]>()
+  for (const skillId of skillIds) {
+    const skill = catalog.find(item => item.id === skillId)
+    const skillName = skill?.name ?? `技能 ${skillId}`
+    for (const knowledge of skill?.knowledgeBases ?? []) {
+      const knowledgeId = String(knowledge.id)
+      if (!knowledgeId) continue
+      sources.set(knowledgeId, [...(sources.get(knowledgeId) ?? []), skillName])
+    }
+  }
+  return sources
+}
+
+function effectiveKnowledgeIds(skillIds: string[], manualKnowledgeIds: string[], catalog: Implementation[]) {
+  return [...new Set([...knowledgeSources(skillIds, catalog).keys(), ...manualKnowledgeIds])]
+}
+
+const manualKnowledgeStorageKey = (conversationId: string) => `assistant.manual-knowledge.${conversationId}`
+function readManualKnowledge(conversationId: string, availableIds: string[], automaticIds: Set<string>) {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(manualKnowledgeStorageKey(conversationId)) || 'null')
+    if (Array.isArray(stored)) return [...new Set(stored.map(String).filter(id => availableIds.includes(id)))]
+  } catch { /* 存储不可用时按服务端资源推断 */ }
+  return availableIds.filter(id => !automaticIds.has(id))
+}
+function storeManualKnowledge(conversationId: string, ids: string[]) {
+  try { window.localStorage.setItem(manualKnowledgeStorageKey(conversationId), JSON.stringify([...new Set(ids)])) } catch { /* 当前会话仍可正常使用 */ }
+}
+function removeStoredManualKnowledge(conversationId: string) {
+  try { window.localStorage.removeItem(manualKnowledgeStorageKey(conversationId)) } catch { /* ignore */ }
+}
+
 export default function FloatingAssistant({ contextLabel = '当前页面', contextModule = 'developer' }: { contextLabel?: string; contextModule?: AssistantModule }) {
   const [catalog, setCatalog] = useState<Implementation[]>([])
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([])
   const [open, setOpen] = useState(false), [maximized, setMaximized] = useState(false), [drawer, setDrawer] = useState(false)
   const [sessions, setSessions] = useState<ChatConversation[]>([]), [activeId, setActiveId] = useState(''), [messages, setMessages] = useState<Record<string, ChatMessage[]>>({})
-  const [skillIds, setSkillIds] = useState<string[]>([]), [knowledgeIds, setKnowledgeIds] = useState<string[]>([]), [model, setModel] = useState<string | null>(null), [models, setModels] = useState<ChatModel[]>([]), [modelHealth, setModelHealth] = useState<Record<string, ChatModelHealth>>({})
+  const [skillIds, setSkillIds] = useState<string[]>([]), [manualKnowledgeIds, setManualKnowledgeIds] = useState<string[]>([]), [model, setModel] = useState<string | null>(null), [models, setModels] = useState<ChatModel[]>([]), [modelHealth, setModelHealth] = useState<Record<string, ChatModelHealth>>({})
   const [pickingSkills, setPickingSkills] = useState(false), [pickingKnowledge, setPickingKnowledge] = useState(false), [modelOpen, setModelOpen] = useState(false), [files, setFiles] = useState<File[]>([]), [text, setText] = useState('')
   const [selectedArtifactId, setSelectedArtifactId] = useState<string>()
   const [runningTasks, setRunningTasks] = useState<Record<number, ActiveTask>>({}), [taskRows, setTaskRows] = useState<TaskRow[]>([]), [error, setError] = useState(''), [notice, setNotice] = useState(''), [loading, setLoading] = useState(false)
@@ -47,7 +80,9 @@ export default function FloatingAssistant({ contextLabel = '当前页面', conte
   const active = sessions.find(session => session.id === activeId)
   const activeMessages = active ? messages[active.id] ?? [] : []
   const selectedSkills = skillIds.map(id => catalog.find(row => row.id === id) ?? { id, name: `不可用技能 ${id}` })
-  const selectedKnowledge = knowledgeIds.map(id => knowledgeBases.find(row => row.id === id) ?? { id, name: `不可用知识库 ${id}` })
+  const knowledgeSourceMap = knowledgeSources(skillIds, catalog)
+  const knowledgeIds = effectiveKnowledgeIds(skillIds, manualKnowledgeIds, catalog)
+  const selectedKnowledge = knowledgeIds.map(id => knowledgeBases.find(row => row.id === id) ?? catalog.flatMap(skill => skill.knowledgeBases ?? []).find(row => row.id === id) ?? { id, name: `不可用知识库 ${id}` })
   const modelLabel = model ? models.find(item => item.name === model)?.displayName || model : '自动'
   const healthFor = (name: string) => modelHealth[name]
   const modelTier = (name: string) => {
@@ -68,6 +103,16 @@ export default function FloatingAssistant({ contextLabel = '当前页面', conte
   useEffect(() => () => Object.values(taskRef.current).forEach(item => item.controller.abort()), [])
   useEffect(() => { if (open) bottom.current?.scrollIntoView({ block: 'nearest' }) }, [open, activeId, activeMessages.length, task])
   useEffect(() => { if (!notice) return; const timer = window.setTimeout(() => setNotice(''), 2200); return () => window.clearTimeout(timer) }, [notice])
+  useEffect(() => {
+    if (!open) return
+    const receivePastedImage = (event: ClipboardEvent) => {
+      const target = event.target
+      if (busy || loading || !(target instanceof HTMLTextAreaElement) || target.getAttribute('aria-label') !== '向智能助手提问') return
+      if (addPastedImages(event.clipboardData?.items ?? null)) event.preventDefault()
+    }
+    document.addEventListener('paste', receivePastedImage)
+    return () => document.removeEventListener('paste', receivePastedImage)
+  }, [open, busy, loading, files])
   useEffect(() => { const move = (event: PointerEvent) => { if (resize.current) { const origin = resize.current; setGeometry(value => ({ ...value, size: { width: Math.max(320, Math.min(window.innerWidth - 24, origin.width - event.clientX + origin.x)), height: Math.max(320, Math.min(window.innerHeight - 104, origin.height - event.clientY + origin.y)) } })); return } if (!drag.current) return; const dx = event.clientX - drag.current.x, dy = event.clientY - drag.current.y; if (drag.current.source === 'trigger' && Math.hypot(dx, dy) > 4) triggerDragged.current = true; const bounds = drag.current.bounds; setOffset({ x: drag.current.offsetX + Math.max(8 - bounds.left, Math.min(window.innerWidth - bounds.right - 8, dx)), y: drag.current.offsetY + Math.max(8 - bounds.top, Math.min(window.innerHeight - bounds.bottom - 8, dy)) }) }; const end = () => { drag.current = null; resize.current = null }; window.addEventListener('pointermove', move); window.addEventListener('pointerup', end); return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end) } }, [])
 
   useEffect(() => {
@@ -108,9 +153,11 @@ export default function FloatingAssistant({ contextLabel = '当前页面', conte
     setLoading(true); setError('')
     try {
       const [conversation, history] = await Promise.all([getChatConversation(conversationId), listChatMessages(conversationId)])
-      patchSession({ ...conversation, unreadCount: 0 }); setActiveId(conversationId); setSkillIds(conversation.skills.map(String)); setKnowledgeIds(conversation.knowledgeBases.map(String)); setModel(conversation.model); setMessages(current => ({ ...current, [conversationId]: history })); setFiles([]); setText(''); setResendSource(undefined)
+      patchSession({ ...conversation, unreadCount: 0 }); setActiveId(conversationId); setSkillIds(conversation.skills.map(String)); setModel(conversation.model); setMessages(current => ({ ...current, [conversationId]: history })); setFiles([]); setText(''); setResendSource(undefined)
       const [skillDetails, knowledgeDetails] = await Promise.all([Promise.all(conversation.skills.map(id => getCatalogSkill(String(id)).catch(() => undefined))), Promise.all(conversation.knowledgeBases.map(id => getKnowledgeBase(String(id)).catch(() => undefined)))])
-      setCatalog(skillDetails.filter((item): item is Implementation => !!item)); setKnowledgeBases(knowledgeDetails.filter((item): item is KnowledgeBase => !!item))
+      const resolvedSkills = skillDetails.filter((item): item is Implementation => !!item)
+      const automaticKnowledge = new Set(knowledgeSources(conversation.skills.map(String), resolvedSkills).keys())
+      setCatalog(resolvedSkills); setKnowledgeBases(knowledgeDetails.filter((item): item is KnowledgeBase => !!item)); setManualKnowledgeIds(readManualKnowledge(conversation.id, conversation.knowledgeBases.map(String), automaticKnowledge))
       await readChatConversation(conversationId); setSessions(items => items.map(item => item.id === conversationId ? { ...item, unreadCount: 0 } : item))
     } catch (reason) { setError((reason as Error).message) } finally { setLoading(false) }
   }
@@ -128,7 +175,7 @@ export default function FloatingAssistant({ contextLabel = '当前页面', conte
   function close() { setOpen(false); setDrawer(false); trigger.current?.focus() }
   async function newSession() {
     setLoading(true); setError('')
-    try { const conversation = await createChatConversation(); patchSession(conversation); setActiveId(conversation.id); setMessages(current => ({ ...current, [conversation.id]: [] })); setSkillIds([]); setKnowledgeIds([]); setModel(null); setFiles([]); setText(''); setDrawer(false); setResendSource(undefined) }
+    try { const conversation = await createChatConversation(); patchSession(conversation); setActiveId(conversation.id); setMessages(current => ({ ...current, [conversation.id]: [] })); setSkillIds([]); setManualKnowledgeIds([]); setModel(null); setFiles([]); setText(''); setDrawer(false); setResendSource(undefined) }
     catch (reason) { setError((reason as Error).message) } finally { setLoading(false) }
   }
   async function ensureConversation(title: string) {
@@ -136,14 +183,20 @@ export default function FloatingAssistant({ contextLabel = '当前页面', conte
     const conversation = await createChatConversation(title.trim().slice(0, 30) || '新对话'); patchSession(conversation); setActiveId(conversation.id); setMessages(current => ({ ...current, [conversation.id]: [] })); return conversation
   }
   function skillNumbers(ids = skillIds) { return ids.map(serverId).filter((id): id is number => !!id) }
-  async function persistResources(conversation: ChatConversation, next = { skills: skillIds, knowledge: knowledgeIds, selectedModel: model }) {
-    const kbIds = next.knowledge.map(serverId).filter((id): id is number => !!id)
-    const saved = await saveChatResources(conversation.id, { skills: skillNumbers(next.skills), knowledgeBases: kbIds, model: next.selectedModel }); patchSession(saved); return saved
+  async function persistResources(conversation: ChatConversation, next = { skills: skillIds, manualKnowledge: manualKnowledgeIds, selectedModel: model }, rows = catalog) {
+    const kbIds = effectiveKnowledgeIds(next.skills, next.manualKnowledge, rows).map(serverId).filter((id): id is number => !!id)
+    const saved = await saveChatResources(conversation.id, { skills: skillNumbers(next.skills), knowledgeBases: kbIds, model: next.selectedModel }); patchSession(saved)
+    storeManualKnowledge(saved.id, next.manualKnowledge.filter(id => saved.knowledgeBases.map(String).includes(id)))
+    return saved
   }
-  async function changeResources(change: { skills?: string[]; knowledge?: string[]; selectedModel?: string | null }, strict = false) {
-    const next = { skills: change.skills ?? skillIds, knowledge: change.knowledge ?? knowledgeIds, selectedModel: change.selectedModel === undefined ? model : change.selectedModel }
-    if (!active) { setSkillIds(next.skills); setKnowledgeIds(next.knowledge); setModel(next.selectedModel); return }
-    try { const saved = await persistResources(active, next); setSkillIds(saved.skills.map(String)); setKnowledgeIds(saved.knowledgeBases.map(String)); setModel(saved.model) }
+  async function changeResources(change: { skills?: string[]; manualKnowledge?: string[]; selectedModel?: string | null }, strict = false, rows = catalog) {
+    const next = { skills: change.skills ?? skillIds, manualKnowledge: change.manualKnowledge ?? manualKnowledgeIds, selectedModel: change.selectedModel === undefined ? model : change.selectedModel }
+    if (!active) { setSkillIds(next.skills); setManualKnowledgeIds(next.manualKnowledge); setModel(next.selectedModel); return }
+    try {
+      const saved = await persistResources(active, next, rows)
+      const savedKnowledgeIds = saved.knowledgeBases.map(String)
+      setSkillIds(saved.skills.map(String)); setManualKnowledgeIds(next.manualKnowledge.filter(id => savedKnowledgeIds.includes(id))); setModel(saved.model)
+    }
     catch (reason) { setError((reason as Error).message); if (strict) throw reason }
   }
   async function clearSession() {
@@ -151,10 +204,23 @@ export default function FloatingAssistant({ contextLabel = '当前页面', conte
     try { const saved = await clearChatConversation(active.id); patchSession(saved); setMessages(current => ({ ...current, [active.id]: [] })); setError(''); setNotice('已清空当前会话') } catch (reason) { setError((reason as Error).message) }
   }
   async function removeSession(conversationId: string) {
-    try { await deleteChatConversation(conversationId); const rest = sessions.filter(row => row.id !== conversationId); setSessions(rest); setMessages(current => { const next = { ...current }; delete next[conversationId]; return next }); if (conversationId === activeId) { setActiveId(''); setSkillIds([]); setKnowledgeIds([]); setModel(null); if (rest[0]) void loadConversation(rest[0].id) } } catch (reason) { setError((reason as Error).message); throw reason }
+    try { await deleteChatConversation(conversationId); removeStoredManualKnowledge(conversationId); const rest = sessions.filter(row => row.id !== conversationId); setSessions(rest); setMessages(current => { const next = { ...current }; delete next[conversationId]; return next }); if (conversationId === activeId) { setActiveId(''); setSkillIds([]); setManualKnowledgeIds([]); setModel(null); if (rest[0]) void loadConversation(rest[0].id) } } catch (reason) { setError((reason as Error).message); throw reason }
   }
   async function toggleFavorite(conversation: ChatConversation) { try { patchSession(await favoriteChatConversation(conversation.id, !conversation.favorite)) } catch (reason) { setError((reason as Error).message) } }
-  function addFiles(incoming: File[]) { const existing = files.map((file, index) => ({ id: String(index), name: file.name, size: file.size, lastModified: file.lastModified })); const result = validateResourceFiles(incoming, existing, chatFileExtensions, chatFileLimits); setFiles(previous => [...previous, ...result.accepted]); setError(result.errors.join('；')) }
+  function addFiles(incoming: File[]) { const existing = files.map((file, index) => ({ id: String(index), name: file.name, size: file.size, lastModified: file.lastModified })); const result = validateResourceFiles(incoming, existing, chatFileExtensions, chatFileLimits); setFiles(previous => [...previous, ...result.accepted]); setError(result.errors.join('；')); return result }
+  function addPastedImages(items: DataTransferItemList | null) {
+    const suffixByMime: Record<string, string> = { 'image/png': '.png', 'image/jpeg': '.jpg' }
+    const now = Date.now()
+    const images = Array.from(items ?? []).flatMap((item, index) => {
+      const suffix = suffixByMime[item.type]
+      const file = suffix ? item.getAsFile() : null
+      return file ? [new File([file], `粘贴图片-${now}-${index + 1}${suffix}`, { type: file.type, lastModified: now })] : []
+    })
+    if (!images.length) return false
+    const result = addFiles(images)
+    if (result.accepted.length) setNotice(`已添加 ${result.accepted.length} 张粘贴图片`)
+    return true
+  }
   function applyTask(conversationId: string, messageId: string, current: ChatTask) { updateMessage(conversationId, messageId, message => ({ ...message, text: current.content || (current.status === 'failed' ? current.error || '生成失败，请稍后重试。' : message.text), status: statusOf(current), artifacts: current.artifacts, taskId: current.taskId, serverId: current.messageId })) }
   async function followTask(running: ActiveTask) {
     try { await streamChatTask(running.taskId, result => applyTask(running.conversationId, String(running.messageId), result), running.controller.signal) }
@@ -214,12 +280,12 @@ export default function FloatingAssistant({ contextLabel = '当前页面', conte
       {open && <aside className={`assistant-panel aip-panel ${maximized ? 'aip-maximized' : ''}`} role="dialog" aria-label="平台级 AI 助手" aria-modal="false" style={!maximized ? { width: geometry.size.width, height: Math.min(geometry.size.height, window.innerHeight - 104) } : undefined} data-page-context={contextLabel} onPointerDown={startDrag}>
         <header className="aip-header"><span className="aip-avatar"><span className="aip-avatar-face">AI</span></span><div className="aip-brand"><div className="aip-title">平台级 AI 助手 <span>全局</span></div><div className="aip-sub"><i />{busy ? '正在生成回复…' : loading ? '正在加载服务端会话…' : '已连接对话服务'}</div></div><div className="aip-head-actions"><button aria-label="后台任务" onClick={() => setTaskListOpen(true)}><ListTodo size={15} /></button><button aria-label="偏好设置" onClick={() => setPreferences(true)}><Settings size={15} /></button><button className={drawer ? 'on' : ''} aria-label="查看会话" title="会话" onPointerDown={event => event.stopPropagation()} onClick={() => setDrawer(value => !value)}><History size={15} />{unread > 0 && <i className="aip-unread-dot" />}</button><button aria-label="新建会话" title="新建会话" disabled={loading} onPointerDown={event => event.stopPropagation()} onClick={() => void newSession()}><MessageSquarePlus size={15} /></button><button aria-label={maximized ? '还原窗口' : '最大化窗口'} title={maximized ? '还原窗口' : '最大化窗口'} onPointerDown={event => event.stopPropagation()} onClick={() => setMaximized(value => !value)}>{maximized ? <Minimize2 size={15} /> : <Maximize2 size={15} />}</button><button className="aip-close" aria-label="关闭助手" title="关闭" onPointerDown={event => event.stopPropagation()} onClick={close}><X size={16} /></button></div></header>
         {import.meta.env.VITE_ASSISTANT_ARTIFACT_MOCK === 'true' && <ArtifactDemo />}
-        <section className="aip-resources" aria-label="本次会话资源"><div><b>SKILL</b><span>{selectedSkills.length ? selectedSkills.map(skill => <em key={skill.id}><Sparkles size={11} />{skill.name}<button disabled={busy} aria-label={`移除 ${skill.name}`} onClick={() => void changeResources({ skills: skillIds.filter(id => id !== skill.id) })}>×</button></em>) : <small>未加载 · 使用通用对话</small>}<button className="aip-add" disabled={busy} onClick={() => setPickingSkills(true)}>+ 加载</button></span></div><div><b>知识库</b><span>{selectedKnowledge.length ? selectedKnowledge.map(item => <em key={item.id}><Check size={11} />{item.name}<button disabled={busy} aria-label={`移除 ${item.name}`} onClick={() => void changeResources({ knowledge: knowledgeIds.filter(id => id !== item.id) })}>×</button></em>) : <small>未挂载</small>}<button className="aip-add" disabled={busy} onClick={() => setPickingKnowledge(true)}>+ 挂载</button></span></div></section>
+        <section className="aip-resources" aria-label="本次会话资源"><div><b>SKILL</b><span>{selectedSkills.length ? selectedSkills.map(skill => <em key={skill.id}><Sparkles size={11} />{skill.name}<button disabled={busy} title="移除 Skill；仅移除它带入的知识库来源" aria-label={`移除 ${skill.name}`} onClick={() => void changeResources({ skills: skillIds.filter(id => id !== skill.id) })}>×</button></em>) : <small>未加载 · 使用通用对话</small>}<button className="aip-add" disabled={busy} onClick={() => setPickingSkills(true)}>+ 加载</button></span></div><div><b>知识库</b><span>{selectedKnowledge.length ? selectedKnowledge.map(item => { const id = String(item.id); const sources = knowledgeSourceMap.get(id) ?? []; const manual = manualKnowledgeIds.includes(id); return <em key={id} className={sources.length ? 'context' : ''} title={sources.length ? `由 Skill 自动挂载：${sources.join('、')}` : '手动挂载'}><Check size={11} />{item.name}{sources.length ? <i className="aip-resource-origin">来自 {sources.join('、')}</i> : manual ? <i className="aip-resource-origin">手动</i> : null}{!sources.length && manual && <button disabled={busy} aria-label={`移除 ${item.name}`} onClick={() => void changeResources({ manualKnowledge: manualKnowledgeIds.filter(knowledgeId => knowledgeId !== id) })}>×</button>}</em> }) : <small>未挂载</small>}<button className="aip-add" disabled={busy} onClick={() => setPickingKnowledge(true)}>+ 挂载</button></span></div></section>
         <div className="aip-messages" role="log" aria-live="polite">{loading && !active ? <p className="aip-working"><LoaderCircle size={13} className="spin" />正在加载会话记录…</p> : !activeMessages.length && <section className="aip-welcome"><h3>你好，我是平台级 AI 入口</h3><p>消息、会话、已选资源和模型均保存到后端；可加载已上线 Skill 后发起真实任务。</p><div>{suggestions.map(([tag, value]) => <button key={tag} onClick={() => setText(value)}><span>{tag}</span>{value}</button>)}</div></section>}{activeMessages.map(message => message.role === 'user' ? <article className="aip-message user" key={message.id}><p>{message.text}</p><footer><button className="aip-action" onClick={() => void copy(message.text)}>复制</button><button className="aip-action" disabled={busy} onClick={() => resend(message)}>修改后重发</button></footer>{message.attachments?.length ? <div className="aip-message-meta">{message.attachments.map(name => <span key={name}><Paperclip size={11} />{name}</span>)}</div> : null}</article> : <article className={`aip-message bot ${message.status ?? 'completed'}`} key={message.id}>{message.status === 'generating' ? <><header><Sparkles size={14} /><b>对话服务 · 生成中</b><span>流式返回</span></header><div className="aip-progress"><i /></div>{message.text ? <p>{message.text}</p> : <p className="aip-working"><LoaderCircle size={13} className="spin" />正在调用后端模型…</p>}<footer>{task?.taskId === message.taskId && <button className="aip-action danger" onClick={() => void stop()}><Square size={12} />停止生成</button>}<button className="aip-action ghost" onClick={close}>转入后台</button></footer></> : <><header>{message.status === 'failed' ? <X size={14} /> : message.status === 'stopped' ? <Square size={13} /> : <Check size={14} />}<b>{message.status === 'failed' ? '生成失败' : message.status === 'stopped' ? '已停止生成' : 'AI 助手'}</b><span>{message.status === 'completed' ? '已完成' : ''}</span></header><p>{message.text}</p>{!!message.artifacts?.length && <div className="aip-message-meta">{message.artifacts.map(artifact => <button type="button" className="aip-action" key={artifact.artifactId} onClick={() => setSelectedArtifactId(artifact.artifactId)}><FileText size={14} />查看产出物：{artifact.fileName}</button>)}</div>}<footer><button className="aip-action" onClick={() => void copy(message.text)}><Copy size={12} />复制</button>{message.taskId && <><label className="aip-action">替换附件重试<input type="file" multiple hidden accept={chatFileExtensions.join(',')} disabled={busy} onChange={event => { const incoming = Array.from(event.target.files ?? []); const checked = validateResourceFiles(incoming, [], chatFileExtensions, chatFileLimits); if (checked.errors.length) setError(checked.errors.join('；')); else if (checked.accepted.length) void retry(message, checked.accepted); event.target.value = '' }} /></label><button className="aip-action" disabled={busy} onClick={() => void retry(message)}><RotateCcw size={12} />重新生成</button></>}{message.status === 'completed' && <span className="aip-feedback"><button className={message.feedback === 'up' ? 'selected up' : ''} aria-label="有帮助" onClick={() => void feedback(message, 'up').catch(reason => setError((reason as Error).message))}><ThumbsUp size={13} /></button><button className={message.feedback === 'down' ? 'selected down' : ''} aria-label="需改进" onClick={() => setFeedbackTarget(message)}><ThumbsDown size={13} /></button></span>}</footer></>}</article>)}<div ref={bottom} /></div>
         <section className="aip-composer"><button className="aip-action" disabled={busy || !active} onClick={() => setConfirmClear(true)}>清空当前会话</button>{resendSource && <p className="helper-text">正在修改原请求；发送后保留原消息。<button onClick={() => setResendSource(undefined)}>取消重发</button></p>}<div className="aip-attachments">{files.map((file, index) => <span key={`${file.name}-${index}`}><Paperclip size={11} />{file.name}<button disabled={busy} aria-label={`移除 ${file.name}`} onClick={() => setFiles(current => current.filter((_, fileIndex) => fileIndex !== index))}>×</button></span>)}</div><div className="aip-input"><textarea aria-label="向智能助手提问" placeholder="描述你的诉求，Enter 发送，Shift + Enter 换行" maxLength={40000} value={text} disabled={busy || loading} onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() } }} /><div><label className={busy ? 'disabled' : ''}><Paperclip size={16} /><input type="file" multiple accept={chatFileExtensions.join(',')} disabled={busy} aria-label="上传本次对话文件" onChange={event => { addFiles(Array.from(event.target.files ?? [])); event.target.value = '' }} /></label><small>单文件 ≤ 20 MB，最多 10 个</small><span className="aip-model-picker"><button className={`aip-model ${modelOpen ? 'on' : ''}`} type="button" aria-label="选择对话模型" aria-haspopup="dialog" aria-expanded={modelOpen} disabled={busy} onClick={() => setModelOpen(value => !value)}><Sparkles size={12} /><span>{modelLabel}</span><ChevronDown size={12} /></button>{modelOpen && <span className="aip-model-pop" role="dialog" aria-label="模型选择"><b>模型 · 能力与成本的权衡</b><button className={!model ? 'selected' : ''} onClick={() => { setModelOpen(false); void changeResources({ selectedModel: null }) }}><span><strong>自动 <em>推荐</em></strong><small>按诉求复杂度、已加载 Skill 和知识库自动选择健康模型</small></span>{!model && <Check size={16} />}</button>{models.map(item => <button key={item.name} className={model === item.name ? 'selected' : ''} disabled={['unavailable', 'unconfigured'].includes(healthFor(item.name)?.status ?? '')} onClick={() => { setModelOpen(false); void changeResources({ selectedModel: item.name }) }}><span><strong>{item.displayName}<em className={`model-tier ${healthFor(item.name)?.status ?? 'checking'}`}>{modelTier(item.name)}</em></strong><small>{modelDescription(item.name)}</small></span>{model === item.name && <Check size={16} />}</button>)}<i>健康状态由后端实时检测；自动分配会在结果中标注实际使用的模型</i></span>}</span>{busy ? <button className="aip-stop" onClick={() => void stop()}><Square size={12} />停止</button> : <button className="aip-send" disabled={loading || (!text.trim() && !files.length)} onClick={() => void send()}><Send size={13} />发送</button>}</div></div>{error && <p className="aip-error" role="alert">{error}</p>}</section>
         {drawer && <AssistantSessions sessions={sessions} activeId={activeId} onClose={() => setDrawer(false)} onSelect={id => { setDrawer(false); void loadConversation(id) }}
           onNew={() => void newSession()} onFavorite={item => void toggleFavorite(item)} onDelete={removeSession} onRenamed={patchSession}
-          onClearAll={async () => { await deleteAllChatConversations(); setSessions([]); setMessages({}); setActiveId(''); setSkillIds([]); setKnowledgeIds([]) }} />}
+          onClearAll={async () => { await deleteAllChatConversations(); sessions.forEach(item => removeStoredManualKnowledge(item.id)); setSessions([]); setMessages({}); setActiveId(''); setSkillIds([]); setManualKnowledgeIds([]) }} />}
         {!maximized && <button className="aip-resize-handle" aria-label="调整助手尺寸" onPointerDown={event => { event.preventDefault(); event.stopPropagation(); resize.current = { x: event.clientX, y: event.clientY, ...geometry.size }; event.currentTarget.setPointerCapture(event.pointerId) }}>↖</button>}
 
       </aside>}
@@ -236,9 +302,9 @@ export default function FloatingAssistant({ contextLabel = '当前页面', conte
     {selectedArtifactId && <ArtifactWorkbench key={selectedArtifactId} artifactId={selectedArtifactId} onClose={() => setSelectedArtifactId(undefined)} />}
     {notice && <div className="aip-toast" role="status">{notice}</div>}
     {pickingSkills && <AssistantResourcePicker kind="skills" selected={skillIds} busy={busy} onClose={() => setPickingSkills(false)}
-      onSkill={async item => { setCatalog(rows => [...rows.filter(row => row.id !== item.id), item]); await changeResources({ skills: [...skillIds, item.id] }, true) }} onKnowledge={async () => {}} />}
+      onSkill={async item => { const skill = await getCatalogSkill(item.id); const nextCatalog = [...catalog.filter(row => row.id !== skill.id), skill]; setCatalog(nextCatalog); await changeResources({ skills: [...skillIds, skill.id] }, true, nextCatalog) }} onKnowledge={async () => {}} />}
     {pickingKnowledge && <AssistantResourcePicker kind="knowledge" selected={knowledgeIds} busy={busy} onClose={() => setPickingKnowledge(false)}
-      onKnowledge={async item => { setKnowledgeBases(rows => [...rows.filter(row => row.id !== item.id), item]); await changeResources({ knowledge: [...knowledgeIds, item.id] }, true) }} onSkill={async () => {}} />}
+      onKnowledge={async item => { setKnowledgeBases(rows => [...rows.filter(row => row.id !== item.id), item]); await changeResources({ manualKnowledge: [...manualKnowledgeIds, item.id] }, true) }} onSkill={async () => {}} />}
 
   </>
 }

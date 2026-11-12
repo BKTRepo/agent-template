@@ -53,6 +53,7 @@ export default function AssistantResourcePicker({ kind, selected, busy, onSkill,
       {kind === 'skills' && <SearchSelect label="助手技能类" value={filters.classId} options={metadata?.skill_classes.filter(row => row.is_enabled) ?? []} placeholder="全部技能类" onChange={classId => setFilters({ ...filters, classId })} />}
       <SearchSelect label="助手所属应用" value={filters.application} options={metadata?.applications ?? []} placeholder="全部应用" onChange={application => setFilters({ ...filters, application })} />
       {kind === 'skills' && <SearchSelect label="助手维护人" value={filters.maintainer} options={metadata?.maintainers ?? []} placeholder="全部维护人" onChange={maintainer => setFilters({ ...filters, maintainer })} />}
+      {kind === 'knowledge' && <input aria-label="知识库维护人搜索" placeholder="维护人" value={filters.maintainer} onChange={event => setFilters({ ...filters, maintainer: event.target.value })} />}
       <button className="button primary" disabled={blocked}>搜索</button><button type="button" className="button" disabled={blocked} onClick={() => search(true)}>重置</button>
     </form>
     {error && <p className="error-banner" role="alert">{error}<button className="button small" disabled={blocked} onClick={() => setReload(value => value + 1)}>重试</button></p>}
@@ -60,8 +61,8 @@ export default function AssistantResourcePicker({ kind, selected, busy, onSkill,
     <div className="assistant-skill-results">{kind === 'skills' ? skills.map(item => <article key={item.id}><div><h3>{item.name}</h3><p>{item.description}</p>
       <div className="knowledge-selected"><span className="status-tag blue">{metadata?.skill_classes.find(row => row.id === item.classId)?.name}</span><span>{applicationName(item.applicationIds)}</span></div></div>
       <button className="button small" disabled={blocked || selected.includes(item.id)} onClick={() => void choose(item)}>{selected.includes(item.id) ? '已加载' : '加载'}</button></article>)
-      : <table className="knowledge-picker-table"><thead><tr>{['知识库', '标签', '可见范围', '文档数', '操作'].map(label => <th key={label}>{label}</th>)}</tr></thead>
-        <tbody>{knowledge.map(item => <tr key={item.id}><td>{item.name}</td><td>{item.tagName || item.tag}</td><td>{item.scope === 'public' ? '全体可见' : '仅本人可见'}</td><td>{item.files.length}</td>
+      : <table className="knowledge-picker-table"><thead><tr>{['知识库', '标签', '应用系统', '维护人', '可见范围', '文档数', '操作'].map(label => <th key={label}>{label}</th>)}</tr></thead>
+        <tbody>{knowledge.map(item => <tr key={item.id}><td>{item.name}</td><td>{item.tagName || item.tag}</td><td>{applicationName(item.applicationIds)}</td><td>{item.maintainer || item.creatorName || '未记录'}</td><td>{item.scope === 'public' ? '全体可见' : '仅本人可见'}</td><td>{item.files.length}</td>
           <td><button className="button small" disabled={blocked || selected.includes(item.id)} onClick={() => void choose(item)}>{selected.includes(item.id) ? '已挂载' : '挂载'}</button></td></tr>)}</tbody></table>}
       {!loading && !error && !(kind === 'skills' ? skills.length : knowledge.length) && <p className="empty-table">未找到可加载的{kind === 'skills' ? '已上线技能' : '已处理完成知识库'}。</p>}
     </div>
