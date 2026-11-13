@@ -787,5 +787,6 @@ h1,h2,h3,p { margin:0; }
 .aip-message.user footer .aip-action::after { content:'⧉'; font-size:15px; font-weight:400; line-height:1; }
 .aip-message.user footer .aip-action + .aip-action::after { content:'✎'; font-size:17px; }
 .aip-message.user footer .aip-action:hover { color:#0b5bd3; background:#eaf3ff; box-shadow:none; }
+.aip-head-actions>button[aria-label='后台任务'],.aip-head-actions>button[aria-label='偏好设置'] { display:none; }
 .assistant-owned-dialog .artifact-case-editor label input[type=radio] { width:auto; margin-right:8px; }
 .assistant-owned-dialog>div>label { display:block; margin:12px 0; }
