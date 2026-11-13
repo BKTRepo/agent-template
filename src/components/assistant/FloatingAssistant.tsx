@@ -44,6 +44,7 @@ function effectiveKnowledgeIds(skillIds: string[], manualKnowledgeIds: string[],
 }
 
 const manualKnowledgeStorageKey = (conversationId: string) => `assistant.manual-knowledge.${conversationId}`
+const lastConversationStorageKey = 'assistant.last-conversation'
 function readManualKnowledge(conversationId: string, availableIds: string[], automaticIds: Set<string>) {
   try {
     const stored = JSON.parse(window.localStorage.getItem(manualKnowledgeStorageKey(conversationId)) || 'null')
@@ -56,6 +57,12 @@ function storeManualKnowledge(conversationId: string, ids: string[]) {
 }
 function removeStoredManualKnowledge(conversationId: string) {
   try { window.localStorage.removeItem(manualKnowledgeStorageKey(conversationId)) } catch { /* ignore */ }
+}
+function readLastConversation() {
+  try { return window.sessionStorage.getItem(lastConversationStorageKey) || '' } catch { return '' }
+}
+function storeLastConversation(conversationId: string) {
+  try { window.sessionStorage.setItem(lastConversationStorageKey, conversationId) } catch { /* 当前会话仍可正常使用 */ }
 }
 
 export default function FloatingAssistant({ contextLabel = '当前页面', contextModule = 'developer' }: { contextLabel?: string; contextModule?: AssistantModule }) {
@@ -101,6 +108,7 @@ export default function FloatingAssistant({ contextLabel = '当前页面', conte
 
   useEffect(() => { taskRef.current = runningTasks }, [runningTasks])
   useEffect(() => () => Object.values(taskRef.current).forEach(item => item.controller.abort()), [])
+  useEffect(() => { if (activeId) storeLastConversation(activeId) }, [activeId])
   useEffect(() => { if (open) bottom.current?.scrollIntoView({ block: 'nearest' }) }, [open, activeId, activeMessages.length, task])
   useEffect(() => { if (!notice) return; const timer = window.setTimeout(() => setNotice(''), 2200); return () => window.clearTimeout(timer) }, [notice])
   useEffect(() => {
@@ -177,13 +185,15 @@ export default function FloatingAssistant({ contextLabel = '当前页面', conte
   }
   async function openPanel() {
     setOpen(true); setError('')
-    if (loaded.current) return
+    if (loaded.current && sessions.some(item => item.id === activeId)) return
     setLoading(true)
     try {
       const [history, availableModels, health] = await Promise.all([listChatConversations(), listChatModels(), listChatModelHealth().catch(() => [])])
       loaded.current = true; setSessions(history.items); setModels(availableModels); setModelHealth(Object.fromEntries(health.map(item => [item.model, item])))
       if (health.some(item => item.status === 'checking' || item.refreshing)) window.setTimeout(() => { void listChatModelHealth().then(items => setModelHealth(Object.fromEntries(items.map(item => [item.model, item])))).catch(() => undefined) }, 1600)
-      if (history.items[0]) await loadConversation(history.items[0].id)
+      const lastConversationId = readLastConversation()
+      const conversation = history.items.find(item => item.id === lastConversationId) ?? history.items[0]
+      if (conversation) await loadConversation(conversation.id)
     } catch (reason) { setError((reason as Error).message) } finally { setLoading(false) }
   }
   function close() { setOpen(false); setDrawer(false); trigger.current?.focus() }
