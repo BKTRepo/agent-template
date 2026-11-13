@@ -17906,6 +17906,33 @@ h1:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#
 .aip-input:focus-within:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   box-shadow: 0 0 0 2px rgba(22,119,255,.10);
 }
+.aip-progress:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  --aip-progress-width: 0%;
+  position: relative;
+  height: 5px;
+  margin-top: 20px;
+  overflow: visible;
+  background: #e8eff8;
+}
+.aip-progress:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#)::after {
+  position: absolute;
+  right: 0;
+  bottom: 8px;
+  color: #6f86a4;
+  content: attr(data-progress);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.aip-progress:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) i {
+  width: var(--aip-progress-width);
+  transform: none;
+  animation: none;
+  transition: width .35s ease-out;
+}
+.aip-message.bot.completed:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#)>header span::after {
+  content: ' · 100%';
+  color: #1677ff;
+}
 .assistant-owned-dialog:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) .artifact-case-editor label input[type=radio] {
   width: auto;
   margin-right: 8px;

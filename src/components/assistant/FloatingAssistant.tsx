@@ -74,7 +74,7 @@ export default function FloatingAssistant({ contextLabel = '当前页面', conte
   const [preferences, setPreferences] = useState(false), [taskListOpen, setTaskListOpen] = useState(false), [confirmClear, setConfirmClear] = useState(false)
   const [feedbackTarget, setFeedbackTarget] = useState<ChatMessage>(), [resendSource, setResendSource] = useState<number>()
   const resize = useRef<{ x: number; y: number; width: number; height: number } | null>(null)
-  const trigger = useRef<HTMLButtonElement>(null), bottom = useRef<HTMLDivElement>(null), loaded = useRef(false), taskRef = useRef<Record<number, ActiveTask>>({}), triggerDragged = useRef(false)
+  const trigger = useRef<HTMLButtonElement>(null), bottom = useRef<HTMLDivElement>(null), loaded = useRef(false), taskRef = useRef<Record<number, ActiveTask>>({}), taskProgressStarted = useRef<Record<number, number>>({}), triggerDragged = useRef(false)
   const drag = useRef<{ x: number; y: number; offsetX: number; offsetY: number; source: 'panel' | 'trigger'; bounds: DOMRect } | null>(null)
   const task = Object.values(runningTasks).find(item => item.conversationId === activeId)
   const active = sessions.find(session => session.id === activeId)
@@ -103,6 +103,20 @@ export default function FloatingAssistant({ contextLabel = '当前页面', conte
   useEffect(() => () => Object.values(taskRef.current).forEach(item => item.controller.abort()), [])
   useEffect(() => { if (open) bottom.current?.scrollIntoView({ block: 'nearest' }) }, [open, activeId, activeMessages.length, task])
   useEffect(() => { if (!notice) return; const timer = window.setTimeout(() => setNotice(''), 2200); return () => window.clearTimeout(timer) }, [notice])
+  useEffect(() => {
+    const activeTaskIds = [...Object.values(runningTasks).filter(item => item.conversationId === activeId).map(item => item.taskId), ...taskRows.filter(item => item.conversationId === activeId && ['pending', 'running', 'cancelling', 'recovering'].includes(item.status)).map(item => item.taskId)]
+    if (!activeTaskIds.length) return
+    const taskId = activeTaskIds[0]
+    taskProgressStarted.current[taskId] ??= Date.now()
+    const tick = () => {
+      const elapsed = Date.now() - (taskProgressStarted.current[taskId] ?? Date.now())
+      const progress = elapsed >= 120_000 ? 99 : Math.min(98, Math.floor(99 * (1 - Math.exp(-elapsed / 30_000))))
+      setTaskProgress(progress)
+    }
+    tick()
+    const timer = window.setInterval(tick, 400)
+    return () => window.clearInterval(timer)
+  }, [activeId, runningTasks, taskRows])
   useEffect(() => {
     if (!open) return
     const receivePastedImage = (event: ClipboardEvent) => {
@@ -221,7 +235,21 @@ export default function FloatingAssistant({ contextLabel = '当前页面', conte
     if (result.accepted.length) setNotice(`已添加 ${result.accepted.length} 张粘贴图片`)
     return true
   }
-  function applyTask(conversationId: string, messageId: string, current: ChatTask) { updateMessage(conversationId, messageId, message => ({ ...message, text: current.content || (current.status === 'failed' ? current.error || '生成失败，请稍后重试。' : message.text), status: statusOf(current), artifacts: current.artifacts, taskId: current.taskId, serverId: current.messageId })) }
+  function setTaskProgress(progress: number) {
+    document.querySelectorAll<HTMLElement>('.assistant-float .aip-message.generating .aip-progress').forEach(node => {
+      node.style.setProperty('--aip-progress-width', `${progress}%`)
+      node.dataset.progress = `${progress}%`
+    })
+  }
+  function applyTask(conversationId: string, messageId: string, current: ChatTask) {
+    const apply = () => updateMessage(conversationId, messageId, message => ({ ...message, text: current.content || (current.status === 'failed' ? current.error || '生成失败，请稍后重试。' : message.text), status: statusOf(current), artifacts: current.artifacts, taskId: current.taskId, serverId: current.messageId }))
+    if (current.status === 'success') {
+      setTaskProgress(100)
+      window.setTimeout(apply, 220)
+      return
+    }
+    apply()
+  }
   async function followTask(running: ActiveTask) {
     try { await streamChatTask(running.taskId, result => applyTask(running.conversationId, String(running.messageId), result), running.controller.signal) }
     catch (reason) { if (!running.controller.signal.aborted) { const message = (reason as Error).message || '生成失败，请稍后重试。'; updateMessage(running.conversationId, String(running.messageId), item => ({ ...item, status: 'failed', text: message })); setError(message) } }

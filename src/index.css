@@ -765,5 +765,9 @@ h1,h2,h3,p { margin:0; }
 .aip-attachments button { display:grid; place-items:center; width:16px; height:16px; flex:0 0 16px; border-radius:50%; color:#7896bb; }
 .aip-attachments button:hover { background:#eaf3ff; color:#d93b3b; }
 .aip-input:focus-within { box-shadow:0 0 0 2px rgba(22,119,255,.10); }
+.aip-progress { --aip-progress-width:0%; position:relative; height:5px; margin-top:20px; overflow:visible; background:#e8eff8; }
+.aip-progress::after { position:absolute; right:0; bottom:8px; color:#6f86a4; content:attr(data-progress); font-size:10px; font-variant-numeric:tabular-nums; }
+.aip-progress i { width:var(--aip-progress-width); transform:none; animation:none; transition:width .35s ease-out; }
+.aip-message.bot.completed>header span::after { content:' · 100%'; color:#1677ff; }
 .assistant-owned-dialog .artifact-case-editor label input[type=radio] { width:auto; margin-right:8px; }
 .assistant-owned-dialog>div>label { display:block; margin:12px 0; }
