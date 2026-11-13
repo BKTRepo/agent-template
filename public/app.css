@@ -17933,6 +17933,127 @@ h1:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#
   content: ' · 100%';
   color: #1677ff;
 }
+.aip-message.bot:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) .aip-message-meta .aip-action {
+  min-width: 0;
+  height: 27px;
+  gap: 5px;
+  padding: 0 9px;
+  border-color: #c7dcf8;
+  border-radius: 7px;
+  color: #145fb7;
+  background: #f5f9ff;
+  box-shadow: 0 1px 2px rgba(22,92,183,.08);
+  font-size: 0;
+  white-space: nowrap;
+}
+.aip-message.bot:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) .aip-message-meta .aip-action::after {
+  content: '查看产出物';
+  font-size: 11px;
+  font-weight: 600;
+}
+.aip-message.bot:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) .aip-message-meta .aip-action:hover {
+  border-color: #77abef;
+  color: #0b53c0;
+  background: #eaf3ff;
+  box-shadow: 0 2px 5px rgba(22,92,183,.14);
+}
+.aip-message.bot:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) .aip-message-meta .aip-action svg {
+  flex: 0 0 auto;
+}
+.aip-message.bot.generating:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) footer .aip-action.danger {
+  display: none;
+}
+.aip-message.user:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) footer {
+  position: absolute;
+  right: -29px;
+  bottom: 1px;
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.aip-message.user:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) footer .aip-action {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #d7e5f7;
+  border-radius: 7px;
+  color: #5d89c8;
+  background: #fff;
+  box-shadow: 0 2px 5px rgba(26,76,148,.12);
+  font-size: 0;
+}
+.aip-message.user:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) footer .aip-action::after {
+  content: '⧉';
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1;
+}
+.aip-message.user:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) footer .aip-action:hover {
+  border-color: #9fc3f6;
+  color: #0b5bd3;
+  background: #f5f9ff;
+  box-shadow: 0 3px 7px rgba(26,76,148,.18);
+}
+.aip-message.user:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) footer .aip-action + .aip-action {
+  display: none;
+}
+.aip-message.user:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  transition: margin-bottom .16s ease;
+}
+.aip-message.user:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) footer {
+  top: 100%;
+  right: 0;
+  bottom: auto;
+  width: max-content;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  padding-top: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-3px);
+  transition: opacity .16s ease,transform .16s ease;
+}
+.aip-message.user:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),.aip-message.user:focus-within:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  margin-bottom: 25px;
+}
+.aip-message.user:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) footer,.aip-message.user:focus-within:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) footer {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+.aip-message.user:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) footer .aip-action,.aip-message.user:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) footer .aip-action + .aip-action {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  color: #8598af;
+  background: transparent;
+  box-shadow: none;
+  font-size: 0;
+}
+.aip-message.user:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) footer .aip-action::after {
+  content: '⧉';
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1;
+}
+.aip-message.user:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) footer .aip-action + .aip-action::after {
+  content: '✎';
+  font-size: 17px;
+}
+.aip-message.user:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) footer .aip-action:hover {
+  color: #0b5bd3;
+  background: #eaf3ff;
+  box-shadow: none;
+}
 .assistant-owned-dialog:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) .artifact-case-editor label input[type=radio] {
   width: auto;
   margin-right: 8px;
