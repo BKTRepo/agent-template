@@ -42,9 +42,9 @@ export default function AssistantSessions({ sessions, activeId, onClose, onSelec
     {error && <p role="alert" className="aip-error">{error}</p>}
     <div>{rows.map(session => <article key={session.id} className={session.id === activeId ? 'active' : ''}>
       <button className={session.favorite ? 'favorite' : ''} aria-label={session.favorite ? '取消收藏' : '收藏会话'} onClick={() => onFavorite(session)}><Star size={13} /></button>
-      <div><button className="aip-session-select" onClick={() => onSelect(session.id)}><b>{session.title}</b><p>{new Date(session.updatedAt).toLocaleString('zh-CN')}</p></button>
-        <button className="aip-session-rename" aria-label={`重命名 ${session.title}`} onClick={() => { setRenaming(session); setTitle(session.title) }}><Pencil size={11} />重命名</button></div>
+      <div><button className="aip-session-select" onClick={() => onSelect(session.id)}><b>{session.title}</b><p>{new Date(session.updatedAt).toLocaleString('zh-CN')}</p></button></div>
       {!!session.unreadCount && <i>{session.unreadCount}</i>}
+      <button className="aip-session-rename" title="重命名" aria-label={`重命名 ${session.title}`} onClick={() => { setRenaming(session); setTitle(session.title) }}><Pencil size={13} /></button>
       <button className="delete" aria-label={`删除会话 ${session.title}`} onClick={() => setDeleting(session.id)}><Trash2 size={13} /></button>
     </article>)}{!rows.length && <p className="empty-table">暂无匹配会话</p>}</div>
     <button className="aip-action danger" onClick={() => setDeleting('all')}>清空全部会话</button>

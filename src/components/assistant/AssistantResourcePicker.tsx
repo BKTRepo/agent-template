@@ -46,7 +46,7 @@ export default function AssistantResourcePicker({ kind, selected, busy, onSkill,
     catch (reason) { setError((reason as Error).message) } finally { setAdding(false) }
   }
   const applicationName = (ids: string[] = []) => ids.map(id => metadata?.applications.find(row => row.id === id)?.name || id).join('、') || '未关联应用'
-  return <Dialog className="assistant-owned-dialog" wide title={kind === 'skills' ? '加载 Skill 到对话台' : '挂载知识库到对话台'} busy={adding} onClose={onClose}
+  return <Dialog className="assistant-owned-dialog" wide title={kind === 'skills' ? '加载 Skill 到对话台' : '加载知识库到对话台'} busy={adding} onClose={onClose}
     footer={<button className="button" disabled={adding} onClick={onClose}>完成</button>}>
     <form className="catalog-filters" onSubmit={event => { event.preventDefault(); search() }}>
       <input aria-label={kind === 'skills' ? '助手技能名称搜索' : '助手知识库名称搜索'} placeholder="名称模糊搜索" value={filters.name} onChange={event => setFilters({ ...filters, name: event.target.value })} />
@@ -63,7 +63,7 @@ export default function AssistantResourcePicker({ kind, selected, busy, onSkill,
       <button className="button small" disabled={blocked || selected.includes(item.id)} onClick={() => void choose(item)}>{selected.includes(item.id) ? '已加载' : '加载'}</button></article>)
       : <table className="knowledge-picker-table"><thead><tr>{['知识库', '标签', '应用系统', '维护人', '可见范围', '文档数', '操作'].map(label => <th key={label}>{label}</th>)}</tr></thead>
         <tbody>{knowledge.map(item => <tr key={item.id}><td>{item.name}</td><td>{item.tagName || item.tag}</td><td>{applicationName(item.applicationIds)}</td><td>{item.maintainer || item.creatorName || '未记录'}</td><td>{item.scope === 'public' ? '全体可见' : '仅本人可见'}</td><td>{item.files.length}</td>
-          <td><button className="button small" disabled={blocked || selected.includes(item.id)} onClick={() => void choose(item)}>{selected.includes(item.id) ? '已挂载' : '挂载'}</button></td></tr>)}</tbody></table>}
+          <td><button className="button small" disabled={blocked || selected.includes(item.id)} onClick={() => void choose(item)}>{selected.includes(item.id) ? '已加载' : '加载'}</button></td></tr>)}</tbody></table>}
       {!loading && !error && !(kind === 'skills' ? skills.length : knowledge.length) && <p className="empty-table">未找到可加载的{kind === 'skills' ? '已上线技能' : '已处理完成知识库'}。</p>}
     </div>
     <ListPagination label="助手资源分页" total={total} page={page} pages={pages} busy={blocked} onPageChange={setPage} />

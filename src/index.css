@@ -683,6 +683,16 @@ h1,h2,h3,p { margin:0; }
 .assistant-trigger:hover .aip-eye { transform:scaleY(1.32); transform-origin:center; }
 .aip-avatar-face { width:20px; height:20px; display:grid; place-items:center; border-radius:7px; color:#fff; background:#22434b; font-size:8px; font-weight:700; letter-spacing:.3px; }
 .aip-title span { font-size:9.5px; font-weight:600; letter-spacing:.3px; }
+.aip-title { font-size:0; }
+.aip-title::before { content:'AI 助手'; font-size:13.5px; }
+.aip-title span { font-size:9.5px; }
+.aip-resources > div:nth-child(2) small { font-size:0; }
+.aip-resources > div:nth-child(2) small::after { content:'未加载'; font-size:11px; }
+.aip-resources > div:nth-child(2) .aip-add { font-size:0; }
+.aip-resources > div:nth-child(2) .aip-add::after { content:'+ 加载'; font-size:11px; }
+.aip-welcome h3 { font-size:0 !important; }
+.aip-welcome h3::after { content:'你好，我是ai助手'; font-size:13px; }
+.aip-model-pop > b,.aip-model-pop > i { display:none; }
 .aip-messages { gap:11px; padding:14px 44px 8px; background:#f6f9fd; overscroll-behavior:contain; }
 .aip-message { max-width:calc(86% - 32px); font-size:13px; line-height:1.63; letter-spacing:.1px; }
 .aip-message.user { position:relative; max-width:calc(86% - 32px); margin-right:32px; padding:9px 12px; color:#fff; background:linear-gradient(180deg,#0f68dd,#0b53c0); box-shadow:0 6px 16px -8px rgba(11,83,192,.65); }
@@ -742,6 +752,8 @@ h1,h2,h3,p { margin:0; }
 .aip-session-drawer .aip-session-select { flex:1 1 100%; }
 .aip-session-rename { display:inline-flex; gap:3px; align-items:center; height:22px; padding:0 7px; border:1px solid #dbe6f3; border-radius:6px; color:#607492; background:#fff; font-size:10.5px; cursor:pointer; transition:border-color .16s,color .16s,background .16s; }
 .aip-session-rename:hover { border-color:#a9c9f7; color:#0b5bd3; background:#f3f8ff; }
+.aip-session-drawer article > .aip-session-rename { display:grid; width:22px; height:22px; place-items:center; padding:0; border:0; border-radius:5px; color:#8497af; background:transparent; }
+.aip-session-drawer article > .aip-session-rename:hover { border:0; color:#0b5bd3; background:#eef5ff; }
 .aip-rename-dialog .dialog-body { padding:20px 22px 18px; }
 .aip-rename-form { display:grid; gap:8px; }
 .aip-rename-form label { color:#41526b; font-size:12px; font-weight:600; }
@@ -790,3 +802,4 @@ h1,h2,h3,p { margin:0; }
 .aip-head-actions>button[aria-label='后台任务'],.aip-head-actions>button[aria-label='偏好设置'] { display:none; }
 .assistant-owned-dialog .artifact-case-editor label input[type=radio] { width:auto; margin-right:8px; }
 .assistant-owned-dialog>div>label { display:block; margin:12px 0; }
+.aip-model-pop > b,.aip-model-pop > i { display:none; }
