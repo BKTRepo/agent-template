@@ -13,20 +13,20 @@ UAT 同时保留原知识库问答 `/chat/stream`、`/chat/resume-query`、`/cha
 - `direct`（默认）：复用 `ANTHROPIC_BASE_URL` 和 `ANTHROPIC_API_KEY`。DeepSeek 未单独设置时使用 `ANTHROPIC_MODEL`。
 - `ccr`：使用行内已部署的 CCR，填写 `CHAT_CCR_BASE_URL`、`CHAT_CCR_AUTH_MODE` 和 `CHAT_CCR_API_KEY`。地址是 CCR 的 Anthropic 兼容服务基础地址，不是模型网关的 `/v1/chat/completions` 完整地址。认证方式支持 `bearer`（默认）、`api_key`（`x-api-key`）和 `none`（CCR 不校验凭据）。`none` 模式下 SDK 仍发送非机密占位 token；是否接受需在目标环境验证。
 
-公网模型映射使用 `CHAT_MODEL_DEEPSEEK`、`CHAT_MODEL_GLM51`、`CHAT_MODEL_QWEN38_NOTHINK`、`CHAT_MODEL_QWEN38_THINK` 和 `CHAT_MODEL_QWEN35_NOTHINK`。行内 CCR 优先使用对应的 `CHAT_CCR_MODEL_*`，未填写时兼容读取 `CHAT_MODEL_*`；公网直连不读取 `CHAT_CCR_MODEL_*`。`ccr` 模式不会回退到公网的 `ANTHROPIC_MODEL`，必须填写 CCR 实际接受的模型名或路由标识。未配置的模型不出现在列表和健康检测结果中。健康检测会向各已配置模型发送短请求并可能消耗少量 token；429 表示限流，不代表测到了排队人数。
+公网模型映射使用 `CHAT_MODEL_DEEPSEEK` 等配置。CCR 模式从网关 `/v1/models` 动态读取模型，使用 CCR 返回的完整 ID 展示、校验和调用；无需配置 `CHAT_CCR_MODEL_*` 或模型清单。列表进程内缓存 30 秒，CCR 不可用时返回错误而不展示过期配置。健康检测会向模型发送短请求并可能消耗少量 token；429 表示限流，不代表测到了排队人数。
 
-模型不限定为上述五种。设置 `CHAT_MODEL_REGISTRY` 为单行 JSON 数组即可自定义清单，例如：
+公网直连模式可以设置 `CHAT_MODEL_REGISTRY` 自定义清单，例如：
 
 ```dotenv
 CHAT_MODEL_REGISTRY='[{"id":"deepseek","name":"DeepSeek","direct_model":"deepseek-flash","ccr_model":"bank,deepseek"},{"id":"new-model","name":"新模型","ccr_model":"bank,new-model"}]'
 CHAT_DEFAULT_MODEL=deepseek
 ```
 
-`id` 是悬浮窗传参及保存资源时使用的稳定标识；`direct_model`、`ccr_model` 分别是两个环境中实际的网关模型名或 CCR 路由标识。只使用一个环境时可只填写对应映射；没有当前环境映射或网关连接配置不完整的模型不会出现在列表。新模型加入清单并配置映射即可，无须改代码或建表。`GET /chat/models` 的 `name` 返回稳定 id，供发送接口使用；`display_name` 返回当前网关实际调用的完整模型名，供前端展示。健康状态中的 `model` 同样使用 id。清单未设置时继续兼容原有映射，清单设置后只使用清单中的模型。出现在列表中仅表示已配置，可用性仍以健康检测为准。
+`id` 是公网直连模式的模型标识；`direct_model` 是实际模型名。CCR 模式忽略这份清单，`GET /chat/models` 的 `name` 和 `display_name` 均为 CCR 返回的完整 ID。出现在列表中仅表示已配置，可用性仍以健康检测为准。
 
-`CHAT_DEFAULT_MODEL` 设置共享的默认模型 id，留空使用清单第一项；未设置清单时为 `deepseek`。开发者中心在线调试使用该默认模型；悬浮窗仍可手动选择模型，自动选模则优先参考健康状态。更换清单后默认模型必须仍在清单内。
+`CHAT_DEFAULT_MODEL` 设置共享的默认模型 id，留空使用当前列表第一项；CCR 模式下若填写须与 CCR 返回的完整 ID 一致。开发者中心在线调试使用该默认模型；悬浮窗自动选模优先参考健康状态。
 
-服务端和对话容器必须都能访问 `CHAT_CCR_BASE_URL`；容器中的 `127.0.0.1` 指容器自身。实际 CCR 版本、路由、鉴权以及流式和工具调用转换能力需要在行内联调验证。CCR 不由本项目启动或配置，其上游模型地址及上游密钥由行内部署方管理。
+服务端和对话容器必须都能访问 `CHAT_CCR_BASE_URL`；容器中的 `127.0.0.1` 指容器自身。实际 CCR 版本、路由、鉴权以及流式和工具调用转换能力需要在行内联调验证。部署目录也提供 CCR 容器配置。
 
 模型健康状态通过项目 Redis 配置共享，正常状态默认缓存 60 秒，异常状态默认缓存 30 秒，分别由 `CHAT_MODEL_HEALTH_TTL_SECONDS` 和 `CHAT_MODEL_HEALTH_FAILURE_TTL_SECONDS` 配置。首次请求没有结果时立即返回 `checking`，缓存过期时返回带 `stale: true` 的上次结果；两种情况均由后台探测更新，前端可在 `refreshing: true` 时稍后重新查询。`checked_at` 是实际检测时间，UTC ISO 8601 格式。Redis 不可用时降级为进程内缓存，此时多进程之间不共享结果。模型网关地址、实际模型名或凭证变更会使用新的缓存键。
 

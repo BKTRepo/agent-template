@@ -2,8 +2,11 @@
 import json
 import os
 import re
+import time
+import threading
 from pathlib import Path
 
+import httpx
 from dotenv import dotenv_values
 
 from configure import PROJECT_CONFIG
@@ -19,6 +22,43 @@ CCR_MODEL_ENV = {'deepseek': 'CHAT_CCR_MODEL_DEEPSEEK', 'glm51': 'CHAT_CCR_MODEL
                  'qwen35-35b-a3b-nothink': 'CHAT_CCR_MODEL_QWEN35_NOTHINK'}
 OPTIONAL_ENV = ('CLAUDE_MAX_TURNS', 'CLAUDE_MAX_BUDGET_USD', 'CLAUDE_CODE_EFFORT_LEVEL',
                 'CLAUDE_CODE_AUTO_COMPACT_WINDOW', 'CLAUDE_CODE_MAX_CONTEXT_TOKENS')
+
+_ccr_cache = {}
+_ccr_lock = threading.Lock()
+
+
+def _ccr_models(value):
+    base = value('CHAT_CCR_BASE_URL').rstrip('/')
+    mode = value('CHAT_CCR_AUTH_MODE').lower() or 'bearer'
+    key = value('CHAT_CCR_API_KEY')
+    if not base or mode not in ('bearer', 'api_key', 'none') or (mode != 'none' and not key):
+        raise RuntimeError('CCR 地址或鉴权配置不完整')
+    identity = (base, mode, key)
+    with _ccr_lock:
+        cached = _ccr_cache.get(identity)
+        if cached and cached[0] > time.monotonic():
+            return cached[1]
+        headers = {'Authorization': f'Bearer {key}'} if mode == 'bearer' else ({'x-api-key': key} if mode == 'api_key' else {})
+        url = base + ('/models' if base.endswith('/v1') else '/v1/models')
+        try:
+            with httpx.Client(timeout=5, trust_env=False) as client:
+                response = client.get(url, headers=headers)
+                response.raise_for_status()
+                payload = response.json()
+            data = payload.get('data') if isinstance(payload, dict) else None
+            if not isinstance(data, list):
+                raise ValueError('模型列表格式错误')
+            rows, seen = [], set()
+            for item in data:
+                model = item.get('id') if isinstance(item, dict) else None
+                if isinstance(model, str) and model.strip() == model and 0 < len(model) <= 128 and model not in seen:
+                    seen.add(model)
+                    rows.append({'id': model, 'name': model, 'ccr_model': model})
+            _ccr_cache.clear()
+            _ccr_cache[identity] = (time.monotonic() + 30, rows)
+            return rows
+        except (httpx.HTTPError, ValueError) as exc:
+            raise RuntimeError('获取 CCR 模型列表失败，请检查 CCR 服务和鉴权配置') from exc
 
 
 def _values():
@@ -63,7 +103,8 @@ def _registry(value):
 
 
 def model_registry():
-    return _registry(_values())
+    value = _values()
+    return _ccr_models(value) if value('CHAT_GATEWAY_MODE').lower() == 'ccr' else _registry(value)
 
 
 def model_ids():
@@ -72,7 +113,9 @@ def model_ids():
 
 def default_model():
     value = _values()
-    rows = _registry(value)
+    rows = model_registry()
+    if not rows:
+        raise RuntimeError('当前网关没有可用模型')
     model = value('CHAT_DEFAULT_MODEL') or rows[0]['id']
     if model not in {row['id'] for row in rows}:
         raise RuntimeError('CHAT_DEFAULT_MODEL 不是支持的模型标识')
@@ -81,9 +124,9 @@ def default_model():
 
 def model_environment(model):
     value = _values()
-    registry = _registry(value)
+    registry = model_registry()
     configured = next((item for item in registry if item['id'] == model), None)
-    if value('CHAT_MODEL_REGISTRY') and not configured:
+    if (value('CHAT_MODEL_REGISTRY') or value('CHAT_GATEWAY_MODE').lower() == 'ccr') and not configured:
         raise RuntimeError(f'模型 {model} 不在 CHAT_MODEL_REGISTRY 中')
     mode = value('CHAT_GATEWAY_MODE').lower() or 'direct'
     if mode == 'direct':
@@ -137,6 +180,15 @@ def configured_model_registry():
             continue
         result.append({'id': row['id'], 'model_name': environment['ANTHROPIC_MODEL']})
     return result
+
+
+def sandbox_model_environment(model):
+    """沙箱可以配置独立的网关地址，其他模型配置保持一致。"""
+    environment = model_environment(model)
+    value = _values()
+    if value('CHAT_GATEWAY_MODE').lower() == 'ccr' and value('CHAT_CCR_SANDBOX_BASE_URL'):
+        environment['ANTHROPIC_BASE_URL'] = value('CHAT_CCR_SANDBOX_BASE_URL')
+    return environment
 
 
 def configured_model_ids():

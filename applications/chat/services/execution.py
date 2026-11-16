@@ -26,7 +26,7 @@ from applications.wrq.agent.services.skill_catalog_service import SkillCatalogSe
 from applications.wrq.agent.services.skill_knowledge_scope import visible_skill_knowledge
 from applications.wrq.markdown_storage import read_markdown
 from configure import LOGGER, PROJECT_CONFIG
-from services.model_gateway import model_environment
+from services.model_gateway import sandbox_model_environment
 from services.docker_paths import docker_source
 
 _workers = set()
@@ -256,7 +256,7 @@ async def execute_task(task_id):
         if expects_uploads and not task_upload_dir(task.id).is_dir():
             raise RuntimeError('临时附件已丢失，请重新上传')
         request, packages = await build_request(task, conversation)
-        environment = model_environment(task.model)
+        environment = sandbox_model_environment(task.model)
         request['model'] = environment['ANTHROPIC_MODEL']
         work_root = Path(PROJECT_CONFIG.OUTPUT_DATAGRAM_DIR).resolve() / 'chat_work'
         work_root.mkdir(parents=True, exist_ok=True)

@@ -207,7 +207,6 @@ services:
       CHAT_CCR_BASE_URL: http://ccr:3456
       CHAT_CCR_AUTH_MODE: bearer
       CHAT_CCR_API_KEY: ${CHAT_CCR_API_KEY}
-      CHAT_CCR_MODEL_DEEPSEEK: ${INTRANET_CHAT_MODEL:-deepseek-v4-flash-local-thinkl}
     volumes:
       - *chroma-data
       - type: bind

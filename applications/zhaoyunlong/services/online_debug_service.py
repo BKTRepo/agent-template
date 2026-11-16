@@ -16,7 +16,7 @@ from typing import Any, Iterable
 from urllib.parse import quote
 
 from configure import PROJECT_CONFIG
-from services.model_gateway import default_model, model_environment
+from services.model_gateway import default_model, sandbox_model_environment
 
 from .docker_sandbox import DockerSandboxRunner, SandboxConfig, SandboxResult
 
@@ -466,7 +466,7 @@ class OnlineDebugService:
     def _model_environment() -> dict[str, str]:
         """在线调试与悬浮对话台使用同一套网关和默认模型配置。"""
         try:
-            return model_environment(default_model())
+            return sandbox_model_environment(default_model())
         except RuntimeError as exc:
             raise OnlineDebugError(str(exc)) from exc
 

@@ -22,9 +22,9 @@ from applications.chat.services.chat_service import (clear_conversation, convers
                                                      require_conversation, validate_resources)
 from applications.chat.services.attachments import save_uploads, task_upload_dir, remove_task_uploads
 from applications.chat.services.history_files import history_store, schedule_history, sync_history, write_history_events
-from applications.chat.services.execution import model_environment, start_task
+from applications.chat.services.execution import start_task
 from applications.chat.services.model_health import health, select_model
-from services.model_gateway import configured_model_registry, model_ids
+from services.model_gateway import configured_model_registry, model_environment, model_ids
 from applications.user.models.user_model import User
 from core.responses import SuccessResponse
 from services import DependAuth
@@ -135,8 +135,13 @@ async def favorite_conversation(body: ConversationFavorite, user: User = DependA
 @chat_router.post("/conversation/resources", summary="悬浮窗-选择技能和知识库")
 async def save_resources(body: ConversationResources, user: User = DependAuth):
     original = await require_conversation(body.conversation_id, user.id)
-    if body.model and body.model not in model_ids():
-        raise HTTPException(400, '不支持的模型')
+    if body.model:
+        try:
+            supported = await asyncio.to_thread(model_ids)
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc)) from exc
+        if body.model not in supported:
+            raise HTTPException(400, '不支持的模型')
     skills, knowledge = await validate_resources(user, body.skills, body.knowledge_bases)
     async with in_transaction() as conn:
         row = await require_conversation(body.conversation_id, user.id, connection=conn)
@@ -221,15 +226,21 @@ async def retry_artifact_count(body: ArtifactInput, user: User = DependAuth):
 
 @chat_router.get('/models', summary='悬浮窗-模型列表')
 async def models(user: User = DependAuth):
-    return SuccessResponse(data=[{'name': row['id'], 'display_name': row['model_name']}
-                                 for row in configured_model_registry()])
+    try:
+        rows = await asyncio.to_thread(configured_model_registry)
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return SuccessResponse(data=[{'name': row['id'], 'display_name': row['model_name']} for row in rows])
 
 
 @chat_router.get('/models/health', summary='悬浮窗-模型健康检测',
     description='优先返回缓存。首次查询返回 checking；过期时返回上次结果并标记 stale，后台异步刷新。'
                 'checked_at 为 UTC 检测时间，refreshing 表示需要稍后重新查询。')
 async def model_health(user: User = DependAuth):
-    return SuccessResponse(data=await health())
+    try:
+        return SuccessResponse(data=await health())
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
 
 
 @chat_router.get('/statistics', summary='悬浮窗-技能调用和产物统计')
@@ -307,7 +318,7 @@ async def submit_message(conversation_id, content, selected_model, user, directo
                 raise HTTPException(400, str(exc)) from exc
             if model is None:
                 raise HTTPException(503, '当前没有可用的健康模型，请稍后重试或手动选择')
-            if model not in model_ids():
+            if model not in await asyncio.to_thread(model_ids):
                 raise HTTPException(400, '不支持的模型')
             try:
                 model_environment(model)

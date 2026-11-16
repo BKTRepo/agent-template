@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import httpx
 import redis.asyncio as redis
 
-from applications.chat.services.execution import model_environment
+from services.model_gateway import model_environment
 from configure import PROJECT_CONFIG
 from services.model_gateway import configured_model_ids, default_model
 
@@ -187,11 +187,13 @@ async def _status(model, *, refresh):
 
 
 async def health():
-    return await asyncio.gather(*(_status(model, refresh=True) for model in configured_model_ids()))
+    models = await asyncio.to_thread(configured_model_ids)
+    return await asyncio.gather(*(_status(model, refresh=True) for model in models))
 
 
 async def select_model():
-    samples = await asyncio.gather(*(_status(model, refresh=False) for model in configured_model_ids()))
+    models = await asyncio.to_thread(configured_model_ids)
+    samples = await asyncio.gather(*(_status(model, refresh=False) for model in models))
     if not samples:
         return None
     available = [item for item in samples if not item['stale'] and item['status'] == 'healthy']
