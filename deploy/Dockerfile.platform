@@ -1,0 +1,29 @@
+# Build with the backend worktree as context and --build-context frontend=<frontend worktree>.
+ARG PYTHON_IMAGE=python:3.12-slim-bookworm
+FROM ${PYTHON_IMAGE} AS web
+ARG NODE_VERSION=24.15.0
+RUN python -c "import sys, tarfile, urllib.request; from pathlib import Path; version=sys.argv[1]; filename=f'node-v{version}-linux-x64.tar.xz'; urllib.request.urlretrieve(f'https://nodejs.org/dist/v{version}/{filename}', '/tmp/node.tar.xz'); tarfile.open('/tmp/node.tar.xz').extractall('/opt', filter='data'); Path('/opt/node').symlink_to('/opt/' + filename.removesuffix('.tar.xz'))" "${NODE_VERSION}"
+ENV PATH="/opt/node/bin:${PATH}"
+WORKDIR /web
+COPY --from=frontend package.json package-lock.json ./
+RUN npm ci
+COPY --from=frontend . .
+RUN VITE_REALTIME_DEBUG_ENABLED=true VITE_SKILL_METADATA_READY=true VITE_SKILL_PROXY_AUTH=false npm run build
+
+FROM ${PYTHON_IMAGE}
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 TZ=Asia/Shanghai
+WORKDIR /app
+RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates docker.io fonts-noto-cjk libgl1 libglib2.0-0 tini tzdata \
+    && rm -rf /var/lib/apt/lists/*
+COPY requirements.txt .
+RUN --mount=type=cache,target=/root/.cache/pip pip install --index-url https://download.pytorch.org/whl/cpu torch==2.12.0 torchvision==0.27.0
+RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt reportlab==4.4.6 \
+    && pip check
+COPY --from=web /opt/node/bin/node /usr/local/bin/node
+COPY --from=web /web/dist /opt/platform-web/dist
+COPY --from=web /web/server.js /opt/platform-web/server.mjs
+COPY . .
+EXPOSE 3000
+CMD ["python", "-m", "applications.wrq.full_backend"]

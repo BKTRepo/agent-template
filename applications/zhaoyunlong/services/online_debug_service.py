@@ -91,7 +91,8 @@ class OnlineDebugService:
     def __init__(self, runner: DockerSandboxRunner | None = None) -> None:
         self.runner = runner or DockerSandboxRunner()
         # 调试结果与在线调试模块放在一起，目录结构为 sandbox_results/runs/{run_id}。
-        self.data_dir = Path(__file__).resolve().parents[1] / "sandbox_results"
+        data_dir = os.environ.get("ZHAOYUNLONG_DEBUG_DATA_DIR")
+        self.data_dir = Path(data_dir) if data_dir else Path(__file__).resolve().parents[1] / "sandbox_results"
         self.runs_dir = self.data_dir / "runs"
         self.image = os.environ.get("ZHAOYUNLONG_SANDBOX_IMAGE", "test-case-sandbox:local")
         self.skill_dir = Path(__file__).resolve().parents[1] / "sandbox" / "online-debug-skill"
@@ -123,18 +124,23 @@ class OnlineDebugService:
         output_dir.mkdir(mode=0o700)
         try:
             self._write_input(input_dir, payload)
+            skill_dir = self.skill_dir
+            if os.environ.get('DOCKER_SHARED_HOST_DIR'):
+                skill_dir = work_dir / 'skill'
+                shutil.copytree(self.skill_dir, skill_dir)
             if payload.get('_knowledge_token'):
                 bridge = Path(__file__).resolve().parents[2] / 'wrq' / 'knowledge_mcp.py'
                 shutil.copyfile(bridge, input_dir / 'knowledge_mcp.py')
                 model_environment['KNOWLEDGE_RUN_TOKEN'] = payload['_knowledge_token']
                 model_environment['KNOWLEDGE_SEARCH_URL'] = os.environ.get('KNOWLEDGE_SEARCH_URL', 'http://host.docker.internal:8519/skills/knowledge/search')
             result = self.runner.run(SandboxConfig(
-                skill_dir=self.skill_dir,
+                skill_dir=skill_dir,
                 input_dir=input_dir,
                 output_dir=output_dir,
                 command=("python", "run.py"),
                 image=self.image,
                 environment=model_environment,
+                network=os.environ.get('PLATFORM_SANDBOX_NETWORK', 'bridge'),
                 timeout_seconds=self.execution_timeout_seconds,
             ))
             _, skill_result = self._extract_skill_result(result.stdout)

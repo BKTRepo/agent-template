@@ -3,10 +3,11 @@ import io
 import zipfile
 from types import SimpleNamespace
 from tortoise.expressions import F, Q, Subquery
+from tortoise.functions import Count
+from applications.chat.models.chat_model import ChatSkillCall
 
 from applications.wrq.agent.models.agent_model import (
     DeveloperSkillClass, Skill, SkillVersion, SkillForm,
-    SkillResourceBinding,
 )
 from applications.wrq.agent.services.developer_skill_crud import DeveloperError
 from applications.wrq.agent.services.skill_package_service import SkillPackageService, SkillBuildNotFound
@@ -14,7 +15,7 @@ from applications.wrq.agent.services.skill_package_builder import SkillPackageEr
 from applications.wrq.agent.services.published_skill_version import display_skill_version
 from applications.wrq.catalog import application_options
 from applications.wrq.markdown_storage import read_markdown
-from applications.wrq.agent.services.knowledge_reference_service import current_knowledge_references
+from applications.wrq.agent.services.skill_knowledge_scope import visible_skill_knowledge
 
 
 class SkillCatalogService:
@@ -38,7 +39,7 @@ class SkillCatalogService:
         return skill, version, form
 
     @staticmethod
-    def summary(skill, version, form):
+    def summary(skill, version, form, chat_calls=0):
         maintainer = skill.update_user_login_name or skill.create_user_login_name
         return {'id': skill.id, 'name': form.name, 'class_id': form.skill_class_id,
                 'application_ids': [form.application_paso] if form.application_paso else [],
@@ -49,7 +50,16 @@ class SkillCatalogService:
                 'maintainer_id': maintainer, 'maintainer_name': maintainer,
                 'updated_at': skill.updated_time, 'build_id': version.build_id,
                 'backend_skill_id': skill.id, 'build_origin': 'backend' if version.build_id else None,
-                'call_count': skill.call_count, 'download_count': skill.download_count}
+                'call_count': (skill.call_count or 0) + chat_calls, 'download_count': skill.download_count}
+
+    @staticmethod
+    async def chat_call_counts(skill_ids):
+        if not skill_ids:
+            return {}
+        rows = await ChatSkillCall.filter(skill_id__in=skill_ids).group_by('skill_id').annotate(
+            count=Count('id'),
+        ).values('skill_id', 'count')
+        return {row['skill_id']: row['count'] for row in rows}
 
     async def metadata(self):
         classes = []
@@ -91,16 +101,17 @@ class SkillCatalogService:
         skills = await query.order_by('-published_at', 'id').offset((page - 1) * page_size).limit(page_size)
         versions = {row.id: row for row in await SkillVersion.filter(id__in=[s.published_version_id for s in skills])}
         forms = {row.skill_version_id: row for row in await SkillForm.filter(skill_version_id__in=list(versions))}
-        items = [self.summary(skill, versions[skill.published_version_id], forms[skill.published_version_id])
+        calls = await self.chat_call_counts([skill.id for skill in skills])
+        items = [self.summary(skill, versions[skill.published_version_id], forms[skill.published_version_id], calls.get(skill.id, 0))
                  for skill in skills if skill.published_version_id in versions and skill.published_version_id in forms
                  and versions[skill.published_version_id].skill_id == skill.id]
         return {'items': items, 'total': total,
                 'page': page, 'page_size': page_size, 'pages': pages}
 
-    async def detail(self, skill_id):
+    async def detail(self, skill_id, user):
         skill, version, form = await self.published(skill_id)
-        knowledge = await current_knowledge_references(await SkillResourceBinding.filter(
-            skill_version_id=version.id, source_type='knowledge_base').order_by('sort_order', 'id'))
+        knowledge = await visible_skill_knowledge(version.id, user)
+        calls = await self.chat_call_counts([skill.id])
         skill_markdown = ''
         if form.skill_markdown_path:
             try:
@@ -108,7 +119,7 @@ class SkillCatalogService:
             except FileNotFoundError:
                 # 对话台加载 Skill 仍需要其资源绑定；定义原件缺失不应阻断该只读元数据。
                 skill_markdown = ''
-        return {**self.summary(skill, version, form), 'instructions': form.instructions,
+        return {**self.summary(skill, version, form, calls.get(skill.id, 0)), 'instructions': form.instructions,
                 'technical_name': form.technical_name, 'compatibility': form.compatibility or '',
                 'resource_usage': form.resource_usage or '', 'resource_ids': [row['id'] for row in knowledge],
                 'knowledge_bases': knowledge, 'uploaded_resources': [],

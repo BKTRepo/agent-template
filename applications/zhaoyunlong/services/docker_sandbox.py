@@ -12,6 +12,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
+from services.docker_paths import docker_source
 
 
 class SandboxValidationError(ValueError):
@@ -97,7 +98,7 @@ class DockerSandboxRunner:
     def ensure_available(self) -> None:
         """在真正运行前确认 Docker CLI 与守护进程均可用。"""
         try:
-            result = self._docker("info", "--format", "{{.ServerVersion}}")
+            result = self._docker("info", "--format", "{{.ServerVersion}}", timeout=20)
         except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
             raise RuntimeError("Docker CLI 或 Docker 守护进程不可用") from exc
         if result.returncode != 0:
@@ -139,9 +140,9 @@ class DockerSandboxRunner:
             "--cap-drop", "ALL", "--pids-limit", "128",
             "--memory", config.memory, "--cpus", str(config.cpus),
             "--network", config.network, "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
-            "--mount", f"type=bind,src={skill_dir},dst=/skill,readonly",
-            "--mount", f"type=bind,src={input_dir},dst=/input,readonly",
-            "--mount", f"type=bind,src={output_dir},dst=/output",
+            "--mount", f"type=bind,src={docker_source(skill_dir)},dst=/skill,readonly",
+            "--mount", f"type=bind,src={docker_source(input_dir)},dst=/input,readonly",
+            "--mount", f"type=bind,src={docker_source(output_dir)},dst=/output",
             "--workdir", "/skill",
             "--env", "HOME=/tmp",
             "--env", "XDG_CACHE_HOME=/tmp/.cache",

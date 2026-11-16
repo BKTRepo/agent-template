@@ -1,0 +1,15 @@
+.git
+.venv
+.env*
+**/__pycache__
+output
+input
+celery_scheduler/*.pid
+applications/chat/chat_history
+applications/zhaoyunlong/sandbox_results
+core/chroma_db
+*.log
+.tmp
+**/*.pyc
+applications/chat/chat_results
+**/*.log

@@ -1,10 +1,10 @@
 ---
 title: 资产管理接入与验收
 status: implemented
-last_updated: 2026-11-11
+last_updated: 2026-11-12
 ---
 
-资产管理复用 `keenrobot_skill_classes`，概览按可见资产统计总数及各大类数量。列表按创建时间和编号稳定分页，每页 10 项，支持资产名称及创建人姓名或账号搜索。创建人才能移入回收站、恢复和彻底删除。
+资产管理复用 `keenrobot_skill_classes`，概览按可见资产统计总数及各大类数量。列表按创建时间和编号稳定分页，每页 10 项，支持资产名称及创建人姓名或账号搜索。创建人才能移入回收站、恢复和彻底删除。移入回收站只支持逐条操作：仅显示每行操作按钮，确认时展示资产名称；多选工具栏保留批量导出，不提供批量移入。回收站现有恢复、彻底删除能力保持不变。
 
 ## 部署
 
@@ -27,9 +27,10 @@ last_updated: 2026-11-11
 | POST | `/create` | `artifact_id`、`base_hash`、`name`、`skill_classes_id`、`application_identify`、`visibility`，归档原文件快照，同来源幂等 |
 | GET | `/preview`、`/preview-pdf`、`/download` | `asset_id`、`file_id`，每次检查资产权限及附件归属 |
 | GET | `/preview-sheet` | `asset_id`、`file_id`、`sheet_index`、`offset`、`column_offset`，每次最多 100 行和 50 列 |
-| POST | `/export` | `asset_ids`，下载所选资产原文件 ZIP，校验全部权限，保留文件字节与格式 |
+| POST | `/export` | `asset_ids`，下载所选资产原文件 ZIP，文件直接平铺在压缩包根目录，不添加资产编号文件夹或文件名前缀；同名文件自动加 `(2)`、`(3)` 等后缀（保留扩展名，忽略大小写判断重名），校验全部权限，保留文件字节与格式 |
 | GET | `/recycle-bin` | `page`，返回本人可恢复资产及截止时间 |
-| POST | `/move-to-recycle-bin`、`/restore`、`/delete-recycled` | `asset_ids`，限创建人操作，彻底删除限回收站资产 |
+| POST | `/move-to-recycle-bin` | `asset_ids` 数组必须恰好1个正整数，限创建人操作；接口及业务层拒绝批量移入 |
+| POST | `/restore`、`/delete-recycled` | `asset_ids`，限创建人操作，彻底删除限回收站资产 |
 
 悬浮窗覆盖保存只更新原产出物。资产预览与下载读取纳入时的快照。
 

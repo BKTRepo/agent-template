@@ -26,11 +26,8 @@ async def get_login_access_token(
     except (NotFoundException, NoPermissionException) as e:
         return NotFoundResponse(message=str(e.message))
 
-    await user_crud.update_last_login(user.id)
-    from applications.wrq.models.overview_event_model import OverviewEvent
-    from uuid import uuid4
-    await OverviewEvent.create(event_key='login:' + uuid4().hex, kind='login', occurred_at=datetime.now(),
-        operator_login_name=user.username, data={'user_id': user.id, 'username': user.alias or user.username, 'history_unknown': bool(user.last_login) and not await OverviewEvent.filter(kind='login', operator_login_name=user.username).exists()})
+    from applications.wrq.agent.services.login_statistics import record_successful_login
+    user.last_login = await record_successful_login(user.id)
     access_token_expires = timedelta(minutes=PROJECT_CONFIG.AUTH_JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
     expire = datetime.now(timezone.utc) + access_token_expires
 

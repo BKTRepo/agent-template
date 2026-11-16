@@ -1,0 +1,247 @@
+x-platform: &platform
+  image: ${PLATFORM_IMAGE:-keenrobot-platform:uat-bundled}
+  pull_policy: never
+  init: true
+  restart: unless-stopped
+
+x-backend: &backend
+  <<: *platform
+  env_file: ./.env
+  depends_on:
+    database-init: {condition: service_completed_successfully}
+    redis: {condition: service_healthy}
+    milvus: {condition: service_healthy}
+  environment: &backend-environment
+    SERVER_HOST: 0.0.0.0
+    SERVER_PORT: "8519"
+    DATABASE_AUTO_MIGRATION: "false"
+    OUTPUT_DIR: /data/output
+    OUTPUT_LOGS_DIR: /data/output/logs
+    OUTPUT_UPLOAD_DIR: /data/output/upload
+    OUTPUT_DATAGRAM_DIR: /data/output/datagram
+    OUTPUT_DOWNLOAD_DIR: /data/output/download
+    OUTPUT_MEDIA_DIR: /data/output/media
+    OUTPUT_JMX_DIR: /data/output/jmx
+    OUTPUT_XLSX_DIR: /data/output/xlsx
+    OUTPUT_DOCS_DIR: /data/output/docs
+    DOCUMENT_PREVIEW_CACHE_DIR: /data/output/knowledge_previews
+    CHROMA_DIR: /data/chroma
+    SKILL_BUILD_DIR: /data/output/skill-builds
+    RAG_OUTPUT_DIR: /data/output/knowledge-parsed
+    RAG_INPUT_DIR: /data/input
+    CHAT_HISTORY_DIR: /data/chat-history
+    ZHAOYUNLONG_DEBUG_DATA_DIR: /data/debug
+    LLM_BASE_URL: ${INTRANET_OPENAI_BASE_URL:-http://10.240.192.142:30003/v1}
+    LLM_MODEL: ${INTRANET_CHAT_MODEL:-deepseek-v4-flash-local-thinkl}
+    LLM_API_KEY: ${INTRANET_MODEL_API_KEY:?Set INTRANET_MODEL_API_KEY}
+    EMBEDDING_BINDING_HOST: ${INTRANET_OPENAI_BASE_URL:-http://10.240.192.142:30003/v1}
+    EMBEDDING_BINDING_API_KEY: ${INTRANET_MODEL_API_KEY}
+    EMBEDDING_MODEL: ${EMBEDDING_MODEL:-bge-m3}
+    EMBEDDING_USE_BASE64: ${EMBEDDING_USE_BASE64:-false}
+    RERANK_BINDING_HOST: ${INTRANET_OPENAI_BASE_URL:-http://10.240.192.142:30003/v1}/rerank
+    RERANK_BINDING_API_KEY: ${INTRANET_MODEL_API_KEY}
+    RERANK_MODEL: ${RERANK_MODEL:-bge-rerank-v2-m3}
+  volumes:
+    - &chroma-data "${DATABASE_DATA_ROOT:-/zdhgj/keenrobo}/chroma:/data/chroma"
+    - type: bind
+      source: ${PLATFORM_DATA_DIR:?Set PLATFORM_DATA_DIR to an absolute Docker host directory}
+      target: /data
+
+services:
+  ccr:
+    image: ${CCR_IMAGE:-keenrobot-ccr:3.1.3}
+    pull_policy: never
+    init: true
+    restart: unless-stopped
+    environment:
+      CCR_UPSTREAM_OPENAI_BASE_URL: ${INTRANET_OPENAI_BASE_URL:-http://10.240.192.142:30003/v1}
+      CCR_UPSTREAM_MODEL: ${INTRANET_CHAT_MODEL:-deepseek-v4-flash-local-thinkl}
+      CCR_UPSTREAM_API_KEY: ${INTRANET_MODEL_API_KEY}
+      CCR_PLATFORM_API_KEY: ${CHAT_CCR_API_KEY:?Set CHAT_CCR_API_KEY}
+      CCR_WEB_AUTH_TOKEN: ${CCR_WEB_AUTH_TOKEN:?Set CCR_WEB_AUTH_TOKEN}
+    ports:
+      - "${CCR_WEB_BIND_ADDRESS:-0.0.0.0}:${CCR_WEB_PORT:-3458}:3458"
+    volumes: ["${DATABASE_DATA_ROOT:-/zdhgj/keenrobo}/ccr:/data"]
+    networks: [default, sandbox]
+    healthcheck:
+      test: ["CMD", "node", "-e", "Promise.all(['http://127.0.0.1:3458/', 'http://127.0.0.1:3456/health'].map(url => fetch(url))).then(results => process.exit(results.every(result => result.ok) ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      start_period: 15s
+      retries: 12
+
+  document-preview:
+    image: gotenberg/gotenberg:9.0.0-libreoffice
+    pull_policy: never
+    restart: unless-stopped
+    networks: [preview]
+    command:
+      - gotenberg
+      - --api-timeout=60s
+      - --libreoffice-max-queue-size=10
+      - --libreoffice-deny-private-ips=true
+      - --libreoffice-deny-public-ips=true
+    mem_limit: 2g
+    cpus: 2
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  mysql:
+    image: docker.m.daocloud.io/library/mysql:8.0
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DATABASE_NAME:-keenrobot}
+      MYSQL_USER: ${DATABASE_USERNAME:-keenrobot}
+      MYSQL_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD}
+      TZ: Asia/Shanghai
+    volumes: ["${DATABASE_DATA_ROOT:-/zdhgj/keenrobo}/mysql:/var/lib/mysql"]
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$${MYSQL_PASSWORD}\" mysql -h 127.0.0.1 -u \"$${MYSQL_USER}\" \"$${MYSQL_DATABASE}\" -Nse 'SELECT 1'"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+
+  redis:
+    image: docker.m.daocloud.io/library/redis:7.4-alpine
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
+    command: ["sh", "-ec", "exec redis-server --appendonly yes --requirepass \"$${REDIS_PASSWORD}\""]
+    volumes: ["${DATABASE_DATA_ROOT:-/zdhgj/keenrobo}/redis:/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$${REDIS_PASSWORD}\" redis-cli ping | grep -qx PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.18
+    pull_policy: never
+    restart: unless-stopped
+    command: ["etcd", "--advertise-client-urls=http://etcd:2379", "--listen-client-urls=http://0.0.0.0:2379", "--data-dir=/etcd"]
+    volumes: ["${DATABASE_DATA_ROOT:-/zdhgj/keenrobo}/etcd:/etcd"]
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  minio:
+    image: docker.m.daocloud.io/minio/minio:RELEASE.2024-12-18T13-15-44Z
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-keenrobot}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
+    command: ["minio", "server", "/data"]
+    volumes: ["${DATABASE_DATA_ROOT:-/zdhgj/keenrobo}/minio:/data"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/minio/health/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  milvus:
+    image: docker.m.daocloud.io/milvusdb/milvus:v2.6.4
+    pull_policy: never
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-keenrobot}
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
+      MQ_TYPE: woodpecker
+    volumes: ["${DATABASE_DATA_ROOT:-/zdhgj/keenrobo}/milvus:/var/lib/milvus"]
+    depends_on:
+      etcd: {condition: service_healthy}
+      minio: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9091/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+
+  database-init:
+    <<: *backend
+    restart: "no"
+    depends_on:
+      mysql: {condition: service_healthy}
+    command: ["python", "-m", "deploy.init-bundled-database"]
+
+  web:
+    <<: *platform
+    command: ["node", "/opt/platform-web/server.mjs"]
+    ports:
+      - "${PLATFORM_BIND_ADDRESS:-0.0.0.0}:${PLATFORM_PORT:-3000}:3000"
+    environment:
+      BACKEND_URL: http://backend:8519
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  backend:
+    <<: *backend
+    depends_on:
+      database-init: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+      milvus: {condition: service_healthy}
+      document-preview: {condition: service_healthy}
+      ccr: {condition: service_healthy}
+    hostname: ${COMPOSE_PROJECT_NAME:-keenrobot-platform}-backend
+    environment:
+      <<: *backend-environment
+      DOCKER_SHARED_HOST_DIR: ${PLATFORM_DATA_DIR}
+      PLATFORM_SANDBOX_NETWORK: ${COMPOSE_PROJECT_NAME:-keenrobot-platform}-sandbox
+      ZHAOYUNLONG_SANDBOX_IMAGE: ${PLATFORM_IMAGE:-keenrobot-platform:uat-bundled}
+      KNOWLEDGE_SEARCH_URL: ${KNOWLEDGE_SEARCH_URL:-http://backend:8519/skills/knowledge/search}
+      DOCUMENT_PREVIEW_CONVERTER_URL: ${DOCUMENT_PREVIEW_CONVERTER_URL:-http://document-preview:3000}
+      CHAT_GATEWAY_MODE: ccr
+      ANTHROPIC_BASE_URL: http://ccr:3456
+      CHAT_CCR_BASE_URL: http://ccr:3456
+      CHAT_CCR_AUTH_MODE: bearer
+      CHAT_CCR_API_KEY: ${CHAT_CCR_API_KEY}
+      CHAT_CCR_MODEL_DEEPSEEK: ${INTRANET_CHAT_MODEL:-deepseek-v4-flash-local-thinkl}
+    volumes:
+      - *chroma-data
+      - type: bind
+        source: ${PLATFORM_DATA_DIR}
+        target: /data
+      - type: bind
+        source: ${PLATFORM_DOCKER_SOCKET:-/var/run/docker.sock}
+        target: /var/run/docker.sock
+    networks:
+      default: {}
+      preview: {}
+      sandbox:
+        aliases: [backend]
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8519/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 6
+
+  knowledge-parse:
+    <<: *backend
+    command: ["celery", "-A", "celery_scheduler.celery_worker:celery", "worker", "--pool=threads", "--concurrency=1", "-Q", "knowledge_parse", "-n", "knowledge-parse@%h", "-l", "INFO"]
+
+  knowledge-delete:
+    <<: *backend
+    command: ["celery", "-A", "celery_scheduler.celery_worker:celery", "worker", "--pool=threads", "--concurrency=2", "-Q", "knowledge_delete", "-n", "knowledge-delete@%h", "-l", "INFO"]
+
+  scheduler:
+    <<: *backend
+    command: ["celery", "-A", "celery_scheduler.celery_worker:celery", "beat", "-l", "INFO"]
+
+networks:
+  preview:
+    internal: true
+  sandbox:
+    name: ${COMPOSE_PROJECT_NAME:-keenrobot-platform}-sandbox

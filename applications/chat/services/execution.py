@@ -15,21 +15,23 @@ from pathlib import PurePosixPath
 from types import SimpleNamespace
 
 from tortoise.transactions import in_transaction
+from tortoise.expressions import Q
 
 from applications.chat.models.chat_model import ChatArtifact, ChatConversation, ChatMessage, ChatSkillCall, ChatTask
 from applications.chat.services.artifacts import artifact_root, count_cases
 from applications.chat.services.attachments import stage_attachments, task_upload_dir, remove_task_uploads
 from applications.chat.services.history_files import history_store, schedule_history, sync_history, write_history_events
-from applications.knowledge_base.models.knowledge_base_model import Document
 from applications.user.models.user_model import User
-from applications.wrq.agent.models.agent_model import SkillResourceBinding
 from applications.wrq.agent.services.skill_catalog_service import SkillCatalogService
+from applications.wrq.agent.services.skill_knowledge_scope import visible_skill_knowledge
 from applications.wrq.markdown_storage import read_markdown
 from configure import LOGGER, PROJECT_CONFIG
 from services.model_gateway import model_environment
+from services.docker_paths import docker_source
 
 _workers = set()
 _prefix = 'CHAT_EVENT='
+STOP_REQUESTED = '用户请求停止'
 _suffixes = {'.txt', '.md', '.json', '.csv', '.xlsx', '.docx', '.pdf', '.py', '.js', '.sql', '.sh'}
 
 
@@ -55,14 +57,7 @@ async def build_request(task, conversation):
             package_service, built, published_version = await catalog.package(skill.id, version.build_id, online=True)
             archive = package_service._published_archive(built, published_version.version)[0]
             packages.append((skill.id, built, archive))
-        bindings = await SkillResourceBinding.filter(skill_version_id=version.id)
-        for binding in bindings:
-            if binding.source_type == 'knowledge_base' and binding.source_id:
-                knowledge_ids.add(binding.source_id)
-            elif binding.source_type == 'knowledge_document' and binding.source_id:
-                document = await Document.get_or_none(id=binding.source_id, is_deleted=False)
-                if document:
-                    knowledge_ids.add(document.knowledge_base_id)
+        knowledge_ids.update(row['id'] for row in await visible_skill_knowledge(version.id, user))
     knowledge = ''
     contents = await asyncio.to_thread(history_store().message_contents, conversation.user_id, conversation.id, task.generation)
     question = contents.get(task.user_message_id)
@@ -152,8 +147,8 @@ async def _read_events(process, task, assistant_id, skill_ids, user_id):
             call_id = event.get('call_id')
             if isinstance(call_id, str) and len(call_id) <= 64:
                 owner = await User.get(id=user_id)
-                invoked = await SkillCatalogService().detail(event['skill_id'])
-                record, _ = await ChatSkillCall.get_or_create(call_id=call_id, defaults={'task_id': task.id, 'skill_id': event['skill_id'], 'operator_login_name': owner.username, 'skill_name_snapshot': invoked['name']})
+                _, _, invoked = await SkillCatalogService().published(event['skill_id'], online=True)
+                record, _ = await ChatSkillCall.get_or_create(call_id=call_id, defaults={'task_id': task.id, 'skill_id': event['skill_id'], 'operator_login_name': owner.username, 'skill_name_snapshot': invoked.name})
                 if record.task_id != task.id or record.skill_id != event['skill_id']:
                     raise RuntimeError('技能调用标识冲突')
                 process.stdin.write((json.dumps({'call_id': call_id}) + '\n').encode())
@@ -182,9 +177,14 @@ async def _watch_cancel(process, task_id, container_name):
     while process.returncode is None:
         await asyncio.sleep(1)
         if not await ChatTask.filter(id=task_id, status='running').exists():
-            stopper = await asyncio.create_subprocess_exec('docker', 'stop', '--time', '1', container_name,
-                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-            await stopper.wait()
+            try:
+                await _remove_container(container_name)
+            finally:
+                if process.returncode is None:
+                    try:
+                        process.kill()
+                    except ProcessLookupError:
+                        pass
             return
         ticks += 1
         if ticks % 10 == 0:
@@ -192,6 +192,7 @@ async def _watch_cancel(process, task_id, container_name):
 
 
 async def _remove_container(name):
+    cleanup = None
     try:
         cleanup = await asyncio.create_subprocess_exec('docker', 'rm', '--force', name,
             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
@@ -199,6 +200,13 @@ async def _remove_container(name):
         return cleanup.returncode == 0 or (cleanup.returncode == 1 and b'No such container' in stderr)
     except Exception:
         return False
+    finally:
+        if cleanup is not None and cleanup.returncode is None:
+            try:
+                cleanup.kill()
+            except ProcessLookupError:
+                pass
+            await cleanup.communicate()
 
 
 async def recover_stale_tasks():
@@ -207,7 +215,10 @@ async def recover_stale_tasks():
         worker_host=socket.gethostname(), heartbeat_at__lt=cutoff).limit(50)
     for row in rows:
         if row.status != 'recovering':
-            claimed = await ChatTask.filter(id=row.id, status=row.status, heartbeat_at=row.heartbeat_at).update(status='recovering')
+            updates = {'status': 'recovering'}
+            if row.status == 'cancelling':
+                updates['error'] = STOP_REQUESTED
+            claimed = await ChatTask.filter(id=row.id, status=row.status, heartbeat_at=row.heartbeat_at).update(**updates)
             if not claimed:
                 continue
         if await _remove_container(f'floating-chat-{row.id}'):
@@ -217,10 +228,13 @@ async def recover_stale_tasks():
                     if not path.is_symlink() and path.is_dir() and path.resolve().is_relative_to(work_root):
                         await asyncio.to_thread(shutil.rmtree, path)
             conversation = await ChatConversation.get_or_none(id=row.conversation_id)
-            cancelled = row.status == 'cancelling' or not conversation or conversation.state or conversation.generation != row.generation
-            await ChatTask.filter(id=row.id, status='recovering').update(
-                status='cancelled' if cancelled else 'failed', error=None if cancelled else '任务执行中断，请重试',
-                finished_at=datetime.now())
+            query = ChatTask.filter(id=row.id, status='recovering')
+            if not conversation or conversation.state or conversation.generation != row.generation:
+                await query.update(status='cancelled', error=None, finished_at=datetime.now())
+            else:
+                await query.filter(Q(error__isnull=True) | ~Q(error=STOP_REQUESTED)).update(
+                    status='failed', error='任务执行中断，请重试', finished_at=datetime.now())
+                await query.filter(error=STOP_REQUESTED).update(status='cancelled', error=None, finished_at=datetime.now())
 
 
 async def execute_task(task_id):
@@ -253,13 +267,15 @@ async def execute_task(task_id):
         request['attachments'] = await stage_attachments(task, input_dir)
         (input_dir / 'request.json').write_text(json.dumps(request, ensure_ascii=False), encoding='utf-8')
         sandbox = Path(__file__).resolve().parents[1] / 'sandbox'
+        if os.environ.get('DOCKER_SHARED_HOST_DIR'):
+            sandbox = Path(shutil.copytree(sandbox, temporary / 'skill'))
         name = f'floating-chat-{task.id}'
         command = ['docker', 'run', '-i', '--rm', '--name', name, '--read-only', '--security-opt', 'no-new-privileges:true',
                    '--cap-drop', 'ALL', '--pids-limit', '128', '--memory', '1g', '--cpus', '1',
-                   '--network', 'bridge', '--tmpfs', '/tmp:rw,noexec,nosuid,size=64m',
-                   '--mount', f'type=bind,src={sandbox},dst=/skill,readonly',
-                   '--mount', f'type=bind,src={input_dir},dst=/input,readonly',
-                   '--mount', f'type=bind,src={output_dir},dst=/output', '--workdir', '/skill',
+                   '--network', os.environ.get('PLATFORM_SANDBOX_NETWORK', 'bridge'), '--tmpfs', '/tmp:rw,noexec,nosuid,size=64m',
+                   '--mount', f'type=bind,src={docker_source(sandbox)},dst=/skill,readonly',
+                   '--mount', f'type=bind,src={docker_source(input_dir)},dst=/input,readonly',
+                   '--mount', f'type=bind,src={docker_source(output_dir)},dst=/output', '--workdir', '/skill',
                    '--env', 'HOME=/tmp', '--env', 'XDG_CACHE_HOME=/tmp/.cache',
                    '--env', 'XDG_CONFIG_HOME=/tmp/.config', '--env', 'XDG_DATA_HOME=/tmp/.local/share']
         if hasattr(os, 'getuid'):
@@ -355,12 +371,14 @@ async def execute_task(task_id):
         if process and name:
             cleanup_ok = await _remove_container(name)
         if cleanup_ok:
-            await ChatTask.filter(id=task_id, status='cancelling').update(status='cancelled', finished_at=datetime.now())
+            await ChatTask.filter(id=task_id, status='cancelling').update(status='cancelled', error=None, finished_at=datetime.now())
         else:
             # 无法确认容器已经退出时保留工作目录，并交给同主机的恢复任务重试。
-            await ChatTask.filter(id=task_id, status__in=['failed', 'cancelling']).update(
-                status='recovering', heartbeat_at=datetime.now() - timedelta(minutes=3),
-                worker_host=socket.gethostname(), error='容器清理未完成，等待恢复')
+            query = ChatTask.filter(id=task_id)
+            recovery = dict(status='recovering', heartbeat_at=datetime.now() - timedelta(minutes=3),
+                            worker_host=socket.gethostname())
+            await query.filter(status='cancelling').update(**recovery, error=STOP_REQUESTED)
+            await query.filter(status='failed').update(**recovery, error='容器清理未完成，等待恢复')
             temporary = None
         if final_dir and final_dir.exists():
             shutil.rmtree(final_dir, ignore_errors=True)

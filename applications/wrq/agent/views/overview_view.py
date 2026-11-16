@@ -1,7 +1,10 @@
 from datetime import date
 from typing import Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, Query
+from starlette.concurrency import run_in_threadpool
+from starlette.responses import Response
 
 from applications.wrq.agent.services.developer_skill_crud import DeveloperError
 from applications.wrq.agent.services.overview_service import online_skills, period_skills, skill_details
@@ -9,6 +12,7 @@ from applications.wrq.http import WrqRoute
 from core.responses import SuccessResponse
 from services import DependAuth
 from applications.wrq.agent.services import overview_facts as facts
+from applications.wrq.agent.services.overview_export import EXCEL_MEDIA_TYPE, METRICS, PERIOD_METRICS, export_rows, workbook_bytes
 
 
 overview_router = APIRouter(route_class=WrqRoute)
@@ -57,3 +61,23 @@ async def metric_detail(metric: Metric,
     else:
         start, end = None, None
     return success(await facts.detail(metric, start, end, page, page_size))
+
+
+@overview_router.get('/metric-export', summary='总览-下载指标全部明细Excel')
+async def metric_export(metric: Metric,
+                        start_date: str | None = Query(None, pattern=DATE_PATTERN),
+                        end_date: str | None = Query(None, pattern=DATE_PATTERN), current_user=DependAuth):
+    start = end = None
+    if metric in PERIOD_METRICS:
+        if start_date is None or end_date is None:
+            raise DeveloperError('导出期间指标明细需要开始日期和结束日期', 422)
+        start, end = parse_period(start_date, end_date)
+        facts.window(start, end)
+    rows = await export_rows(metric, start, end)
+    content = await run_in_threadpool(workbook_bytes, metric, rows)
+    period = f'_{start.isoformat()}至{end.isoformat()}' if start else ''
+    filename = f'{METRICS[metric][0]}明细{period}.xlsx'
+    return Response(content, media_type=EXCEL_MEDIA_TYPE, headers={
+        'Content-Disposition': f"attachment; filename*=UTF-8''{quote(filename)}",
+        'Cache-Control': 'no-store',
+    })

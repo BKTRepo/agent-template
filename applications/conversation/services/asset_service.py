@@ -136,10 +136,10 @@ async def archive(user, data):
         await run_in_threadpool(_persist, target, source.content)
         async with in_transaction() as db:
             asset = await Asset.create(using_db=db, name=data.name, skill_classes_id=data.skill_classes_id,
-                application_identify=data.application_identify, created_by=user.id, visibility=data.visibility,
+                application_identify=data.application_identify, created_by=user.id, visibility="platform",
                 source_artifact_id=data.artifact_id)
             file = await AssetFile.create(using_db=db, asset_id=asset.id, file_name=source.filename,
-                storage_key=key, size_bytes=len(source.content))
+                storage_key=key, size_bytes=len(source.content), case_groups=source.groups)
     except IntegrityError as exc:
         await run_in_threadpool(target.unlink, missing_ok=True)
         existing = await asset_status(user, data.artifact_id)
@@ -156,6 +156,8 @@ async def archive(user, data):
 
 
 async def change_recycle_state(user, ids, *, restore):
+    if not restore and len(ids) != 1:
+        raise ConversationBusinessError("一次只能移入一项资产，请逐条操作")
     operation_time = now()
     async with in_transaction() as db:
         query = Asset.filter(id__in=ids, created_by=user.id).using_db(db)

@@ -23,6 +23,16 @@ class AssetFile(models.Model):
     file_name = fields.CharField(max_length=255)
     storage_key = fields.CharField(max_length=512, unique=True)
     size_bytes = fields.BigIntField()
+    case_groups = fields.JSONField(null=True)
 
     class Meta:
         table = "keenrobot_asset_files"
+
+
+class ArtifactCaseGroups(models.Model):
+    artifact_id = fields.CharField(max_length=128, pk=True)
+    groups = fields.JSONField()
+    updated_time = fields.DatetimeField(auto_now=True)
+
+    class Meta:
+        table = "keenrobot_artifact_case_groups"

@@ -30,9 +30,10 @@ async def resolve_artifact(owner_id: int, artifact_id: str) -> Artifact:
     name = Path(row.file_name).stem
     return Artifact(str(row.id), name, path,
                     "test_cases" if row.artifact_type == "test_case" else path.suffix[1:].lower(),
-                    row.artifact_type)
+                    row.artifact_type, row.created_time.isoformat())
 
 
 def artifact_reference(row):
     # BIGINT stays a string in the browser. Never expose storage_key or server paths.
-    return {"artifact_id": str(row.id), "file_name": row.file_name, "artifact_type": row.artifact_type}
+    return {"artifact_id": str(row.id), "file_name": row.file_name, "artifact_type": row.artifact_type,
+            "created_time": row.created_time.isoformat()}

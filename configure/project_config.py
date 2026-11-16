@@ -444,6 +444,19 @@ class ProjectConfig(BaseSettings):
     DATABASE_POOL_MIN_SIZE: int = Field(default=1, ge=1, description="每进程数据库连接池最小连接数")
     DATABASE_POOL_MAX_SIZE: int = Field(default=10, ge=1, description="每进程数据库连接池最大连接数")
 
+    # Independent, read-only department directory. Mock/disabled never connect to this database.
+    USER_DEPARTMENT_MODE: Literal["disabled", "mock", "mysql"] = "disabled"
+    USER_DEPARTMENT_MOCK_FILE: str = Field(default=os.path.join(_BACKEND_PROJECT_ROOT,
+        "applications", "wrq", "data", "mock_user_departments.json"))
+    USER_DEPARTMENT_DB_HOST: str = ""
+    USER_DEPARTMENT_DB_PORT: int = Field(default=3456, ge=1, le=65535)
+    USER_DEPARTMENT_DB_NAME: str = ""
+    USER_DEPARTMENT_DB_USERNAME: str = ""
+    USER_DEPARTMENT_DB_PASSWORD: str = Field(default="", repr=False)
+    USER_DEPARTMENT_DB_SSL_ENABLED: bool = True
+    USER_DEPARTMENT_DB_SSL_CA: str = ""
+    USER_DEPARTMENT_TIMEOUT_SECONDS: int = Field(default=5, ge=1, le=30)
+
     # Redis 配置
     REDIS_URL: str = ""
     REDIS_HOST: str = Field(default="", description="Redis主机")

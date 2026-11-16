@@ -53,7 +53,7 @@ async def list_skills(name: str = Query('', max_length=128), class_id: int | Non
 
 @skill_catalog.get('/catalog/get-skill', summary='技能中心-查询实现发布版本详情')
 async def detail(skill_id: int = Query(..., ge=1), current_user=DependAuth):
-    return success(await catalog.detail(skill_id))
+    return success(await catalog.detail(skill_id, current_user))
 
 
 @skill_catalog.get('/catalog/get-build', summary='技能中心-查询固定发布构建及资源清单')

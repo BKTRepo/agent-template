@@ -403,6 +403,8 @@ async def events(task_id: int = Query(gt=0), user: User = DependAuth):
 
 @chat_router.post('/stop', summary='悬浮窗-停止生成')
 async def stop(body: TaskInput, user: User = DependAuth):
+    from applications.chat.services.execution import STOP_REQUESTED
+
     task = await require_task(body.task_id, user)
     cancelled = await ChatTask.filter(id=task.id, status='pending').update(status='cancelled', finished_at=datetime.now())
     if cancelled and task.worker_host == socket.gethostname():
@@ -410,7 +412,8 @@ async def stop(body: TaskInput, user: User = DependAuth):
             await asyncio.to_thread(remove_task_uploads, task.id)
         except OSError:
             pass  # 后台清理会重试
-    await ChatTask.filter(id=task.id, status='running').update(status='cancelling')
+    await ChatTask.filter(id=task.id, status='running').update(status='cancelling', error=STOP_REQUESTED)
+    await ChatTask.filter(id=task.id, status='recovering').update(error=STOP_REQUESTED)
     return SuccessResponse(data=await task_data(await require_task(task.id, user)))
 
 

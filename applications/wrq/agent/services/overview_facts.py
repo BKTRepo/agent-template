@@ -13,9 +13,10 @@ from applications.wrq.agent.models.agent_model import Skill
 from applications.wrq.agent.services.developer_skill_crud import DeveloperError
 from .overview_service import online_skills, period_skills, skill_details
 from applications.wrq.catalog import application_options
+from .user_department_directory import departments_for_users
 
-NOTES = ['登录、智能对话及挂载事件从本版部署后记录；未记录的历史次数不估算。',
-         '用户表没有部门信息，部门字段留空；缺少生成时间或来源的旧产物不混入日期统计。',
+NOTES = ['登录时间与次数从现存真实记录起算；无登录事件的旧账号按已保存的最近一次登录起算1次，未记录的其他历史次数不估算。',
+         '用户接入明细的部门由独立目录按登录名查询，无匹配项时留空；缺少生成时间或来源的旧产物不混入日期统计。',
          '产出物按最终成功文件统计；Top5 的产出物数按同一任务实际调用的技能关联，用于并列排序。']
 
 
@@ -55,10 +56,9 @@ async def connected_rows():
     rows = []
     for user in users:
         logs = by_user[user.id]
-        unknown = not logs or any(item.data.get('history_unknown') for item in logs)
         rows.append({'id': user.id, 'department': None, 'username': user.alias or user.username, 'employee_no': user.username,
-                     'first_access_at': logs[0].occurred_at if logs and not unknown else None,
-                     'last_login_at': user.last_login, 'login_count': len(logs) if not unknown else None,
+                     'first_access_at': logs[0].occurred_at if logs else user.last_login,
+                     'last_login_at': user.last_login, 'login_count': len(logs) if logs else 1,
                      'recorded_login_count': len(logs)})
     return rows
 
@@ -139,4 +139,9 @@ async def detail(metric, start, end, page, size):
         rows = await {'active_users': active_rows, 'test_artifacts': artifact_rows, 'new_knowledge_bases': new_knowledge_rows}[metric](left, right)
     else:
         rows = await {'connected_users': connected_rows, 'skill_calls': call_rows, 'knowledge_mounts': mount_rows}[metric]()
-    return page_rows(rows, page, size)
+    result = page_rows(rows, page, size)
+    if metric == 'connected_users':
+        departments = await departments_for_users(row['employee_no'] for row in result['items'])
+        for row in result['items']:
+            row['department'] = departments.get(row['employee_no'])
+    return result

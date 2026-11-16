@@ -1,6 +1,7 @@
 """Artifact preview/edit/download shared by real outputs and opt-in samples."""
 
 import json
+from contextlib import ExitStack
 from hashlib import sha256
 from mimetypes import guess_type
 from typing import Annotated
@@ -9,17 +10,20 @@ from urllib.parse import quote
 from fastapi import APIRouter, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
+from tortoise.transactions import in_transaction
 
 from applications.conversation.exceptions import ConversationBusinessError
 from applications.conversation.services.artifact_source import resolve_artifact
 from applications.conversation.services.artifact_case_groups import with_case_groups
+from applications.conversation.models.asset_model import ArtifactCaseGroups, Asset, AssetFile
+from applications.conversation.services.asset_service import file_path
 from applications.conversation.services.artifact_documents import MAX_PARAGRAPHS, ParagraphEdit, save_document
 from applications.conversation.services.artifact_formats import MAX_TEXT_LENGTH, make_demo_file, ordinary_detail, save_text
 from applications.conversation.services.artifact_mock import (
     MAX_FILE_BYTES, asset_path, asset_record_path, check_revision, file_write_lock, mock_artifact, read_original,
     replace_original,
 )
-from applications.conversation.services.artifact_spreadsheet import CellEdit, save_sheet, sheet_page
+from applications.conversation.services.artifact_spreadsheet import CellEdit, save_sheet, sheet_metadata, sheet_page
 from applications.conversation.services.artifact_workbook import (
     MAX_ROWS, TestCase, make_demo_workbook, update_workbook, workbook_detail,
 )
@@ -46,6 +50,7 @@ class ArtifactRevision(BaseModel):
 
 class SaveArtifact(ArtifactRevision):
     cases: list[TestCase] = Field(max_length=MAX_ROWS)
+    sync_asset: bool = False
 
 
 class SaveWord(ArtifactRevision):
@@ -102,11 +107,15 @@ def _read_detail(artifact):
 
 
 def _describe(artifact, content):
-    return workbook_detail(artifact, content) if artifact.kind == "test_cases" else ordinary_detail(artifact, content)
+    if artifact.kind == "test_cases":
+        return {**workbook_detail(artifact, content), "sheets": sheet_metadata(content)}
+    return ordinary_detail(artifact, content)
 
 
 async def _present(artifact, metadata):
-    return result(await with_case_groups(artifact, metadata) if artifact.kind == "test_cases" else metadata)
+    if artifact.kind == "test_cases":
+        metadata = await with_case_groups(artifact, metadata)
+    return result({**metadata, "created_at": artifact.created_at})
 
 
 @artifact_router.get("/sheet", summary="产出物-分页读取普通 XLSX 工作表")
@@ -115,7 +124,7 @@ async def read_sheet(artifact_id: ArtifactId, base_hash: Annotated[FileHash, Que
                limit: int = Query(default=25, ge=1, le=50), column_limit: int = Query(default=12, ge=1, le=20),
                current_user: User = DependAuth):
     artifact = await resolve_artifact(current_user.id, artifact_id)
-    if artifact.kind != "xlsx":
+    if artifact.kind not in ("xlsx", "test_cases"):
         raise ConversationBusinessError("该文件使用其他预览方式")
     def read():
         content = read_original(artifact.path)
@@ -127,11 +136,64 @@ async def read_sheet(artifact_id: ArtifactId, base_hash: Annotated[FileHash, Que
 @artifact_router.post("/save-content", summary="产出物-按原格式覆盖保存文件")
 async def save_content(data: SaveArtifact | SaveWord | SaveSpreadsheet | SaveText, current_user: User = DependAuth):
     artifact = await resolve_artifact(current_user.id, data.artifact_id)
-    metadata = await run_in_threadpool(_save, artifact, data)
+    if isinstance(data, SaveArtifact) and artifact.kind == "test_cases":
+        metadata = await _save_cases(artifact, data, current_user.id)
+    else:
+        metadata = await run_in_threadpool(_save, artifact, data)
     if not artifact.id.startswith('mock-'):
         from applications.chat.services.artifacts import count_artifact
         await count_artifact(int(artifact.id), refresh=True)
-    return await _present(artifact, metadata)
+    return result({**metadata, "created_at": artifact.created_at})
+
+
+async def _save_cases(artifact, data, owner_id):
+    original = await run_in_threadpool(read_original, artifact.path)
+    check_revision(original, data.base_hash)
+    saved, metadata = await run_in_threadpool(_edited_content, artifact, original, data)
+    current = await with_case_groups(artifact, await run_in_threadpool(_describe, artifact, original))
+    remaining = {case["id"] for case in metadata["cases"]}
+    groups = []
+    for group in current["groups"]:
+        ids = [case_id for case_id in group["case_ids"] if case_id in remaining]
+        if ids:
+            groups.append({"title": group["title"], "case_ids": ids})
+    grouped = {**metadata, "groups": groups, "grouping_status": current["grouping_status"]}
+    if grouped["grouping_status"] != "complete":
+        raise ConversationBusinessError("测试要点归纳失败，修改尚未保存，请重试")
+
+    with ExitStack() as locks:
+        locks.enter_context(file_write_lock(artifact.path, timeout=0))
+        check_revision(read_original(artifact.path), data.base_hash)
+        replaced = []
+        try:
+            async with in_transaction() as db:
+                if data.sync_asset:
+                    asset = await Asset.filter(created_by=owner_id, source_artifact_id=artifact.id,
+                                               deleted_at__isnull=True).using_db(db).select_for_update().first()
+                    if not asset:
+                        raise ConversationBusinessError("资产已移除或进入回收站，请重新打开产出物")
+                    files = await AssetFile.filter(asset_id=asset.id).using_db(db).select_for_update()
+                    if len(files) != 1 or not files[0].file_name.lower().endswith(".xlsx"):
+                        raise ConversationBusinessError("无法确认要同步的资产附件")
+                    file = files[0]
+                    path = file_path(file)
+                    locks.enter_context(file_write_lock(path, timeout=0))
+                    previous = read_original(path)
+                    file.case_groups = grouped["groups"]
+                    file.size_bytes = len(saved)
+                    await file.save(using_db=db, update_fields=["case_groups", "size_bytes"])
+                    replace_original(path, saved)
+                    replaced.append((path, previous))
+                await ArtifactCaseGroups.update_or_create(
+                    artifact_id=artifact.id, defaults={"groups": grouped["groups"]}, using_db=db,
+                )
+                replace_original(artifact.path, saved)
+                replaced.append((artifact.path, original))
+        except BaseException:
+            for path, previous in reversed(replaced):
+                replace_original(path, previous)
+            raise
+    return grouped
 
 
 def _apply_content(artifact, original, data):
@@ -146,17 +208,21 @@ def _apply_content(artifact, original, data):
     raise ConversationBusinessError("保存内容与产出物格式不匹配")
 
 
+def _edited_content(artifact, original, data):
+    try:
+        saved = _apply_content(artifact, original, data)
+    except ValueError as exc:
+        raise ConversationBusinessError("内容包含文件格式无法保存的字符") from exc
+    if len(saved) > MAX_FILE_BYTES:
+        raise ConversationBusinessError("修改后的文件超过在线处理上限")
+    return saved, _describe(artifact, saved)
+
+
 def _save(artifact, data):
     with file_write_lock(artifact.path):
         original = read_original(artifact.path)
         check_revision(original, data.base_hash)
-        try:
-            saved = _apply_content(artifact, original, data)
-        except ValueError as exc:
-            raise ConversationBusinessError("内容包含文件格式无法保存的字符") from exc
-        if len(saved) > MAX_FILE_BYTES:
-            raise ConversationBusinessError("修改后的文件超过在线处理上限")
-        metadata = _describe(artifact, saved)
+        saved, metadata = _edited_content(artifact, original, data)
         check_revision(read_original(artifact.path), data.base_hash)
         if saved != original:
             replace_original(artifact.path, saved)

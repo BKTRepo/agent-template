@@ -32,7 +32,7 @@ class ArchiveRequest(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     skill_classes_id: int = Field(gt=0)
     application_identify: str = Field(min_length=1, max_length=100)
-    visibility: Literal["private", "platform"] = "private"
+    visibility: Literal["private", "platform"] = "platform"
 
     @field_validator("name", "application_identify")
     @classmethod
@@ -52,6 +52,10 @@ class AssetSelection(BaseModel):
         if any(asset_id <= 0 for asset_id in ids) or len(ids) != len(set(ids)):
             raise ValueError("资产编号必须为不重复的正整数")
         return ids
+
+
+class RecycleSelection(AssetSelection):
+    asset_ids: list[int] = Field(min_length=1, max_length=1, description="仅允许单个资产编号")
 
 
 def _result(data):
@@ -124,8 +128,8 @@ async def create(data: ArchiveRequest, current_user=DependAuth):
     return _result(await service.archive(current_user, data))
 
 
-@asset_router.post("/move-to-recycle-bin", summary="资产管理-将所选资产移入回收站")
-async def move_to_recycle(data: AssetSelection, current_user=DependAuth):
+@asset_router.post("/move-to-recycle-bin", summary="资产管理-将单个本人资产移入回收站")
+async def move_to_recycle(data: RecycleSelection, current_user=DependAuth):
     return _result({"changed": await service.change_recycle_state(current_user, data.asset_ids, restore=False)})
 
 
@@ -146,11 +150,24 @@ async def preview_file(asset_id: int = Query(..., gt=0), file_id: int = Query(..
     data = {"format": suffix.lstrip("."), "viewer": "unsupported"}
     try:
         if suffix == ".xlsx":
-            cases = await run_in_threadpool(_test_cases, file, path) if file.size_bytes <= 10 * 1024 * 1024 else None
+            from applications.conversation.services.artifact_mock import file_write_lock
+            with file_write_lock(path, timeout=0):
+                file, path = await _file(current_user, asset_id, file_id)
+                cases = await run_in_threadpool(_test_cases, file, path) if file.size_bytes <= 20 * 1024 * 1024 else None
             if cases is not None:
-                from applications.conversation.services.artifact_case_groups import with_case_groups
+                from applications.conversation.services.artifact_case_groups import _valid_groups, legacy_groups
                 source = SimpleNamespace(id=f"asset-file-{file.id}", path=path)
-                cases = await with_case_groups(source, cases)
+                groups = file.case_groups
+                if groups is None:
+                    groups = await run_in_threadpool(legacy_groups, source, cases)
+                    if groups is not None:
+                        await AssetFile.filter(id=file.id, storage_key=file.storage_key, case_groups__isnull=True).update(case_groups=groups)
+                if _valid_groups(groups, cases["cases"]):
+                    cases.update(groups=groups, grouping_status="complete")
+                else:
+                    cases.update(groups=[{"title": "待归纳", "case_ids": [case["id"] for case in cases["cases"]]}]
+                                 if cases["cases"] else [], grouping_status="failed",
+                                 grouping_error="该资产尚未保存测试要点，可从原产出物同步更新。")
                 await _asset(current_user, asset_id)
                 return _result({**data, "viewer": "case", "case_artifact": cases})
             data.update(viewer="spreadsheet", sheets=await run_in_threadpool(preview.workbook_metadata, _fingerprint(path)))
@@ -216,9 +233,18 @@ async def export(data: AssetSelection, current_user=DependAuth):
             target = Path(temporary.name)
         try:
             with zipfile.ZipFile(target, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+                used_names = set()
                 for file in files:
-                    name = re.sub(r'[\\/\x00-\x1f\x7f]', '_', file.file_name)
-                    archive.write(service.storage_path(file.storage_key), f'{file.asset_id}/{file.id}-{name}')
+                    name = re.sub(r'[\\/\x00-\x1f\x7f<>:"|?*]', '_', file.file_name).rstrip(' .')
+                    if not name or name in {'.', '..'}:
+                        name = f'文件-{file.id}'
+                    stem, suffix = Path(name).stem, Path(name).suffix
+                    candidate, number = name, 2
+                    while candidate.casefold() in used_names:
+                        candidate = f'{stem} ({number}){suffix}'
+                        number += 1
+                    used_names.add(candidate.casefold())
+                    archive.write(service.storage_path(file.storage_key), candidate)
             return target
         except Exception:
             target.unlink(missing_ok=True)

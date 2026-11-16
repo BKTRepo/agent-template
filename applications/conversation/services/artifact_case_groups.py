@@ -9,7 +9,8 @@ from starlette.concurrency import run_in_threadpool
 
 from applications.conversation.exceptions import ConversationBusinessError
 from configure import LOGGER, PROJECT_CONFIG
-from .artifact_mock import Artifact, file_write_lock, read_original, replace_original
+from .artifact_mock import Artifact, check_revision, file_write_lock, read_original, replace_original
+from applications.conversation.models.asset_model import ArtifactCaseGroups
 
 SCHEMA_VERSION = 2
 DEMO_TOPICS = (
@@ -95,6 +96,31 @@ def _store_groups(path, artifact, source_hash, mode, groups):
 
 
 async def with_case_groups(artifact: Artifact, metadata: dict) -> dict:
+    with file_write_lock(artifact.path, timeout=0):
+        check_revision(read_original(artifact.path), metadata["base_hash"])
+        stored = await ArtifactCaseGroups.get_or_none(artifact_id=artifact.id)
+        if stored and _valid_groups(stored.groups, metadata["cases"]):
+            return {**metadata, "groups": stored.groups, "grouping_status": "complete"}
+    grouped = await derive_case_groups(artifact, metadata)
+    if grouped["grouping_status"] == "complete":
+        with file_write_lock(artifact.path, timeout=0):
+            check_revision(read_original(artifact.path), metadata["base_hash"])
+            stored, _ = await ArtifactCaseGroups.get_or_create(
+                artifact_id=artifact.id, defaults={"groups": grouped["groups"]},
+            )
+            grouped["groups"] = stored.groups
+    return grouped
+
+
+def legacy_groups(artifact, metadata, mode="model"):
+    root = artifact.path.parent.parent
+    path = (root / ".case-groups" / artifact.path.parent.name / f"{artifact.id}.json").resolve()
+    if path.is_relative_to(root / ".case-groups"):
+        return _read_groups(path, artifact, metadata["base_hash"], mode, metadata["cases"])
+    return None
+
+
+async def derive_case_groups(artifact: Artifact, metadata: dict, *, use_legacy=True) -> dict:
     cases, source_hash = metadata["cases"], metadata["base_hash"]
     root = artifact.path.parent.parent
     group_path = (root / ".case-groups" / artifact.path.parent.name / f"{artifact.id}.json").resolve()
@@ -102,7 +128,7 @@ async def with_case_groups(artifact: Artifact, metadata: dict) -> dict:
     use_model = bool(cases) and (real_output or PROJECT_CONFIG.ASSISTANT_ARTIFACT_MODEL_GROUPING)
     mode = "model" if use_model else "rules"
     can_cache = group_path.is_relative_to(root / ".case-groups")
-    if can_cache:
+    if can_cache and use_legacy:
         cached = await run_in_threadpool(_read_groups, group_path, artifact, source_hash, mode, cases)
         if cached is not None:
             return {**metadata, "groups": cached, "grouping_status": "complete"}
@@ -126,7 +152,7 @@ async def with_case_groups(artifact: Artifact, metadata: dict) -> dict:
                 return {**metadata, "groups": [{"title": "待归纳", "case_ids": [case["id"] for case in cases]}],
                         "grouping_status": "failed", "grouping_error": "模型归纳失败，案例文件已保留，请重新打开重试。"}
             mode = "rules"
-    if can_cache:
+    if can_cache and use_legacy:
         await run_in_threadpool(_store_groups, group_path, artifact, source_hash, mode, groups)
     return {**metadata, "groups": groups, "grouping_status": "complete"}
 

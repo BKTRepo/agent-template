@@ -34,6 +34,7 @@ class Artifact:
     path: Path
     kind: str
     category: str
+    created_at: str | None = None
 
     @property
     def file_type(self):
@@ -73,9 +74,9 @@ def check_revision(content: bytes, base_hash: str) -> None:
 
 
 @contextmanager
-def file_write_lock(path: Path):
+def file_write_lock(path: Path, *, timeout=5):
     try:
-        with FileLock(str(path) + ".lock", timeout=5):
+        with FileLock(str(path) + ".lock", timeout=timeout):
             yield
     except Timeout as exc:
         raise ConversationBusinessError("原文件正在保存，请稍后重试") from exc

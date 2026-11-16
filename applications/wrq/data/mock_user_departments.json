@@ -1,0 +1,10 @@
+{
+  "users": [
+    {"uid": 10001, "login_name": "admin", "department_id": 101},
+    {"uid": 10002, "login_name": "test", "department_id": 102}
+  ],
+  "departments": [
+    {"department_id": 101, "department_name": "平台研发部（模拟）"},
+    {"department_id": 102, "department_name": "测试管理部（模拟）"}
+  ]
+}
