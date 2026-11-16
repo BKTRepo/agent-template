@@ -1,3 +1,4 @@
+import ArtifactTitle from './ArtifactTitle'
 import { useEffect, useState, type ReactNode } from 'react'
 import { readArtifactFile } from '@/api/assistantArtifacts'
 import Dialog from '@/components/developer/Dialog'
@@ -22,7 +23,7 @@ export default function ArtifactReadOnlyDrawer({ artifact, onClose, toolbar, act
     return () => controller.abort()
   }, [artifact])
   return <Dialog className="artifact-case-drawer ordinary-artifact-drawer" title={
-    <span className="artifact-case-title">测试产出物<small>{artifact.name}.{artifact.fileType}</small></span>}
+    <ArtifactTitle artifact={artifact} />}
     busy={actionBusy} onClose={onClose} footer={<button className="button" onClick={onClose} disabled={actionBusy}>关闭</button>}>
     <div className="artifact-case-views"><span>原文件</span><div className="artifact-case-toolbar">{toolbar(artifact, actionBusy)}</div></div>
     {(error || actionError) && <p className="error-banner" role="alert">{error || actionError}</p>}

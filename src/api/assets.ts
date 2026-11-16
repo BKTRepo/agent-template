@@ -85,7 +85,8 @@ export async function exportAssets(ids: number[]) {
 const assetActions = { move: '/move-to-recycle-bin', restore: '/restore', delete: '/delete-recycled' } as const
 export type AssetAction = keyof typeof assetActions
 
-export function changeAssetState(ids: number[], action: AssetAction) {
+export async function changeAssetState(ids: number[], action: AssetAction) {
+  if (action === 'move' && ids.length !== 1) throw new Error('一次只能移入一项资产，请逐条操作。')
   return request<{ changed: number }>(assetActions[action], post({ asset_ids: ids }))
 }
 
@@ -94,6 +95,6 @@ export function assetSourceStatus(artifactId: string) {
 }
 
 export function createAsset(data: { artifact_id: string; base_hash: string; name: string; skill_classes_id: number;
-  application_identify: string; visibility: 'private' | 'platform' }) {
+  application_identify: string }) {
   return request<AssetStatus>('/create', post(data))
 }

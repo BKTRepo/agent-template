@@ -85,7 +85,7 @@ export function OverviewTrend({ data, loading, error }: QueryStatus & { data?: T
 export function OverviewRanking({ data, loading, error }: QueryStatus & { data?: RankedSkill[] | null }) {
   const rows = data?.slice(0, 5) ?? []
   const max = rows.reduce((value, row) => Math.max(value, row.call_count), 0)
-  return <section className="surface overview-analytic">
+  return <section className="surface overview-analytic overview-ranking-card">
     <div className="overview-analytic-header"><h2>热门技能 Top 5</h2><span>调用量</span></div>
     {rows.length > 0 ? <ol className="overview-ranking">
       {rows.map((row, index) => <li key={row.skill_id}>

@@ -11,6 +11,7 @@ interface ArtifactResponse {
   artifact_id: string
   name: string
   file_type: string
+  created_at?: string | null
   is_test_case: boolean
   grouping_error?: string
   base_hash: string
@@ -43,9 +44,9 @@ async function request<T>(path: string, data?: object, signal?: AbortSignal): Pr
 }
 
 function fromArtifact(row: ArtifactResponse): AssistantArtifact {
-  const file = { artifactId: row.artifact_id, baseHash: row.base_hash, name: row.name, fileType: row.file_type }
+  const file = { artifactId: row.artifact_id, baseHash: row.base_hash, name: row.name, fileType: row.file_type, createdAt: row.created_at ?? undefined }
   if (row.is_test_case && Array.isArray(row.cases) && Array.isArray(row.groups)) {
-    return { ...file, editor: 'cases', groupingError: row.grouping_error, cases: row.cases, groups: row.groups.map(group => ({ title: group.title, caseIds: group.case_ids })) }
+    return { ...file, editor: 'cases', groupingError: row.grouping_error, cases: row.cases, sheets: row.sheets, groups: row.groups.map(group => ({ title: group.title, caseIds: group.case_ids })) }
   }
   if (!row.is_test_case) {
     if (row.editor === 'download') return { ...file, editor: 'download' }
@@ -64,9 +65,9 @@ export async function getArtifact(artifactId: string, signal?: AbortSignal) {
   return fromArtifact(await request<ArtifactResponse>(`/detail?${new URLSearchParams({ artifact_id: artifactId })}`, undefined, signal))
 }
 
-export async function saveArtifact(change: ArtifactRevision & { cases: TestCase[] }): Promise<TestCaseArtifact> {
+export async function saveArtifact(change: ArtifactRevision & { cases: TestCase[]; syncAsset?: boolean }): Promise<TestCaseArtifact> {
   const result = fromArtifact(await request<ArtifactResponse>('/save-content', {
-    artifact_id: change.artifactId, base_hash: change.baseHash, cases: change.cases,
+    artifact_id: change.artifactId, base_hash: change.baseHash, cases: change.cases, sync_asset: change.syncAsset,
   }))
   if (result.editor !== 'cases') throw new Error('保存响应与测试案例格式不匹配。')
   return result

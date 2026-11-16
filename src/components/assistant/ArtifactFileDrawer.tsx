@@ -1,3 +1,4 @@
+import ArtifactTitle from './ArtifactTitle'
 import { lazy, Suspense, useState, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -50,7 +51,7 @@ export default function ArtifactFileDrawer({ artifact, onClose, toolbar, actionB
 
   return <>
     <Dialog className="artifact-case-drawer ordinary-artifact-drawer" title={
-      <span className="artifact-case-title">测试产出物<small>{saved.name}.{saved.fileType}</small></span>}
+      <ArtifactTitle artifact={saved} />}
       busy={blocked} onClose={() => dirty ? setDiscard('close') : onClose()}
       footer={<><span className={dirty ? 'artifact-case-dirty' : 'helper-text'} role="status">{dirty ? '有未保存的修改' : '已保存'}</span>
         <button className="button" type="button" disabled={!dirty || blocked} onClick={() => setDiscard('reset')}>取消修改</button>

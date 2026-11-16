@@ -83,8 +83,6 @@ export default function AssetsPage() {
 
   const locked = busy || loading
   const label = recycle ? '回收站' : overview?.classes.find(row => row.id === filters.classId)?.name ?? '全部资产'
-  const eligible = result.items.filter(row => recycle || row.can_manage).map(row => row.id)
-  const selectedForChange = selected.filter(id => eligible.includes(id))
 
   return <div className="assets-page">
     <div className="asset-page-actions"><button className="button" disabled={busy} onClick={toggleRecycle}>
@@ -106,8 +104,8 @@ export default function AssetsPage() {
       </form>}
       {selected.length > 0 && <div className="asset-bulk"><span>已选 {selected.length} 项</span>
         {!recycle && <button className="button small" disabled={locked} onClick={() => void run(() => exportAssets(selected))}>批量导出</button>}
-        <button className="button small" disabled={locked || selectedForChange.length !== selected.length}
-          onClick={() => setPending({ ids: selectedForChange, action: recycle ? 'restore' : 'move' })}>{recycle ? '恢复' : '移入回收站'}</button>
+        {recycle && <button className="button small" disabled={locked}
+          onClick={() => setPending({ ids: selected, action: 'restore' })}>恢复</button>}
         {recycle && <button className="button small" disabled={locked} onClick={() => setPending({ ids: selected, action: 'delete' })}>彻底删除</button>}
         <button className="button small" disabled={locked} onClick={() => setSelected([])}>取消选择</button>
       </div>}
@@ -155,7 +153,9 @@ export default function AssetsPage() {
           setPending(undefined); setNotice(`已${actionLabels[pending.action]} ${result.changed} 项资产`)
           setRefresh(value => value + 1)
         })}>{pending.action === 'move' ? '确认移入' : `确认${actionLabels[pending.action]}`}</button></>}>
-      <p>{actionLabels[pending.action]}所选 {pending.ids.length} 项资产？
+      <p>{pending.action === 'move'
+        ? `确认将资产「${result.items.find(row => row.id === pending.ids[0])?.name ?? ''}」移入回收站？`
+        : `${actionLabels[pending.action]}所选 ${pending.ids.length} 项资产？`}
         {pending.action === 'delete' ? '彻底删除后无法恢复。' : pending.action === 'move' && `回收站保留 ${overview?.recycle_days ?? 30} 天。`}</p>
       {error && <p className="error-banner" role="alert">{error}</p>}
     </Dialog>}

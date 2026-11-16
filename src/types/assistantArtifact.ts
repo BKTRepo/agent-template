@@ -6,6 +6,7 @@ export interface ArtifactRevision {
 export interface ArtifactFile extends ArtifactRevision {
   name: string
   fileType: string
+  createdAt?: string
 }
 
 export interface TestCase {
@@ -22,6 +23,7 @@ export interface TestCaseArtifact extends ArtifactFile {
   editor: 'cases'
   cases: TestCase[]
   groups: { title: string; caseIds: string[] }[]
+  sheets?: SheetInfo[]
 }
 
 export interface WordParagraph {

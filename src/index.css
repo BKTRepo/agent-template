@@ -122,7 +122,8 @@ h1,h2,h3,p { margin:0; }
 .overview-trend-dot { fill:white; }
 .overview-chart-empty, .overview-ranking-empty { display:grid; place-items:center; min-height:190px; color:var(--platform-muted); font-size:13px; }
 .overview-chart-empty { border-block-end:1px solid var(--platform-line); background:repeating-linear-gradient(to bottom, #e9eff6 0px, #e9eff6 1px, transparent 1px, transparent 25%); }
-.overview-ranking { display:grid; gap:14px; padding:0; list-style:none; }
+.overview-ranking-card { display:grid; grid-template-rows:auto 1fr; }
+.overview-ranking { display:grid; grid-auto-rows:minmax(36px, 1fr); margin:0; padding:0; list-style:none; }
 .overview-ranking li { display:grid; grid-template-columns:24px minmax(0, 1fr) minmax(35px, .65fr) auto; gap:8px; align-items:center; font-size:12px; }
 .overview-ranking strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .overview-rank-number { color:#2267be; font-weight:700; }
@@ -491,6 +492,7 @@ h1,h2,h3,p { margin:0; }
 .artifact-case-drawer .dialog-header { align-items:flex-start; }
 .artifact-case-title { display:grid; gap:4px; font-size:22px; }
 .artifact-case-title small { color:var(--platform-muted); font-size:14px; font-weight:400; overflow-wrap:anywhere; }
+.artifact-case-title small strong { color:var(--platform-text, #17243b); font-weight:700; }
 .artifact-case-drawer .dialog-body { flex:1; display:flex; flex-direction:column; padding:0; overflow:hidden; }
 .artifact-case-drawer .dialog-footer>span { margin-right:auto; }
 .artifact-case-dirty { color:#885007; font-size:13px; }
@@ -700,6 +702,9 @@ h1,h2,h3,p { margin:0; }
 .aip-message.bot { margin-left:0; color:#41526b; box-shadow:0 2px 8px rgba(9,30,66,.04); }
 .aip-message.bot::before,.aip-welcome::before { left:-32px; }
 .aip-message-meta { gap:6px; margin-top:6px; font-size:10.5px; }
+.aip-action.aip-artifact { height:auto; min-height:25px; max-width:100%; padding-block:4px; flex-wrap:wrap; text-align:left; }
+.aip-artifact strong { color:#111827; font-weight:700; overflow-wrap:anywhere; min-width:0; }
+.aip-artifact time { color:#66768d; white-space:nowrap; font-variant-numeric:tabular-nums; }
 .aip-message.user .aip-message-meta span { color:rgba(255,255,255,.85); border-color:rgba(255,255,255,.16); background:rgba(255,255,255,.16); }
 .aip-message.bot>header { margin-bottom:7px; font-size:12px; }
 .aip-welcome { width:calc(88% - 32px); margin-left:0; padding:12px 13px; }

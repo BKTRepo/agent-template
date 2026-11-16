@@ -15,7 +15,6 @@ interface ArchiveForm {
   name: string
   application: string
   classId: string
-  visibility: 'private' | 'platform'
 }
 
 export default function ArtifactWorkbench({ artifactId, onClose }: { artifactId: string; onClose: () => void }) {
@@ -62,7 +61,7 @@ export default function ArtifactWorkbench({ artifactId, onClose }: { artifactId:
       const [metadata, overview] = await Promise.all([getDeveloperMetadata(), getAssetOverview()])
       setApplications(metadata.applications.filter(application => application.id !== '*'))
       setClasses(overview.classes.filter(row => row.enabled))
-      setForm({ artifact: current, exportAfter, name: current.name, application: '', classId: '', visibility: 'private' })
+      setForm({ artifact: current, exportAfter, name: current.name, application: '', classId: '' })
       setExportChoice(undefined)
     })
   }
@@ -70,7 +69,7 @@ export default function ArtifactWorkbench({ artifactId, onClose }: { artifactId:
   function submit(form: ArchiveForm) {
     return run(async () => {
       const status = await createAsset({ artifact_id: form.artifact.artifactId, base_hash: form.artifact.baseHash,
-        name: form.name.trim(), application_identify: form.application, skill_classes_id: Number(form.classId), visibility: form.visibility })
+        name: form.name.trim(), application_identify: form.application, skill_classes_id: Number(form.classId) })
       setAssetStatus(status)
       setForm(undefined)
       window.dispatchEvent(new Event('asset-collection-changed'))
@@ -94,7 +93,15 @@ export default function ArtifactWorkbench({ artifactId, onClose }: { artifactId:
       {busy ? <p role="status">正在读取产出物…</p> : <p role="alert" className="error-banner">{error}</p>}
     </Dialog>}
     {artifact && (artifact.editor === 'cases'
-      ? <TestCaseArtifactDrawer artifact={artifact} onSave={saveArtifact} {...drawerProps} />
+      ? <TestCaseArtifactDrawer artifact={artifact} checkArchived={async id => {
+        const status = await assetSourceStatus(id)
+        setAssetStatus(status)
+        return status.included
+      }} onSave={async change => {
+        const updated = await saveArtifact(change)
+        if (change.syncAsset) window.dispatchEvent(new Event('asset-collection-changed'))
+        return updated
+      }} {...drawerProps} />
       : artifact.editor === 'download' ? <ArtifactReadOnlyDrawer artifact={artifact} {...drawerProps} /> : <ArtifactFileDrawer artifact={artifact} {...drawerProps} />)}
     {exportChoice && <Dialog className="assistant-owned-dialog" title="导出测试产出物" busy={busy}
       onClose={() => { setExportChoice(undefined); setError('') }}
@@ -115,10 +122,6 @@ export default function ArtifactWorkbench({ artifactId, onClose }: { artifactId:
           <option value="">请选择技能大类</option>{classes.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
         <ApplicationPicker required value={form.application ? [form.application] : []} options={applications}
           disabled={busy} onChange={ids => setForm({ ...form, application: ids[0] ?? '' })} />
-        <label>可见范围<select value={form.visibility} disabled={busy}
-          onChange={event => setForm({ ...form, visibility: event.target.value === 'platform' ? 'platform' : 'private' })}>
-          <option value="private">仅本人</option><option value="platform">全平台</option>
-        </select></label>
       </div>
       {error && <p className="error-banner" role="alert">{error}</p>}
     </Dialog>}

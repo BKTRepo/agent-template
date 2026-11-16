@@ -3,9 +3,9 @@ import { useAuthStore } from '@/stores/authStore'
 import { hasSkillSession } from './skillSession'
 
 export interface AssistantSkill { id: string; name: string; description?: string; input?: string; output?: string }
-export interface ChatArtifactReference { artifactId: string; fileName: string; artifactType: string }
-interface ArtifactReferenceResponse { artifact_id: string; file_name: string; artifact_type: string }
-function artifactReferences(rows?: ArtifactReferenceResponse[]): ChatArtifactReference[] { return (rows ?? []).map(row => ({ artifactId: String(row.artifact_id), fileName: row.file_name, artifactType: row.artifact_type })) }
+export interface ChatArtifactReference { artifactId: string; fileName: string; artifactType: string; createdAt?: string }
+interface ArtifactReferenceResponse { artifact_id: string; file_name: string; artifact_type: string; created_time?: string }
+function artifactReferences(rows?: ArtifactReferenceResponse[]): ChatArtifactReference[] { return (rows ?? []).map(row => ({ artifactId: String(row.artifact_id), fileName: row.file_name, artifactType: row.artifact_type, createdAt: row.created_time })) }
 export type AssistantRole = 'user' | 'assistant'
 export interface AssistantMessage { id: string; serverId?: number; role: AssistantRole; text: string; unread?: boolean; createdAt?: string; attachments?: string[]; artifacts?: ChatArtifactReference[]; taskId?: number; status?: 'generating' | 'completed' | 'stopped' | 'failed'; feedback?: 'up' | 'down'; feedbackReason?: string; context?: object }
 export interface ChatConversation { id: string; title: string; favorite: boolean; generation: number; skills: number[]; knowledgeBases: number[]; model: string | null; unreadCount: number; createdAt: string; updatedAt: string }

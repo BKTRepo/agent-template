@@ -1,28 +1,33 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import Dialog from '@/components/developer/Dialog'
 import CaseMindMap from './CaseMindMap'
+import ArtifactTitle from './ArtifactTitle'
+import ArtifactSpreadsheet from './ArtifactSpreadsheet'
 import type { TestCase, TestCaseArtifact } from '@/types/assistantArtifact'
 
 interface Props {
   artifact: TestCaseArtifact
-  onSave: (change: Pick<TestCaseArtifact, 'artifactId' | 'baseHash' | 'cases'>) => Promise<TestCaseArtifact>
+  onSave: (change: Pick<TestCaseArtifact, 'artifactId' | 'baseHash' | 'cases'> & { syncAsset?: boolean }) => Promise<TestCaseArtifact>
+  checkArchived: (artifactId: string) => Promise<boolean>
   onClose: () => void
   toolbar: (saved: TestCaseArtifact, disabled: boolean) => ReactNode
   actionBusy: boolean
   actionError: string
 }
 
-export default function TestCaseArtifactDrawer({ artifact, onSave, onClose, toolbar, actionBusy, actionError }: Props) {
+export default function TestCaseArtifactDrawer({ artifact, onSave, checkArchived, onClose, toolbar, actionBusy, actionError }: Props) {
   const [saved, setSaved] = useState(artifact)
   const [cases, setCases] = useState(artifact.cases)
-  const [view, setView] = useState<'map' | 'list'>('map')
+  const [view, setView] = useState<'map' | 'list' | 'sheet'>('map')
   const [selectedId, setSelectedId] = useState<string>()
   const [editing, setEditing] = useState<TestCase>()
   const [pendingDelete, setPendingDelete] = useState<TestCase>()
   const [discard, setDiscard] = useState<'reset' | 'close'>()
   const [saving, setSaving] = useState(false)
+  const [confirmSync, setConfirmSync] = useState(false)
+  const [checkingArchive, setCheckingArchive] = useState(false)
   const [error, setError] = useState('')
-  const blocked = saving || actionBusy
+  const blocked = saving || checkingArchive || actionBusy
   const dirty = JSON.stringify(cases) !== JSON.stringify(saved.cases)
   const groups = useMemo(() => {
     const byId = new Map(cases.map(item => [item.id, item]))
@@ -31,12 +36,12 @@ export default function TestCaseArtifactDrawer({ artifact, onSave, onClose, tool
     })).filter(group => group.items.length)
   }, [cases, saved.groups])
 
-  async function save() {
+  async function save(syncAsset = false) {
     if (blocked || !dirty) return
     setSaving(true)
     setError('')
     try {
-      const updated = await onSave({ artifactId: saved.artifactId, baseHash: saved.baseHash, cases })
+      const updated = await onSave({ artifactId: saved.artifactId, baseHash: saved.baseHash, cases, syncAsset })
       setSaved(updated)
       setCases(updated.cases)
       setSelectedId(undefined)
@@ -44,6 +49,20 @@ export default function TestCaseArtifactDrawer({ artifact, onSave, onClose, tool
       setError(reason instanceof Error ? reason.message : '保存修改失败，请重试。')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function requestSave() {
+    if (blocked || !dirty) return
+    setCheckingArchive(true)
+    setError('')
+    try {
+      if (await checkArchived(saved.artifactId)) setConfirmSync(true)
+      else await save()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '无法查询资产状态，请重试。')
+    } finally {
+      setCheckingArchive(false)
     }
   }
 
@@ -55,21 +74,33 @@ export default function TestCaseArtifactDrawer({ artifact, onSave, onClose, tool
   }
 
   return <>
-    <Dialog title={<span className="artifact-case-title">测试产出物<small>{saved.name} · Excel (.xlsx)</small></span>}
+    {confirmSync && <Dialog title="同步到资产管理" onClose={() => setConfirmSync(false)}
+      footer={<>
+        <button type="button" className="button" onClick={() => setConfirmSync(false)}>取消</button>
+        <button type="button" className="button" onClick={() => { setConfirmSync(false); void save() }}>仅保存当前产出物</button>
+        <button type="button" className="button primary" onClick={() => { setConfirmSync(false); void save(true) }}>同步修改</button>
+      </>}>
+      <p>该产出物已纳入资产管理，是否将本次修改同步到资产管理？</p>
+    </Dialog>}
+    <Dialog title={<ArtifactTitle artifact={saved} />}
       className="artifact-case-drawer" busy={blocked} onClose={() => dirty ? setDiscard('close') : onClose()}
       footer={<><span className={dirty ? 'artifact-case-dirty' : 'helper-text'} role="status">{dirty ? '有未保存的修改' : '已保存'}</span>
         <button type="button" className="button" disabled={!dirty || blocked} onClick={() => setDiscard('reset')}>取消修改</button>
-        <button type="button" className="button primary" disabled={!dirty || blocked} onClick={() => void save()}>{saving ? '保存中…' : '保存修改'}</button></>}>
+        <button type="button" className="button primary" disabled={!dirty || blocked}
+          onClick={() => void requestSave()}>{saving || checkingArchive ? '保存中…' : '保存修改'}</button></>}>
       <div className="artifact-case-views">
         <div role="group" aria-label="测试案例视图">
         <button type="button" aria-pressed={view === 'map'} onClick={() => setView('map')}>思维导图</button>
         <button type="button" aria-pressed={view === 'list'} onClick={() => setView('list')}>用例</button>
+        {!!saved.sheets?.length && <button type="button" disabled={dirty || blocked} aria-pressed={view === 'sheet'} onClick={() => setView('sheet')}>原表</button>}
         </div>
         <div className="artifact-case-toolbar">{toolbar(saved, dirty || blocked)}</div>
       </div>
       {(error || actionError) && <p className="error-banner artifact-case-error" role="alert">{error || actionError}</p>}
       {saved.groupingError && <p className="error-banner" role="alert">{saved.groupingError}</p>}
-      {!groups.length ? <p className="empty-table">暂无测试案例</p> : view === 'map' ?
+      {view === 'sheet' && saved.sheets?.length ?
+        <ArtifactSpreadsheet artifact={{ ...saved, editor: 'sheet', sheets: saved.sheets }} editing={false} changes={{}} onChange={() => {}} />
+        : !groups.length ? <p className="empty-table">暂无测试案例</p> : view === 'map' ?
         <CaseMindMap title={saved.name} groups={groups} selectedId={selectedId} disabled={blocked}
           onSelect={id => { setSelectedId(id); setEditing(cases.find(item => item.id === id)) }} actions={actions} /> :
         <div className="artifact-case-list">{groups.map(({ title, items }) => <section key={title}>

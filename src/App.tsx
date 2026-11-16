@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Boxes, FileStack, GitBranch, House, Layers3, Menu, Settings, Sparkles, X } from 'lucide-react'
+import { Boxes, FileStack, House, Layers3, Menu, Settings, Sparkles, X } from 'lucide-react'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import DeveloperPage from '@/pages/DeveloperPage'
 import AssetsPage from '@/pages/AssetsPage'
@@ -23,7 +23,6 @@ const navigation = [
     { id: 'overview', label: '总览', icon: House },
     { id: 'skills', label: '技能中心', icon: Sparkles },
     { id: 'developer', label: '开发者中心', icon: Boxes },
-    { id: 'workflow', label: '技能编排', icon: GitBranch },
   ] },
   { group: '资源治理', items: [
     { id: 'knowledge', label: '知识库与文件管理', icon: Layers3 },
@@ -59,12 +58,12 @@ export default function App() {
 }
 
 function Workspace() {
-  const [page, setPage] = useState('developer')
+  const [page, setPage] = useState('overview')
   const [mobileMenu, setMobileMenu] = useState(false)
   const updateSummary = useKnowledgeUpdatesStore(state => state.summary)
   const actor = useAccessStore(state => state.actor)
   const unreadSkills = updateSummary?.unread_skill_count ?? 0
-  const label = navigation.flatMap(group => group.items).find(item => item.id === page)?.label ?? '开发者中心'
+  const label = navigation.flatMap(group => group.items).find(item => item.id === page)?.label ?? '总览'
   return <ErrorBoundary><div className="platform">
     {mobileMenu && <button className="sidebar-shade" aria-label="关闭导航" onClick={() => setMobileMenu(false)} />}
     <aside className={`platform-sidebar ${mobileMenu ? 'is-open' : ''}`} aria-label="平台导航">

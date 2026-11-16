@@ -13386,9 +13386,14 @@ h1:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#
   border-block-end: 1px solid var(--platform-line);
   background: repeating-linear-gradient(to bottom, #e9eff6 0px, #e9eff6 1px, transparent 1px, transparent 25%);
 }
+.overview-ranking-card:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
 .overview-ranking:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   display: grid;
-  gap: 14px;
+  grid-auto-rows: minmax(36px, 1fr);
+  margin: 0;
   padding: 0;
   list-style: none;
 }
@@ -15593,6 +15598,10 @@ h1:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#
   font-weight: 400;
   overflow-wrap: anywhere;
 }
+.artifact-case-title:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) small strong {
+  color: var(--platform-text, #17243b);
+  font-weight: 700;
+}
 .artifact-case-drawer:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) .dialog-body {
   flex: 1;
   display: flex;
@@ -17422,6 +17431,25 @@ h1:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#
   gap: 6px;
   margin-top: 6px;
   font-size: 10.5px;
+}
+.aip-action.aip-artifact:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  height: auto;
+  min-height: 25px;
+  max-width: 100%;
+  padding-block: 4px;
+  flex-wrap: wrap;
+  text-align: left;
+}
+.aip-artifact:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) strong {
+  color: #111827;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.aip-artifact:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) time {
+  color: #66768d;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .aip-message.user:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) .aip-message-meta span {
   color: rgba(255,255,255,.85);
