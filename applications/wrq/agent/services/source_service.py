@@ -55,7 +55,10 @@ class SourceService:
                     kind = mapping.get(category)
                     if kind is None:
                         raise DeveloperError('请选择有效的资源用途分类')
-                    source = await Source.filter(category_id=kind.id, sha256=digest, state='ACTIVE').using_db(db).first()
+                    owned_source = Source.filter(
+                        create_user_login_name=login, category_id=kind.id, sha256=digest, state='ACTIVE',
+                    ).using_db(db)
+                    source = await owned_source.first()
                     if source:
                         path.unlink(missing_ok=True)
                     else:
@@ -65,9 +68,10 @@ class SourceService:
                                 storage_key=str(path), byte_size=size, sha256=digest, category_id=kind.id,
                                 create_user_login_name=login, state='ACTIVE')
                         except IntegrityError:
-                            source = await Source.filter(category_id=kind.id, sha256=digest, state='ACTIVE').using_db(db).first()
+                            source = await owned_source.first()
                             if not source:
                                 raise
+                            path.unlink(missing_ok=True)
                     results.append({'id': f'file:{source.id}', 'fileId': source.id,
                         'name': source.original_name, 'size': source.byte_size, 'lastModified': 0, 'category': kind.name,
                         'savedCategory': kind.name, 'downloadUrl': f'/skills/developer/download-resource-file?file_id={source.id}'})

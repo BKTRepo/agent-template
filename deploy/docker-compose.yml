@@ -99,6 +99,8 @@ services:
       MYSQL_USER: ${DATABASE_USERNAME:-keenrobot}
       MYSQL_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD}
       TZ: Asia/Shanghai
+    ports:
+      - "3308:3306"
     volumes: ["${DATABASE_DATA_ROOT:-/zdhgj/keenrobo}/mysql:/var/lib/mysql"]
     healthcheck:
       test: ["CMD-SHELL", "MYSQL_PWD=\"$${MYSQL_PASSWORD}\" mysql -h 127.0.0.1 -u \"$${MYSQL_USER}\" \"$${MYSQL_DATABASE}\" -Nse 'SELECT 1'"]
@@ -212,6 +214,7 @@ services:
       - type: bind
         source: ${PLATFORM_DATA_DIR}
         target: /data
+      - "${PLATFORM_DATA_DIR:?Set PLATFORM_DATA_DIR to an absolute Docker host directory}/chat-results:/app/applications/chat/chat_results"
       - type: bind
         source: ${PLATFORM_DOCKER_SOCKET:-/var/run/docker.sock}
         target: /var/run/docker.sock

@@ -27,10 +27,10 @@ async def resolve_artifact(owner_id: int, artifact_id: str) -> Artifact:
         raise ConversationBusinessError("产出物路径不可用") from exc
     if not path.is_file() or path.is_symlink():
         raise ConversationBusinessError("原产出物不存在或已清理")
-    name = Path(row.file_name).stem
-    return Artifact(str(row.id), name, path,
-                    "test_cases" if row.artifact_type == "test_case" else path.suffix[1:].lower(),
-                    row.artifact_type, row.created_time.isoformat())
+    file_type = path.suffix[1:].lower()
+    name = Path(row.file_name).stem if file_type else row.file_name
+    kind = "test_cases" if row.artifact_type == "test_case" else file_type
+    return Artifact(str(row.id), name, path, kind, row.artifact_type, row.created_time.isoformat())
 
 
 def artifact_reference(row):

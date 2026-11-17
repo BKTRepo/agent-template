@@ -18,9 +18,11 @@ from tortoise.transactions import in_transaction
 from tortoise.expressions import Q
 
 from applications.chat.models.chat_model import ChatArtifact, ChatConversation, ChatMessage, ChatSkillCall, ChatTask
-from applications.chat.services.artifacts import artifact_root, count_cases
+from applications.chat.services.artifacts import artifact_root
 from applications.chat.services.attachments import stage_attachments, task_upload_dir, remove_task_uploads
 from applications.chat.services.history_files import history_store, schedule_history, sync_history, write_history_events
+from applications.conversation.exceptions import ConversationBusinessError
+from applications.conversation.services.artifact_workbook import STANDARD_CASE_HEADER, read_workbook
 from applications.user.models.user_model import User
 from applications.wrq.agent.services.skill_catalog_service import SkillCatalogService
 from applications.wrq.agent.services.skill_knowledge_scope import visible_skill_knowledge
@@ -32,7 +34,6 @@ from services.docker_paths import docker_source
 _workers = set()
 _prefix = 'CHAT_EVENT='
 STOP_REQUESTED = '用户请求停止'
-_suffixes = {'.txt', '.md', '.json', '.csv', '.xlsx', '.docx', '.pdf', '.py', '.js', '.sql', '.sh'}
 
 
 def start_task(task_id):
@@ -89,7 +90,8 @@ async def build_request(task, conversation):
         remaining -= len(content)
     metadata = next((entry['data'] for entry in events if entry.get('type') == 'created'), {})
     return {'page_context': snapshot.get('context'), 'model': task.model, 'skills': skills, 'knowledge': knowledge, 'messages': list(reversed(messages)),
-            'summary': metadata.get('summary') or '', 'older_messages': list(reversed(older))}, packages
+            'summary': metadata.get('summary') or '', 'older_messages': list(reversed(older)),
+            'case_workbook_headers': STANDARD_CASE_HEADER}, packages
 
 
 def stage_skill_packages(packages, input_dir):
@@ -237,6 +239,27 @@ async def recover_stale_tasks():
                 await query.filter(error=STOP_REQUESTED).update(status='cancelled', error=None, finished_at=datetime.now())
 
 
+def _generated_artifact_kind(file, declared_kind):
+    name = file.stem.lower().replace('_', '').replace('-', '').replace(' ', '')
+    case_expected = declared_kind == 'test_case' or (
+        declared_kind is None and any(marker in name for marker in ('用例', '测试案例', 'testcase'))
+    )
+    if file.suffix.lower() != '.xlsx':
+        if case_expected:
+            raise ConversationBusinessError(f'{file.name}：测试用例须使用标准表头的 XLSX 文件')
+        return 'other'
+    if declared_kind == 'other':
+        return 'other'
+    try:
+        workbook, _, _, _ = read_workbook(file.read_bytes(), standard_only=True)
+        workbook.close()
+    except ConversationBusinessError as exc:
+        if case_expected:
+            raise ConversationBusinessError(f'{exc}（{file.name}）') from exc
+        return 'other'
+    return 'test_case'
+
+
 async def execute_task(task_id):
     task = await ChatTask.get_or_none(id=task_id)
     if not task or (task.worker_host and task.worker_host != socket.gethostname()):
@@ -303,30 +326,21 @@ async def execute_task(task_id):
                         manifest_types[entry['file_name']] = entry['type']
             except (ValueError, AttributeError, TypeError):
                 pass
-        files = [p for p in output_dir.iterdir() if p.name != '_artifacts.json' and p.is_file()
-                 and not p.is_symlink() and p.suffix.lower() in _suffixes]
+        files = [p for p in output_dir.iterdir() if p.name != '_artifacts.json' and not p.is_symlink() and p.is_file()]
         if len(files) > 20 or any(p.stat().st_size > 20 * 1024 * 1024 for p in files):
             raise RuntimeError('生成文件超过数量或大小限制')
         final_dir = artifact_root() / 'conversations' / conversation.id / str(task.generation) / str(task.id)
         final_dir.mkdir(parents=True, exist_ok=False)
         staged = []
         for file in files:
-            filename = Path(file.name).name
-            safe_name = uuid.uuid4().hex + file.suffix.lower()
+            filename = file.name
+            kind = await asyncio.to_thread(_generated_artifact_kind, file, manifest_types.get(filename))
+            suffix = file.suffix.lower()
+            safe_name = uuid.uuid4().hex
+            if len(os.fsencode(suffix)) <= 255 - len(safe_name):
+                safe_name += suffix
             shutil.copyfile(file, final_dir / safe_name)
             key = (final_dir / safe_name).relative_to(artifact_root()).as_posix()
-            kind = manifest_types.get(filename, 'other')
-            if file.suffix.lower() == '.xlsx':
-                try:
-                    await asyncio.to_thread(count_cases, file)
-                    kind = 'test_case'
-                except Exception:
-                    # 看似用例表但无法识别列时交由埋点重试与人工处理，不能按单个文件误算。
-                    if '用例' in filename or 'testcase' in filename.lower().replace('_', '').replace('-', ''):
-                        kind = 'test_case'
-            elif kind == 'test_case':
-                # 用例按 Excel 有效行统计，其他格式不能猜测条数。
-                raise RuntimeError('测试用例产物必须使用 Excel 格式')
             staged.append((filename, key, kind))
         generated_artifact_ids = []
         async with in_transaction() as conn:

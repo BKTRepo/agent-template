@@ -243,7 +243,7 @@ async def download(artifact_id: ArtifactId, base_hash: FileHash | None = Query(d
     media_type = guess_type(artifact.path.name)[0] or "application/octet-stream"
     return Response(content, media_type=media_type, headers={
         **NO_CACHE, "X-Content-Type-Options": "nosniff",
-        "Content-Disposition": f"attachment; filename*=UTF-8''{quote(artifact.name + '.' + artifact.file_type)}",
+        "Content-Disposition": f"attachment; filename*=UTF-8''{quote(artifact.name + artifact.path.suffix)}",
     })
 
 

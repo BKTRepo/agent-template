@@ -3,22 +3,26 @@ import json
 import time
 from pathlib import Path
 import httpx
-from configure import PROJECT_CONFIG
+from configure import LOGGER, PROJECT_CONFIG
 
 _cache_key = None
 _cache_rows = []
 _expires_at = 0
 
 
-def normalize_applications(payload):
+def normalize_applications(payload, *, skip_incomplete=False):
     if not isinstance(payload, dict) or payload.get('retCd') != '000000' or not isinstance(payload.get('data'), list):
         raise ValueError('应用目录接口返回失败或数据格式不正确')
     rows, seen = [], {}
+    incomplete = 0
     for item in payload['data']:
         if not isinstance(item, dict):
             raise ValueError('应用目录中存在无效记录')
         identifier, name = item.get('subApplicationIdentify'), item.get('subApplicationName')
         if not isinstance(identifier, str) or not identifier.strip() or not isinstance(name, str) or not name.strip():
+            if skip_incomplete:
+                incomplete += 1
+                continue
             raise ValueError('应用目录缺少应用标识或应用名称')
         identifier, name = identifier.strip(), name.strip()
         if identifier == '*' or len(identifier) > 100 or (identifier in seen and seen[identifier] != name):
@@ -26,6 +30,10 @@ def normalize_applications(payload):
         if identifier not in seen:
             rows.append(dict(id=identifier, paso=identifier, name=name))
             seen[identifier] = name
+    if incomplete:
+        if not rows:
+            raise ValueError('应用目录全部记录缺少有效的应用标识或应用名称')
+        LOGGER.warning('应用目录跳过 {} 条缺少有效标识或名称的记录，保留 {} 个应用', incomplete, len(rows))
     return rows
 
 
@@ -48,7 +56,7 @@ async def application_catalog(*, include_all=False):
         async with httpx.AsyncClient(timeout=10, trust_env=False) as client:
             response = await client.post(key[1], json={})
             response.raise_for_status()
-            rows = normalize_applications(response.json())
+            rows = normalize_applications(response.json(), skip_incomplete=True)
         _cache_key, _cache_rows = key, rows
         _expires_at = time.monotonic() + PROJECT_CONFIG.APPLICATION_CATALOG_CACHE_SECONDS
     options = [dict(row) for row in rows]

@@ -79,14 +79,17 @@ def ordinary_detail(artifact, content):
         "artifact_id": artifact.id, "name": artifact.name, "file_type": artifact.file_type,
         "is_test_case": False, "base_hash": sha256(content).hexdigest(),
     }
-    if artifact.file_type == "docx":
-        return {**result, "editor": "word", "blocks": read_document(content)[2]}
-    if artifact.file_type == "xlsx":
-        return {**result, "editor": "sheet", "sheets": sheet_metadata(content)}
-    if artifact.file_type not in {"txt", "md", "csv", "json", "py", "js", "ts", "sh", "bash", "sql", "java", "go", "rb", "yaml", "yml", "xml", "html", "css"}:
-        return {**result, "editor": "download"}
-    text, encoding, _ = _text(content)
-    return {**result, "editor": "text", "text": text, "encoding": encoding}
+    try:
+        if artifact.file_type == "docx":
+            return {**result, "editor": "word", "blocks": read_document(content)[2]}
+        if artifact.file_type == "xlsx":
+            return {**result, "editor": "sheet", "sheets": sheet_metadata(content)}
+        if artifact.file_type in {"txt", "md", "csv", "json", "py", "js", "ts", "sh", "bash", "sql", "java", "go", "rb", "yaml", "yml", "xml", "html", "css"}:
+            text, encoding, _ = _text(content)
+            return {**result, "editor": "text", "text": text, "encoding": encoding}
+    except ConversationBusinessError:
+        pass
+    return {**result, "editor": "download"}
 
 
 def make_demo_file(kind):

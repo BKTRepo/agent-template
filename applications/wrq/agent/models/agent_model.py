@@ -134,7 +134,7 @@ class Source(models.Model):
     updated_time = fields.DatetimeField(auto_now=True, description="最后修改时间")
     class Meta:
         table = "keenrobot_skill_uploaded_files"
-        unique_together = (("category_id", "sha256"),)
+        unique_together = (("create_user_login_name", "category_id", "sha256"),)
 
     @property
     def file_name(self):

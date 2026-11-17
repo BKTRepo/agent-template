@@ -12,6 +12,11 @@ CASE_SHEET = "测试案例"
 STEP_SHEET = "操作步骤"
 CASE_HEADER = ("案例编号", "场景分组", "案例名称", "前置条件", "预期结果")
 STEP_HEADER = ("案例编号", "步骤编号", "操作内容", "本步骤预期结果")
+STANDARD_CASE_HEADER = (
+    "案例id", "序号", "案例名称", "描述", "应用系统", "优先级", "正/反", "前置条件", "备注",
+    "步骤", "预期值", "创建人", "创建时间", "维护人", "维护时间", "案例目录", "案例类型", "案例标签",
+)
+STANDARD_CASE_COLUMNS = {"id": 1, "name": 3, "preconditions": 8, "steps": 10, "expected": 11, "group": 17}
 MAX_ROWS = 5000
 MAX_EXPANDED_BYTES = 64 * 1024 * 1024
 
@@ -81,18 +86,24 @@ FLAT_HEADERS = {
 }
 
 
-def _read_flat(book):
+def _read_flat(book, *, standard_only=False):
     for sheet in book.worksheets:
         if sheet.max_row > MAX_ROWS + 20:
             continue
         for header_row in sheet.iter_rows(max_row=min(sheet.max_row, 20)):
-            columns = {}
-            for field, aliases in FLAT_HEADERS.items():
-                hits = [cell.column for cell in header_row if str(cell.value or "").strip() in aliases]
-                if len(hits) == 1:
-                    columns[field] = hits[0]
-            if not {"id", "name", "preconditions", "steps", "expected"}.issubset(columns):
+            header = tuple(str(cell.value or "").strip() for cell in header_row)
+            if header[:len(STANDARD_CASE_HEADER)] == STANDARD_CASE_HEADER:
+                columns = STANDARD_CASE_COLUMNS
+            elif standard_only:
                 continue
+            else:
+                columns = {}
+                for field, aliases in FLAT_HEADERS.items():
+                    hits = [index for index, name in enumerate(header, 1) if name in aliases]
+                    if len(hits) == 1:
+                        columns[field] = hits[0]
+                if not {"id", "name", "preconditions", "steps", "expected"}.issubset(columns):
+                    continue
             cases, case_rows, step_rows = {}, {}, {}
             for number in range(header_row[0].row + 1, sheet.max_row + 1):
                 def value(field):
@@ -113,12 +124,15 @@ def _read_flat(book):
     raise ValueError("unsupported case workbook")
 
 
-def read_workbook(content: bytes):
+def read_workbook(content: bytes, *, standard_only=False):
+    book = None
     try:
         with ZipFile(BytesIO(content)) as archive:
             if sum(entry.file_size for entry in archive.infolist()) > MAX_EXPANDED_BYTES:
                 raise ConversationBusinessError("工作簿解压后超过处理上限")
         book = load_workbook(BytesIO(content))
+        if standard_only:
+            return _read_flat(book, standard_only=True)
         if (CASE_SHEET not in book.sheetnames or STEP_SHEET not in book.sheetnames or
                 tuple(cell.value for cell in book[CASE_SHEET][1][:len(CASE_HEADER)]) != CASE_HEADER):
             return _read_flat(book)
@@ -139,9 +153,14 @@ def read_workbook(content: bytes):
             step_rows[case_id, key] = row
             cases[case_id].steps.append(step)
     except ConversationBusinessError:
+        if book is not None:
+            book.close()
         raise
     except Exception as exc:
-        raise TestCaseWorkbookFormatError("无法识别测试案例表头，请使用案例编号、案例名称、操作步骤和预期结果列") from exc
+        if book is not None:
+            book.close()
+        columns = "、".join(STANDARD_CASE_HEADER)
+        raise TestCaseWorkbookFormatError(f"测试用例 Excel 无法读取，请按标准模板核对表头及案例数据。表头顺序为 {columns}") from exc
     return book, cases, case_rows, step_rows
 
 

@@ -102,7 +102,7 @@ class ValidationIssue(BaseModel):
 class SkillDefinitionEdit(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     markdown: str = Field(min_length=1, max_length=200_000)
-    expected_version: str = Field(min_length=1, max_length=64)
+    expected_version: str | None = Field(min_length=1, max_length=64, description="当前上线版本号，未上线时传 null")
 
 
 class SkillValidationReport(BaseModel):

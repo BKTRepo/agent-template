@@ -92,7 +92,9 @@ async def main():
               '\n仅当用户明确要求生成、导出或交付文件时：将最终文件放在 /output 根目录，'
               '并在最终回复中说明文件名称；同时写入 /output/_artifacts.json，格式为 '
               '{"artifacts":[{"file_name":"文件名","type":"test_case或other"}]}；'
-              '测试用例 Excel 标记 test_case，其他文件标记 other。普通对话不要检查或说明 /output。')
+              '测试用例必须生成 XLSX 并标记 test_case，工作表从 A 列起使用以下固定表头顺序：'
+              + '、'.join(request['case_workbook_headers']) +
+              '。其他文件标记 other，保持用户要求的格式。普通对话不要检查或说明 /output。')
     final = None
     async with ClaudeSDKClient(options=options) as client:
         await client.query(prompt)
