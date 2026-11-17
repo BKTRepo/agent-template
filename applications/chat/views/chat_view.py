@@ -230,7 +230,7 @@ async def models(user: User = DependAuth):
         rows = await asyncio.to_thread(configured_model_registry)
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
-    return SuccessResponse(data=[{'name': row['id'], 'display_name': row['model_name']} for row in rows])
+    return SuccessResponse(data=[{'name': row['id'], 'display_name': row['display_name']} for row in rows])
 
 
 @chat_router.get('/models/health', summary='悬浮窗-模型健康检测',

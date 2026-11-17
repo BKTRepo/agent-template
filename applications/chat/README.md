@@ -13,7 +13,7 @@ UAT 同时保留原知识库问答 `/chat/stream`、`/chat/resume-query`、`/cha
 - `direct`（默认）：复用 `ANTHROPIC_BASE_URL` 和 `ANTHROPIC_API_KEY`。DeepSeek 未单独设置时使用 `ANTHROPIC_MODEL`。
 - `ccr`：使用行内已部署的 CCR，填写 `CHAT_CCR_BASE_URL`、`CHAT_CCR_AUTH_MODE` 和 `CHAT_CCR_API_KEY`。地址是 CCR 的 Anthropic 兼容服务基础地址，不是模型网关的 `/v1/chat/completions` 完整地址。认证方式支持 `bearer`（默认）、`api_key`（`x-api-key`）和 `none`（CCR 不校验凭据）。`none` 模式下 SDK 仍发送非机密占位 token；是否接受需在目标环境验证。
 
-公网模型映射使用 `CHAT_MODEL_DEEPSEEK` 等配置。CCR 模式从网关 `/v1/models` 动态读取模型，使用 CCR 返回的完整 ID 展示、校验和调用；无需配置 `CHAT_CCR_MODEL_*` 或模型清单。列表进程内缓存 30 秒，CCR 不可用时返回错误而不展示过期配置。健康检测会向模型发送短请求并可能消耗少量 token；429 表示限流，不代表测到了排队人数。
+公网模型映射使用 `CHAT_MODEL_DEEPSEEK` 等配置。CCR 模式从网关 `/v1/models` 动态读取模型，使用 CCR 返回的完整 ID 校验和调用，页面展示时去掉供应商前缀；无需配置 `CHAT_CCR_MODEL_*` 或模型清单。列表进程内缓存 30 秒，CCR 不可用时返回错误而不展示过期配置。健康检测会向模型发送短请求并可能消耗少量 token；429 表示限流，不代表测到了排队人数。
 
 公网直连模式可以设置 `CHAT_MODEL_REGISTRY` 自定义清单，例如：
 
@@ -22,7 +22,7 @@ CHAT_MODEL_REGISTRY='[{"id":"deepseek","name":"DeepSeek","direct_model":"deepsee
 CHAT_DEFAULT_MODEL=deepseek
 ```
 
-`id` 是公网直连模式的模型标识；`direct_model` 是实际模型名。CCR 模式忽略这份清单，`GET /chat/models` 的 `name` 和 `display_name` 均为 CCR 返回的完整 ID。出现在列表中仅表示已配置，可用性仍以健康检测为准。
+`id` 是公网直连模式的模型标识；`direct_model` 是实际模型名。CCR 模式忽略这份清单，`GET /chat/models` 的 `name` 是完整 ID，`display_name` 是去掉供应商前缀后的模型名。出现在列表中仅表示已配置，可用性仍以健康检测为准。
 
 `CHAT_DEFAULT_MODEL` 设置共享的默认模型 id，留空使用当前列表第一项；CCR 模式下若填写须与 CCR 返回的完整 ID 一致。开发者中心在线调试使用该默认模型；悬浮窗自动选模优先参考健康状态。
 

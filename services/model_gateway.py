@@ -53,7 +53,8 @@ def _ccr_models(value):
                 model = item.get('id') if isinstance(item, dict) else None
                 if isinstance(model, str) and model.strip() == model and 0 < len(model) <= 128 and model not in seen:
                     seen.add(model)
-                    rows.append({'id': model, 'name': model, 'ccr_model': model})
+                    rows.append({'id': model, 'name': model.partition('/')[2] or model,
+                                 'ccr_model': model, 'display_name': model.partition('/')[2] or model})
             _ccr_cache.clear()
             _ccr_cache[identity] = (time.monotonic() + 30, rows)
             return rows
@@ -178,7 +179,8 @@ def configured_model_registry():
             environment = model_environment(row['id'])
         except RuntimeError:
             continue
-        result.append({'id': row['id'], 'model_name': environment['ANTHROPIC_MODEL']})
+        result.append({'id': row['id'], 'model_name': environment['ANTHROPIC_MODEL'],
+                       'display_name': row.get('display_name', environment['ANTHROPIC_MODEL'])})
     return result
 
 
