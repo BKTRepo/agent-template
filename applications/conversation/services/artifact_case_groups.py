@@ -67,6 +67,22 @@ async def _model_groups(cases):
     return json.loads(answer)["groups"]
 
 
+async def _model_groups_complete(cases):
+    """输出截断或案例覆盖不完整时拆分批次，避免丢失案例。"""
+    from applications.knowledge_base.rag.llm import LLMTruncatedError
+
+    try:
+        groups = await _model_groups(cases)
+        if not _valid_groups(groups, cases):
+            raise ValueError("invalid case groups")
+        return groups
+    except (LLMTruncatedError, ValueError):
+        if len(cases) <= 1:
+            raise
+        middle = len(cases) // 2
+        return await _model_groups_complete(cases[:middle]) + await _model_groups_complete(cases[middle:])
+
+
 def _read_groups(path, artifact, source_hash, mode, cases):
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -140,9 +156,7 @@ async def derive_case_groups(artifact: Artifact, metadata: dict, *, use_legacy=T
             merged = {}
             for offset in range(0, len(cases), 80):
                 batch = cases[offset:offset + 80]
-                model_groups = await _model_groups(batch)
-                if not _valid_groups(model_groups, batch):
-                    raise ValueError("invalid case groups")
+                model_groups = await _model_groups_complete(batch)
                 for group in model_groups:
                     merged.setdefault(group["title"].strip(), []).extend(group["case_ids"])
             groups = [{"title": title, "case_ids": ids} for title, ids in merged.items()]
