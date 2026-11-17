@@ -182,7 +182,10 @@ export default function DeveloperPage() {
         setNotice('修改已保存到后端数据库。')
       }
       else {
-        setPanel(null); setNotice('草稿已保存到后端数据库。')
+        // 新建草稿后继续停留在当前窗口，并回填服务端版本信息以支持连续保存。
+        setSelectedId(saved.id)
+        setForm(previous => ({ ...previous, revision: saved.revision, skillVersionId: saved.skillVersionId, version: saved.version }))
+        setNotice('草稿已保存到后端数据库。')
         await refresh(1).catch(error => setMessage(`草稿已保存，列表刷新失败：${(error as Error).message}`))
       }
     } catch (error) { setMessage((error as Error).message) } finally { setBusy(null) }
