@@ -62,11 +62,11 @@ export function readBuild(item: Implementation) {
 }
 export function readSkillDefinition(item: Implementation) {
   if (!item.backendSkillId || item.buildOrigin !== 'backend') throw new SkillApiError('该记录没有真实后端 Skill 定义。')
-  return request<{ build: SkillBuild; markdown: string; version: string }>(`/skills/packages/get-definition?${new URLSearchParams({ skill_id: item.backendSkillId })}`)
+  return request<{ build: SkillBuild; markdown: string; version: string | null }>(`/skills/packages/get-definition?${new URLSearchParams({ skill_id: item.backendSkillId })}`)
 }
 export function saveSkillDefinition(item: Implementation, markdown: string) {
   if (!item.backendSkillId) throw new SkillApiError('该技能没有后端记录。')
-  return request<SkillBuild>('/skills/packages/save-definition', { method: 'POST', body: JSON.stringify({ skill_id: Number(item.backendSkillId), markdown, expected_version: item.backendVersion || item.version }) })
+  return request<SkillBuild>('/skills/packages/save-definition', { method: 'POST', body: JSON.stringify({ skill_id: Number(item.backendSkillId), markdown, expected_version: item.backendVersion || item.version || null }) })
 }
 export async function downloadBuild(item: Implementation) {
   await readBuild(item)

@@ -11,6 +11,12 @@ export interface KnowledgeMetadata { applications: { id: string; name: string }[
 export async function getKnowledgeMetadata(signal?: AbortSignal): Promise<KnowledgeMetadata> {
   return (await knowledgeRequest<KnowledgeMetadata>('/knowledge-bases/get-form-metadata', { signal })).data
 }
+export async function getKnowledgeApplications(signal?: AbortSignal): Promise<KnowledgeMetadata['applications']> {
+  return (await knowledgeRequest<KnowledgeMetadata['applications']>('/knowledge-bases/applications', { signal })).data
+}
+export async function getKnowledgeTags(signal?: AbortSignal): Promise<KnowledgeTagOption[]> {
+  return (await knowledgeRequest<KnowledgeTagOption[]>('/knowledge-bases/tags', { signal })).data
+}
 export interface ConversionJob { job_id?: string; id?: string; status: string; summary?: string; error_msg?: string }
 interface ServerDocument { id: string | number; filename: string; file_size: number; status: string; updated_time: string; conversion_job_id?: string; conversion_status?: string; error_message?: string }
 interface ServerKnowledge {

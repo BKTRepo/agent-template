@@ -90,8 +90,8 @@ export async function changeAssetState(ids: number[], action: AssetAction) {
   return request<{ changed: number }>(assetActions[action], post({ asset_ids: ids }))
 }
 
-export function assetSourceStatus(artifactId: string) {
-  return request<AssetStatus>('/source-status' + query({ artifact_id: artifactId }))
+export function assetSourceStatus(artifactId: string, signal?: AbortSignal) {
+  return request<AssetStatus>('/source-status' + query({ artifact_id: artifactId }), { signal })
 }
 
 export function createAsset(data: { artifact_id: string; base_hash: string; name: string; skill_classes_id: number;

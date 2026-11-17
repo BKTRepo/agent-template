@@ -79,6 +79,10 @@ export function OverviewTrend({ data, loading, error }: QueryStatus & { data?: T
     </div>
     {points?.length ? <TrendChart points={points} /> :
       <div className="overview-chart-empty" role="status">{emptyLabel(loading, error, points == null ? '—' : '产出物 0 · Skill 调用 0')}</div>}
+    <div className="overview-chart-notes">
+      <span>产出物：成功生成并保存的产出物</span>
+      <span>调用量：Skill 执行次数</span>
+    </div>
   </section>
 }
 

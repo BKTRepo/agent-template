@@ -97,8 +97,9 @@ export function archiveArtifact(revision: ArtifactRevision, name: string, applic
   })
 }
 
-export async function readArtifactFile(artifact: ArtifactFile, archived = false, signal?: AbortSignal) {
-  const query = new URLSearchParams({ artifact_id: artifact.artifactId, base_hash: artifact.baseHash })
+export async function readArtifactFile(artifact: Pick<ArtifactFile, 'artifactId'> & { baseHash?: string }, archived = false, signal?: AbortSignal) {
+  const query = new URLSearchParams({ artifact_id: artifact.artifactId })
+  if (artifact.baseHash) query.set('base_hash', artifact.baseHash)
   if (archived) query.set('archived', 'true')
   const response = await authFetch(`${prefix}/download?${query}`, { cache: 'no-store', signal })
   if (!response.ok || !response.headers.get('content-disposition')?.startsWith('attachment')) {
@@ -108,5 +109,10 @@ export async function readArtifactFile(artifact: ArtifactFile, archived = false,
 }
 
 export async function exportArtifact(artifact: ArtifactFile, archived = false) {
-  downloadBlob(await readArtifactFile(artifact, archived), `${artifact.name}.${artifact.fileType}`)
+  const filename = artifact.fileType ? `${artifact.name}.${artifact.fileType}` : artifact.name
+  downloadBlob(await readArtifactFile(artifact, archived), filename)
+}
+
+export async function exportOriginalArtifact(artifactId: string, filename: string) {
+  downloadBlob(await readArtifactFile({ artifactId }), filename)
 }

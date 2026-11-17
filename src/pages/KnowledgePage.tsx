@@ -17,7 +17,7 @@ import KnowledgeHistory from '@/components/developer/KnowledgeHistory'
 import { nextVersion } from '@/lib/version'
 import { knowledgeExtensions, knowledgeFileLimits, validateResourceFiles } from '@/lib/skillForm'
 import { downloadBlob } from '@/lib/resourceStorage'
-import { downloadKnowledgeFile, getKnowledgeMetadata, type KnowledgeMetadata } from '@/api/knowledge'
+import { downloadKnowledgeFile, getKnowledgeApplications, getKnowledgeTags, type KnowledgeMetadata, type KnowledgeTagOption } from '@/api/knowledge'
 import { knowledgeCreationErrors, knowledgeEditSnapshot, knowledgeFileSizeError } from '@/lib/knowledgeForm'
 import type { KnowledgeBase } from '@/types/developer'
 
@@ -44,18 +44,31 @@ export default function KnowledgePage() {
   const [message, setMessage] = useState('')
   const [retryFeedback, setRetryFeedback] = useState<{ text: string; error: boolean } | null>(null)
   const [busy, setBusy] = useState(false)
-  const [metadata, setMetadata] = useState<KnowledgeMetadata>({ applications: [], tags: [] })
-  const [metadataLoading, setMetadataLoading] = useState(true)
-  const [metadataError, setMetadataError] = useState('')
+  const [applications, setApplications] = useState<KnowledgeMetadata['applications']>([])
+  const [applicationsLoading, setApplicationsLoading] = useState(true)
+  const [applicationsError, setApplicationsError] = useState('')
+  const [tags, setTags] = useState<KnowledgeTagOption[]>([])
+  const [tagsLoading, setTagsLoading] = useState(true)
+  const [tagsError, setTagsError] = useState('')
   const formOpen = !!form
   useEffect(() => {
     const controller = new AbortController()
-    setMetadataLoading(true); setMetadataError('')
-    void getKnowledgeMetadata(controller.signal).then(value => {
+    setApplicationsLoading(true); setApplicationsError('')
+    void getKnowledgeApplications(controller.signal).then(value => {
       if (controller.signal.aborted) return
-      setApplicationCatalog(value.applications); setMetadata(value)
-    }).catch(error => { if (!controller.signal.aborted) setMetadataError((error as Error).message) })
-      .finally(() => { if (!controller.signal.aborted) setMetadataLoading(false) })
+      setApplicationCatalog(value); setApplications(value)
+    }).catch(error => { if (!controller.signal.aborted) setApplicationsError((error as Error).message) })
+      .finally(() => { if (!controller.signal.aborted) setApplicationsLoading(false) })
+    return () => controller.abort()
+  }, [actor.id, formOpen])
+  useEffect(() => {
+    if (!formOpen) return
+    const controller = new AbortController()
+    setTagsLoading(true); setTagsError('')
+    void getKnowledgeTags(controller.signal).then(value => {
+      if (!controller.signal.aborted) setTags(value)
+    }).catch(error => { if (!controller.signal.aborted) setTagsError((error as Error).message) })
+      .finally(() => { if (!controller.signal.aborted) setTagsLoading(false) })
     return () => controller.abort()
   }, [actor.id, formOpen])
   const edited = knowledgeBases.find(row => row.id === editing)
@@ -68,6 +81,9 @@ export default function KnowledgePage() {
     if (!pagingBusy && target >= 1 && target <= pages && target !== page) { setMessage(''); void load(target) }
   }
   const editUnchanged = !!editing && (!form || originalContent === null || knowledgeEditSnapshot(form) === originalContent)
+  const applicationsUnavailable = applicationsLoading || !!applicationsError
+  const tagsUnavailable = tagsLoading || !!tagsError
+  const saveBlocked = busy || applicationsUnavailable || tagsUnavailable || (!editing && !tags.length) || editUnchanged
   function open(item?: KnowledgeBase) { setOriginalContent(item ? knowledgeEditSnapshot(item) : null); setForm(item ? { ...item, applicationIds: [...(item.applicationIds ?? [])], files: item.files.map(file => ({ ...file })), changeSummary: '', processingOutcome: 'success' } : emptyForm(actor)); setEditing(item?.id); setUploads([]); setErrors({}); setMessage('') }
   function update<K extends keyof KnowledgeForm>(key: K, value: KnowledgeForm[K]) { setForm(previous => previous ? { ...previous, [key]: value } : previous); setErrors(previous => ({ ...previous, [key]: '' })); setMessage('') }
   function addFiles(files: File[]) {
@@ -79,7 +95,7 @@ export default function KnowledgePage() {
     setErrors(previous => ({ ...previous, files: result.errors.join('；') }))
   }
   async function submit() {
-    if (!form || readonly || busy || metadataLoading || metadataError || editUnchanged) return
+    if (!form || readonly || saveBlocked) return
     const issues: Record<string, string> = editing ? {} : knowledgeCreationErrors(form)
     if (!form.name.trim()) issues.name = '请填写知识库名称'
     if (!form.files.length) issues.files = '请至少上传一个知识库文件'
@@ -125,7 +141,7 @@ export default function KnowledgePage() {
     <section className="surface knowledge-management"><div className="section-heading"><h2>知识库（多文件成库 · 可向量化检索）</h2><button className="button" onClick={() => open()}><Plus size={16} />新建知识库</button></div>
       <form className="management-filters knowledge-list-filters" role="search" aria-label="知识库筛选" onSubmit={event => { event.preventDefault(); if (!loading && !busy) { setMessage(''); void load(1, query, { application: filterApplication, maintainer: filterMaintainer }) } }}>
         <input aria-label="知识库名称模糊搜索" placeholder="知识库名称模糊搜索" maxLength={128} value={query} onChange={event => setQuery(event.target.value)} />
-        <SearchSelect label="筛选所属应用" placeholder="全部应用" value={filterApplication} options={metadata.applications} disabled={metadataLoading || !!metadataError} onChange={setFilterApplication} />
+        <SearchSelect label="筛选所属应用" placeholder="全部应用" value={filterApplication} options={applications} disabled={applicationsUnavailable} onChange={setFilterApplication} />
         <input aria-label="维护人" placeholder="维护人姓名或账号" maxLength={64} value={filterMaintainer} onChange={event => setFilterMaintainer(event.target.value)} />
         <button type="submit" className="button primary" disabled={loading || busy}>搜索</button>
         <button type="button" className="button" disabled={loading || busy} onClick={() => { setQuery(''); setFilterApplication(''); setFilterMaintainer(''); setMessage(''); void load(1, '', { application: '', maintainer: '' }) }}>重置</button>
@@ -137,16 +153,18 @@ export default function KnowledgePage() {
     {retryFeedback && <p className={retryFeedback.error ? 'error-banner' : 'form-hint'} role={retryFeedback.error ? 'alert' : 'status'}>{retryFeedback.text}</p>}
     {loading && <p role="status">正在加载知识库…</p>}
     {loadError && <p className="error-banner" role="alert">{loadError} <button className="button small" onClick={() => void load(pagingBusy ? 1 : page, query, { application: filterApplication, maintainer: filterMaintainer })}>重新加载</button></p>}
-    {metadataError && !form && <p className="error-banner" role="alert">筛选应用目录加载失败：{metadataError}</p>}
-    {form && <Dialog wide title={readonly ? '知识库详情' : editing ? '编辑知识库' : '新建知识库'} busy={busy} onClose={() => setForm(null)} footer={<><button className="button" disabled={busy} onClick={() => setForm(null)}>{readonly ? '关闭' : '取消'}</button>{!readonly && <button className="button primary knowledge-save-button" disabled={busy || metadataLoading || !!metadataError || editUnchanged} title={editUnchanged ? '修改知识库内容后可保存' : undefined} onClick={submit}>{busy ? '保存中…' : editing ? '保存修改' : '创建知识库'}</button>}</>}>
+    {applicationsError && !form && <p className="error-banner" role="alert">筛选应用目录加载失败：{applicationsError}</p>}
+    {form && <Dialog wide title={readonly ? '知识库详情' : editing ? '编辑知识库' : '新建知识库'} busy={busy} onClose={() => setForm(null)} footer={<><button className="button" disabled={busy} onClick={() => setForm(null)}>{readonly ? '关闭' : '取消'}</button>{!readonly && <button className="button primary knowledge-save-button" disabled={saveBlocked} title={editUnchanged ? '修改知识库内容后可保存' : undefined} onClick={submit}>{busy ? '保存中…' : editing ? '保存修改' : '创建知识库'}</button>}</>}>
       <fieldset className="implementation-form skill-create-form" disabled={busy || readonly}>
         <label className="form-field"><span>知识库名称 <em>*</em></span><input value={form.name} maxLength={128} placeholder="如：核心交易业务知识库" aria-invalid={!!errors.name} onChange={event => update('name', event.target.value)} />{error('name')}</label>
         {editing && <div className="form-field"><span>版本号</span><p className="form-hint">当前 {form.version}；保存修改后系统自动递增为 {nextVersion(form.version, 'V')}，不可手填。</p></div>}
         {editing && <label className="form-field"><span>变更摘要</span><textarea value={form.changeSummary ?? ''} maxLength={1000} aria-invalid={!!errors.changeSummary} placeholder="简述本次修改的内容，如补充退款规则、修正字段口径" onChange={event => update('changeSummary', event.target.value)} />{error('changeSummary')}</label>}
         <label className="form-field"><span>知识库描述 {!editing && <em>*</em>}</span><textarea value={form.description} required={!editing} aria-invalid={!!errors.description} maxLength={500} placeholder="描述知识库的用途、覆盖范围与更新策略" onChange={event => update('description', event.target.value)} />{error('description')}</label>
-        <label className="form-field"><span>知识库标签 {!editing && <em>*</em>}</span><select aria-label="知识库标签" required={!editing} aria-invalid={!!errors.tag} value={form.tag} disabled={busy || readonly || metadataLoading || !!metadataError} onChange={event => update('tag', event.target.value)}><option value="" disabled hidden>请选择标签{editing ? '（选填）' : ''}</option>{form.tag && !metadata.tags.some(row => row.code === form.tag) && <option value={form.tag} disabled>{form.tagName || form.tag}（已停用）</option>}{metadata.tags.map(row => <option key={row.code} value={row.code}>{row.name}</option>)}</select>{form.tag && !readonly && editing && <button type="button" className="button small" disabled={busy} onClick={() => update('tag', '')}>清除标签</button>}</label>{error('tag')}
-        <ApplicationPicker value={form.applicationIds} options={metadata.applications} required={!editing} disabled={busy || readonly || metadataLoading || !!metadataError} onChange={ids => update('applicationIds', ids)} />{error('applicationIds')}
-        {metadataLoading && <p role="status" className="helper-text">正在加载应用目录和标签配置…</p>}{metadataError && <p role="alert" className="platform-field-error">{metadataError}</p>}
+        <label className="form-field"><span>知识库标签 {!editing && <em>*</em>}</span><select aria-label="知识库标签" className={form.tag ? undefined : 'select-placeholder'} required={!editing} aria-invalid={!!errors.tag} value={form.tag} disabled={busy || readonly || tagsUnavailable || !tags.length} onChange={event => update('tag', event.target.value)}><option value="" disabled hidden>请选择标签{editing ? '（选填）' : ''}</option>{form.tag && !tags.some(row => row.code === form.tag) && <option value={form.tag} disabled>{form.tagName || form.tag}（已停用）</option>}{tags.map(row => <option key={row.code} value={row.code}>{row.name}</option>)}</select>{form.tag && !readonly && editing && <button type="button" className="button small" disabled={busy || tagsUnavailable} onClick={() => update('tag', '')}>清除标签</button>}</label>{error('tag')}
+        {tagsLoading && <p role="status" className="helper-text">正在加载标签配置…</p>}{tagsError && <p role="alert" className="platform-field-error">标签加载失败：{tagsError}</p>}
+        {!editing && !tagsUnavailable && !tags.length && <p className="helper-text">暂无可用知识库标签，请联系管理员启用标签。</p>}
+        <ApplicationPicker value={form.applicationIds} options={applications} required={!editing} disabled={busy || readonly || applicationsUnavailable} onChange={ids => update('applicationIds', ids)} />{error('applicationIds')}
+        {applicationsLoading && <p role="status" className="helper-text">正在加载应用目录…</p>}{applicationsError && <p role="alert" className="platform-field-error">应用目录加载失败：{applicationsError}</p>}
 
         <div className="form-field"><span>可见范围 <em>*</em></span><label className="inline-choice"><input type="radio" name="kb-scope" checked={form.scope === 'public'} onChange={() => update('scope', 'public')} />公开（所有用户可见、可挂载）</label><label className="inline-choice"><input type="radio" name="kb-scope" checked={form.scope === 'team'} onChange={() => update('scope', 'team')} />仅本人可见和挂载</label></div>
         <ResourceUpload label="上传文件" required hint="点击或拖拽上传知识库文件" extensions={knowledgeExtensions} limits={knowledgeFileLimits} items={form.files} activeIds={form.files.map(row => row.id)} error={errors.files} disabled={busy || readonly} onAdd={addFiles} onRemove={id => { setUploads(previous => previous.filter(row => row.id !== id)); update('files', form.files.filter(row => row.id !== id)) }} />

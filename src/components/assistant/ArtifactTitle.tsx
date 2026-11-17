@@ -8,7 +8,7 @@ const timestamp = new Intl.DateTimeFormat('zh-CN', {
 export default function ArtifactTitle({ artifact }: { artifact: ArtifactFile }) {
   const date = artifact.createdAt ? new Date(artifact.createdAt) : undefined
   return <span className="artifact-case-title">测试产出物
-    <small><strong>{artifact.name}.{artifact.fileType}</strong>
+    <small><strong>{artifact.name}{artifact.fileType && `.${artifact.fileType}`}</strong>
       {date && Number.isFinite(date.getTime()) && <> · <time dateTime={artifact.createdAt}>{timestamp.format(date)}</time></>}
     </small>
   </span>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { exportArtifact, getArtifact, saveArtifact } from '@/api/assistantArtifacts'
+import { exportArtifact, exportOriginalArtifact, getArtifact, saveArtifact } from '@/api/assistantArtifacts'
 import { assetSourceStatus, createAsset, downloadAsset, getAssetOverview, type AssetStatus, type AssetOverview } from '@/api/assets'
 import { getDeveloperMetadata, type DeveloperCatalogOption } from '@/api/developerCenter'
 import ApplicationPicker from '@/components/developer/ApplicationPicker'
@@ -17,13 +17,15 @@ interface ArchiveForm {
   classId: string
 }
 
-export default function ArtifactWorkbench({ artifactId, onClose }: { artifactId: string; onClose: () => void }) {
+export default function ArtifactWorkbench({ artifactId, fileName, onClose }: { artifactId: string; fileName: string; onClose: () => void }) {
   const [artifact, setArtifact] = useState<AssistantArtifact>()
   const [exportChoice, setExportChoice] = useState<ArtifactFile>()
   const [form, setForm] = useState<ArchiveForm>()
   const [applications, setApplications] = useState<DeveloperCatalogOption[]>([])
   const [classes, setClasses] = useState<AssetOverview['classes']>([])
   const [assetStatus, setAssetStatus] = useState<AssetStatus>()
+  const [previewLoading, setPreviewLoading] = useState(true)
+  const [previewError, setPreviewError] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -39,19 +41,20 @@ export default function ArtifactWorkbench({ artifactId, onClose }: { artifactId:
   const [reload, setReload] = useState(0)
   useEffect(() => {
     const controller = new AbortController()
-    setArtifact(undefined); setAssetStatus(undefined); setError(''); setBusy(true)
-    void Promise.all([getArtifact(artifactId, controller.signal), assetSourceStatus(artifactId)]).then(([current, status]) => {
-      if (!controller.signal.aborted) { setArtifact(current); setAssetStatus(status) }
-    }).catch(reason => { if (!controller.signal.aborted) setError((reason as Error).message) })
-      .finally(() => { if (!controller.signal.aborted) setBusy(false) })
+    setArtifact(undefined); setAssetStatus(undefined); setPreviewError(''); setPreviewLoading(true)
+    void getArtifact(artifactId, controller.signal).then(current => {
+      if (!controller.signal.aborted) setArtifact(current)
+    }).catch(reason => { if (!controller.signal.aborted) setPreviewError((reason as Error).message) })
+      .finally(() => { if (!controller.signal.aborted) setPreviewLoading(false) })
+    void assetSourceStatus(artifactId, controller.signal).then(status => {
+      if (!controller.signal.aborted) setAssetStatus(current => current ?? status)
+    }).catch(() => {})
     return () => controller.abort()
   }, [artifactId, reload])
 
   function chooseExport(current: ArtifactFile) {
     return run(async () => {
-      const status = await assetSourceStatus(current.artifactId)
-      setAssetStatus(status)
-      if (status.included) await exportArtifact(current)
+      if (assetStatus?.included) await exportArtifact(current)
       else setExportChoice(current)
     })
   }
@@ -88,9 +91,15 @@ export default function ArtifactWorkbench({ artifactId, onClose }: { artifactId:
   }
 
   return <>
-    {!artifact && <Dialog className="assistant-owned-dialog" title="测试产出物" busy={busy} closeWhileBusy onClose={onClose}
-      footer={<><button className="button" onClick={onClose}>关闭</button>{error && <button className="button primary" onClick={() => setReload(value => value + 1)}>重试</button>}</>}>
-      {busy ? <p role="status">正在读取产出物…</p> : <p role="alert" className="error-banner">{error}</p>}
+    {!artifact && <Dialog className="assistant-owned-dialog" title="测试产出物" busy={previewLoading || busy} closeWhileBusy onClose={onClose}
+      footer={<><button className="button" onClick={onClose}>关闭</button>
+        {previewError && <button className="button" disabled={busy} onClick={() => setReload(value => value + 1)}>重试</button>}
+        <button className="button primary" disabled={busy} onClick={() => void run(() => exportOriginalArtifact(artifactId, fileName))}>
+          {busy ? '正在导出…' : '仅导出原文件'}
+        </button></>}>
+      {previewLoading && <p role="status">正在读取产出物…</p>}
+      {previewError && <p role="alert" className="error-banner">{previewError}</p>}
+      {error && <p role="alert" className="error-banner">{error}</p>}
     </Dialog>}
     {artifact && (artifact.editor === 'cases'
       ? <TestCaseArtifactDrawer artifact={artifact} checkArchived={async id => {

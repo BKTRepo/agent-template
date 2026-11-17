@@ -160,7 +160,7 @@ export default function DeveloperPage() {
       const definition = await readSkillDefinition(item)
       if (skillAccount() !== account) return
       if (definition.build.build_id !== item.buildId) throw new Error('后端技能已更新，请重新查询当前构建后再调试。')
-      const details = { revision: definition.build.current_revision, skillVersionId: definition.build.skill_version_id, build: definition.build, skillMarkdown: definition.markdown, version: definition.version, backendVersion: definition.version }
+      const details = { revision: definition.build.current_revision, skillVersionId: definition.build.skill_version_id, build: definition.build, skillMarkdown: definition.markdown, version: definition.version ?? '', backendVersion: definition.version ?? undefined }
       patch(item.id, details); setPanel('debug')
     } catch (error) { if (skillAccount() === account) { setMessage((error as Error).message); setPanel(null) } }
     finally { if (skillAccount() === account) setBusy(null) }
@@ -289,7 +289,7 @@ export default function DeveloperPage() {
     const definition = await readSkillDefinition(current)
     patch(current.id, { build: definition.build, buildId: built.build_id, buildOrigin: 'backend',
       skillMarkdown: definition.markdown, revision: definition.build.current_revision,
-      skillVersionId: definition.build.skill_version_id, backendVersion: definition.version, version: definition.version })
+      skillVersionId: definition.build.skill_version_id, backendVersion: definition.version ?? undefined, version: definition.version ?? '' })
     setPreview({})
   }
   async function refreshList() {
