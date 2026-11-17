@@ -12916,10 +12916,15 @@ button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):n
   --platform-text-rgb: 23 35 61;
   --platform-muted: #7b879c;
   --platform-muted-rgb: 123 135 156;
+  --platform-placeholder: #8b98ac;
+  --platform-placeholder-rgb: 139 152 172;
   --platform-line: #e6edf7;
   --platform-line-rgb: 230 237 247;
   --platform-bg: #f3f7fc;
   --platform-bg-rgb: 243 247 252;
+  --field-placeholder: var(--platform-placeholder);
+  --field-placeholder-rgb: 139 152 172;
+  --field-placeholder-rgb: 139 152 172;
 }
 *:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   box-sizing: border-box;
@@ -18145,6 +18150,10 @@ h1:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#
 }
 .aip-model-pop:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) > b,.aip-model-pop:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) > i {
   display: none;
+}
+html:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) body :is(.platform,.login-page,.assistant-float) input::placeholder,html:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) body :is(.platform,.login-page,.assistant-float) textarea::placeholder {
+  color: var(--platform-placeholder);
+  opacity: 1;
 }
 @property --tw-rotate-x {
   syntax: "*";

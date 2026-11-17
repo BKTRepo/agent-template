@@ -25,7 +25,7 @@ export default function LoginPage() {
     finally { request.current = null; if (!controller.signal.aborted) setBusy(false) }
   }
   return <main className="login-page"><section className="login-intro" aria-label="平台介绍">
-    <div className="login-brand"><span className="platform-mark">AI</span><span>智能服务调度集</span></div>
+    <div className="login-brand"><span className="platform-mark">AI</span><span>智能测试技能中枢</span></div>
     <div><p className="login-eyebrow">AI 辅助测试平台</p><h1>让技能与知识<br />连接测试工作</h1><p className="login-lead">集中管理测试技能与业务知识，让每一次调试都有依据。</p>
       <div className="login-features"><span><Boxes size={20} />发现与使用测试技能</span><span><BookOpen size={20} />管理与检索业务知识</span></div></div>
     <p className="login-caption">技能中心 · 开发者中心 · 知识库</p>

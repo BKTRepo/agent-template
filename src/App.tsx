@@ -58,7 +58,7 @@ export default function App() {
 }
 
 function Workspace() {
-  const [page, setPage] = useState('overview')
+  const [page, setPage] = useState('skills')
   const [mobileMenu, setMobileMenu] = useState(false)
   const updateSummary = useKnowledgeUpdatesStore(state => state.summary)
   const actor = useAccessStore(state => state.actor)
@@ -67,7 +67,7 @@ function Workspace() {
   return <ErrorBoundary><div className="platform">
     {mobileMenu && <button className="sidebar-shade" aria-label="关闭导航" onClick={() => setMobileMenu(false)} />}
     <aside className={`platform-sidebar ${mobileMenu ? 'is-open' : ''}`} aria-label="平台导航">
-      <a className="platform-logo" href="#developer" onClick={() => { setPage('developer'); setMobileMenu(false) }}><span className="platform-mark">AI</span><span>智能服务调度集</span></a>
+      <a className="platform-logo" href="#developer" onClick={() => { setPage('developer'); setMobileMenu(false) }}><span className="platform-mark">AI</span><span>智能测试技能中枢</span></a>
       <button className="mobile-close icon-button" aria-label="关闭导航" onClick={() => setMobileMenu(false)}><X size={20} /></button>
       <nav>{navigation.map(group => <div className="nav-group" key={group.group}><div className="nav-group-title">{group.group}</div>
         {group.items.map(item => <button key={item.id} className={`nav-link ${page === item.id ? 'active' : ''}`} aria-current={page === item.id ? 'page' : undefined} onClick={() => { setPage(item.id); setMobileMenu(false) }}><item.icon size={17} strokeWidth={1.6} /><span>{item.label}</span>{item.id === 'developer' && unreadSkills > 0 && <span className="nav-badge knowledge-update-nav-badge" aria-label={`${unreadSkills}个技能有未读知识库更新`} title={`${unreadSkills}个技能有未读知识库更新`}>{unreadSkills > 99 ? '99+' : unreadSkills}</span>}</button>)}
