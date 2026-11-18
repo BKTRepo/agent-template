@@ -1,4 +1,4 @@
-import type { ImplementationForm, UploadedResource } from '@/types/developer'
+import type { ImplementationForm, ResourceCategoryOption, UploadedResource } from '@/types/developer'
 import { hasDuplicateKnowledge } from './knowledgeSelection'
 
 const normalizedName = (value: string) => value.trim().normalize('NFKC').trim().toLowerCase()
@@ -7,7 +7,6 @@ export const resourceExtensions = ['.py', '.js', '.sh', '.bash', '.ps1', '.zip',
 export const skillResourceExtensions = ['.py', '.js', '.md', '.xlsx', '.docx', '.png', '.jpg', '.jpeg']
 // 在线调试仅接收当前 Office 格式，避免旧版 .doc/.xls 文档解析不稳定。
 export const documentExtensions = ['.pdf', '.docx', '.md', '.txt', '.xlsx', '.json']
-export const resourceCategories = ['参考资料', '模板', '静态资源', '脚本'] as const
 export interface ResourceFileLimits { maxFileBytes?: number; maxFiles?: number; maxTotalBytes?: number }
 export const skillResourceLimits: ResourceFileLimits = { maxFileBytes: 50 * 1024 * 1024, maxTotalBytes: 50 * 1024 * 1024 }
 // 调试文档的格式独立于资源上传，但沿用 50MB 单文件、总量限制；最多 10 份。
@@ -15,7 +14,7 @@ export const debugDocumentLimits: ResourceFileLimits = { ...skillResourceLimits,
 // 知识库所有文件合计最多 200 MB，不限制文件数量。
 export const knowledgeFileLimits: ResourceFileLimits = { maxFileBytes: 200 * 1024 * 1024, maxTotalBytes: 200 * 1024 * 1024 }
 export const knowledgeExtensions = ['.pdf', '.docx', '.md', '.txt', '.xlsx']
-export function validateSkillForm(form: ImplementationForm, existing: { id: string; name: string; pendingChanges?: { name: string } }[], id?: string, draft = false) {
+export function validateSkillForm(form: ImplementationForm, existing: { id: string; name: string; pendingChanges?: { name: string } }[], id?: string, draft = false, categories?: ResourceCategoryOption[]) {
   const errors: Record<string, string> = {}
   void draft
   if (!form.classId) errors.classId = '请选择所属技能大类'
@@ -29,7 +28,7 @@ export function validateSkillForm(form: ImplementationForm, existing: { id: stri
   if (form.instructions.length > 100000) errors.instructions = '执行指令最长 100000 个字符'
   if ((form.resourceIds.length > 0 || (form.uploadedResources?.length ?? 0) > 0) && !form.resourceUsage?.trim()) errors.resourceUsage = '已选择挂载知识库或上传资源，请填写资源使用说明'
   if (hasDuplicateKnowledge(form.resourceIds) || hasDuplicateKnowledge((form.knowledgeBases ?? []).map(row => row.id))) errors.resourceIds = '同一个技能不能重复挂载同一个知识库'
-  if (form.uploadedResources?.some(file => !resourceCategories.includes(file.category!))) errors.uploadedResources = '请为每份上传资源选择用途分类'
+  if (form.uploadedResources?.some(file => !file.category?.trim() || (categories && !categories.some(option => option.name === file.category)))) errors.uploadedResources = '请为每份上传资源选择已启用的用途分类'
   if (form.uploadedResources?.some(file => file.size > skillResourceLimits.maxFileBytes!) || (form.uploadedResources ?? []).reduce((sum, file) => sum + file.size, 0) > skillResourceLimits.maxTotalBytes!) errors.uploadedResources = '单个资源文件及资源总大小均不能超过 50 MB'
   if (!id && !(form.applicationIds?.[0] || '').trim()) errors.applicationIds = '请选择所属应用'
   if ((form.applicationIds?.length ?? 0) > 1) errors.applicationIds = '请选择一个所属应用'

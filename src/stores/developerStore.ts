@@ -1,13 +1,14 @@
 import { create } from 'zustand'
 import { useAuthStore } from './authStore'
 import { setApplicationCatalog } from '@/lib/access'
-import type { Implementation } from '@/types/developer'
+import type { Implementation, ResourceCategoryOption } from '@/types/developer'
 import { getDeveloperMetadata, listDeveloperSkillsPage, emptyDeveloperFilters, type DeveloperFilters, type DeveloperCatalogOption } from '@/api/developerCenter'
 
 interface DeveloperState {
   implementations: Implementation[]
   skillClasses: DeveloperCatalogOption[]
   applications: DeveloperCatalogOption[]
+  resourceCategories: ResourceCategoryOption[]
   filterSkillClasses: DeveloperCatalogOption[]
   statuses: DeveloperCatalogOption[]
   filters: DeveloperFilters
@@ -41,7 +42,7 @@ async function readPage(requestedPage: number, silent: boolean, filters: Develop
     useDeveloperStore.setState({ implementations: result.items, page: result.page, pageSize: result.pageSize,
       total: result.total, pages: Math.max(1, result.pages),
       filters,
-      ...(metadata ? { skillClasses: metadata.skill_classes, applications: metadata.applications,
+      ...(metadata ? { skillClasses: metadata.skill_classes, applications: metadata.applications, resourceCategories: metadata.resource_categories ?? [],
         filterSkillClasses: metadata.filter_skill_classes ?? metadata.skill_classes, statuses: metadata.statuses ?? [] } : {}) })
   } finally { if (!silent && current()) useDeveloperStore.setState({ loading: false }) }
 }
@@ -50,6 +51,7 @@ export const useDeveloperStore = create<DeveloperState>((set) => ({
   implementations: [],
   skillClasses: [],
   applications: [],
+  resourceCategories: [],
   filterSkillClasses: [],
   statuses: [],
   filters: { ...emptyDeveloperFilters },

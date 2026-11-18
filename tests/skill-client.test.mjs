@@ -11,7 +11,13 @@ test('定稿表单提交技能大类应用和按上传顺序排列的分类，�
   useAuthStore.getState().setSession(session)
   const original = globalThis.fetch
   let captured
-  globalThis.fetch = async (url, options) => { captured = { url, ...options }; return response({ build_id: 'build' }) }
+  globalThis.fetch = async (url, options) => {
+    if (url === '/skills/developer/get-form-metadata') return response({ resource_categories: [
+      { id: 2, code: 'template', name: '模板' }, { id: 4, code: 'script', name: '脚本' },
+    ] })
+    captured = { url, ...options }
+    return response({ build_id: 'build' })
+  }
   try {
     await buildSkill(item, { references: [{ id: 'r', file: new File(['ref'], 'ref.md') }], scripts: [{ id: 's', file: new File(['code'], 'check.py') }] })
     assert.equal(captured.url, '/skills/packages/build-from-form')
@@ -33,6 +39,29 @@ test('定稿表单提交技能大类应用和按上传顺序排列的分类，�
     assert.equal(captured.headers['Content-Type'], undefined)
     assert.deepEqual(captured.body.getAll('files').map(file => file.name), ['ref.md', 'check.py'])
     await assert.rejects(buildSkill({ ...item, knowledgeBases: [{ id: '12', source: 'mock' }] }, { references: [], scripts: [] }), SkillApiError)
+  } finally { globalThis.fetch = original }
+})
+
+test('资源分类名称和代码来自字典，支持重命名及新增分类并拒绝已停用分类', async () => {
+  useAuthStore.getState().setSession(session)
+  const original = globalThis.fetch
+  let builds = 0
+  const upload = { references: [{ id: 'r', file: new File(['data'], 'ref.md') }], scripts: [] }
+  const resource = { id: 'r', name: 'ref.md', category: '业务测试数据' }
+  globalThis.fetch = async (url, options) => {
+    assert.equal(options.headers.token, session.token)
+    if (url === '/skills/developer/get-form-metadata') return response({ resource_categories: [
+      { id: 9, code: 'test_data', name: '业务测试数据' },
+    ] })
+    assert.equal(url, '/skills/packages/build-from-form')
+    builds++
+    assert.deepEqual(JSON.parse(options.body.get('source')).resource_categories, ['test_data'])
+    return response({ build_id: 'dynamic' })
+  }
+  try {
+    await buildSkill({ ...item, uploadedResources: [resource] }, upload)
+    await assert.rejects(buildSkill({ ...item, uploadedResources: [{ ...resource, category: '已停用分类' }] }, upload), /已启用/)
+    assert.equal(builds, 1)
   } finally { globalThis.fetch = original }
 })
 

@@ -4,6 +4,14 @@ import { debugDocumentLimits, documentExtensions, skillResourceExtensions, valid
 import { nextVersion } from '../src/lib/version.ts'
 import { withSystemVersion } from '../src/lib/skillModel.ts'
 const form = (changes = {}) => ({ classId: 'SKILL-CASE-001', name: '新技能', description: '生成业务用例', version: '', instructions: '生成业务用例', resourceIds: [], uploadedResources: [], ...changes })
+
+test('资源用途按当前字典校验，允许新增分类并拒绝缺失或停用的选择', () => {
+ const categories = [{ id: 9, code: 'test_data', name: '业务测试数据' }]
+ const values = form({ applicationIds: ['APP'], resourceUsage: '构造数据', uploadedResources: [{ name: 'data.xlsx', size: 1, category: '业务测试数据' }] })
+ assert.equal(validateSkillForm(values, [], undefined, false, categories).uploadedResources, undefined)
+ assert.ok(validateSkillForm(values, [], undefined, false, []).uploadedResources)
+ assert.ok(validateSkillForm({ ...values, uploadedResources: [{ name: 'data.xlsx', size: 1, category: ' ' }] }, [], undefined, false, categories).uploadedResources)
+})
 test('名称唯一性覆盖空格、大小写和全半角，编辑自身不冲突', () => {
  const existing = [{ id: 'one', name: ' Skill ABC ' }]
  assert.ok(validateSkillForm(form({ name: 'ＳＫＩＬＬ ａｂｃ' }), existing).name)

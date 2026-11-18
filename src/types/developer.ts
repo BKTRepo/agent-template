@@ -80,7 +80,8 @@ export interface KnowledgeSelection { id: string; name: string; version?: string
 export interface KnowledgeBaseOption extends KnowledgeSelection {
   description: string; scope: string; fileCount: number; applicationIds: string[]; maintainer: string
 }
-export type ResourceCategory = '参考资料' | '模板' | '静态资源' | '脚本'
+export type ResourceCategory = string
+export interface ResourceCategoryOption { id: number | string; code: string; name: string }
 export interface UploadedResource { sourceId?: number; fileId?: number; sourceVersionId?: number; downloadUrl?: string; savedCategory?: ResourceCategory; id: string; name: string; size: number; lastModified: number; category?: ResourceCategory }
 export interface DebugInput { conversation: string; documentText: string; documents: UploadedResource[] }
 export interface KnowledgeFile extends UploadedResource { sampleContent?: string; conversionJobId?: string; conversionStatus?: string; processingStatus?: string; errorMessage?: string }

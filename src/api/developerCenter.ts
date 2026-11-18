@@ -3,7 +3,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { hasSkillSession } from './skillSession'
 import { restoreSkillUploads } from './skillArchive'
 import { hasDuplicateKnowledge, knowledgeIdentity, uniqueKnowledgeSelections } from '@/lib/knowledgeSelection'
-import type { Implementation, ImplementationForm, SkillUploads } from '@/types/developer'
+import type { Implementation, ImplementationForm, ResourceCategoryOption, SkillUploads } from '@/types/developer'
 
 interface ApiResponse<T> { status: string; message?: string; data: T }
 export interface ServerSkill {
@@ -21,7 +21,7 @@ export const developerSkillStatuses: DeveloperCatalogOption[] = [
   { id: 'DEBUG_SUCCESS', name: '调试成功' }, { id: 'DEBUG_FAILED', name: '调试失败' },
   { id: 'ONLINE', name: '已上线' }, { id: 'OFFLINE', name: '已下线' },
 ]
-export interface DeveloperMetadata { skill_classes: DeveloperCatalogOption[]; applications: DeveloperCatalogOption[]; filter_skill_classes?: DeveloperCatalogOption[]; statuses?: DeveloperCatalogOption[] }
+export interface DeveloperMetadata { skill_classes: DeveloperCatalogOption[]; applications: DeveloperCatalogOption[]; resource_categories?: ResourceCategoryOption[]; filter_skill_classes?: DeveloperCatalogOption[]; statuses?: DeveloperCatalogOption[] }
 export interface DeveloperFilters { name: string; classId: string; status: string; application: string }
 export const emptyDeveloperFilters: DeveloperFilters = { name: '', classId: '', status: '', application: '' }
 

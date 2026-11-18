@@ -27,7 +27,7 @@ const blankForm = (team: string): ImplementationForm => ({ classId: '', name: ''
 const dateText = (value: string) => new Date(value).toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
 
 export default function DeveloperPage() {
-  const { implementations, skillClasses, applications, filterSkillClasses, statuses, filters: appliedFilters, load, refresh, replace, patch, remove, loading, page, pages, total } = useDeveloperStore()
+  const { implementations, skillClasses, applications, resourceCategories, filterSkillClasses, statuses, filters: appliedFilters, load, refresh, replace, patch, remove, loading, page, pages, total } = useDeveloperStore()
   const [filters, setFilters] = useState<DeveloperFilters>({ ...appliedFilters })
   const actor = useAccessStore(state => state.actor)
   const team = ''
@@ -137,7 +137,7 @@ export default function DeveloperPage() {
   function closePanel() { if (!busy) { nameCheckSequence.current++; setPanel(null); setPolishOriginal(undefined); setMessage(''); setOfflinePrompt(false); setDraftDeletePrompt(false) } }
   async function checkName() {
     const sequence = ++nameCheckSequence.current
-    const localError = validateSkillForm(form, implementations, selectedId, true).name ?? ''
+    const localError = validateSkillForm(form, implementations, selectedId, true, resourceCategories).name ?? ''
     setErrors(previous => ({ ...previous, name: localError }))
     if (localError || !hasSkillSession() || !skillBackendEnabled) return
     try {
@@ -166,7 +166,7 @@ export default function DeveloperPage() {
     finally { if (skillAccount() === account) setBusy(null) }
   }
   async function saveDraft() {
-    const issues = validateSkillForm(form, implementations, selectedId, true)
+    const issues = validateSkillForm(form, implementations, selectedId, true, resourceCategories)
     if (showFormErrors(issues)) return
     setBusy('save')
     try {
@@ -192,7 +192,7 @@ export default function DeveloperPage() {
   }
   async function savePublished() {
     if (!selected || busy) return
-    const issues = validateSkillForm(form, implementations, selected.id)
+    const issues = validateSkillForm(form, implementations, selected.id, false, resourceCategories)
     if (showFormErrors(issues)) return
     setBusy('save'); setMessage('')
     try {
@@ -226,7 +226,7 @@ export default function DeveloperPage() {
     } catch (error) { setMessage((error as Error).message) } finally { setBusy(null) }
   }
   async function build(saveChanges = false) {
-    const issues = validateSkillForm(form, implementations, selectedId)
+    const issues = validateSkillForm(form, implementations, selectedId, false, resourceCategories)
     if (form.resourceIds.some(id => { const kb = useKnowledgeStore.getState().knowledgeBases.find(row => row.id === id); return kb && !canViewKnowledge(kb, actor) })) issues.resourceIds = '所选知识库已不在当前用户的可见范围，请重新选择。'
 
     if (showFormErrors(issues)) return
@@ -350,7 +350,7 @@ export default function DeveloperPage() {
       {readonly && <p className="form-hint">创建者：{selected?.creatorName || '历史创建者'}。仅创建者本人可编辑此实现类。</p>}
       {online && !readonly && <p className="helper-text">保存修改后回到草稿状态，重新调试通过并上线时生成新版本。{selected?.pendingChangedAt && `编辑稿保存于 ${dateText(selected.pendingChangedAt)}。`}</p>}
       {selected?.status === '已下线' && <p className="helper-text">该技能已下线。可继续编辑，重新调试通过后重新上线。</p>}
-      <div ref={formRoot}><SkillFields form={form} update={update} skillClasses={skillClasses} applications={applications} errors={errors} disabled={!!busy || readonly} editing={!!selected} activeIds={activeUploads.map(row => row.id)} onAdd={addFiles} onRemove={removeFile} /></div>
+      <div ref={formRoot}><SkillFields form={form} update={update} skillClasses={skillClasses} applications={applications} resourceCategories={resourceCategories} errors={errors} disabled={!!busy || readonly} editing={!!selected} activeIds={activeUploads.map(row => row.id)} onAdd={addFiles} onRemove={removeFile} /></div>
     </Dialog>}
 
     {panel === 'form' && !selectedId && polishOriginal && <SkillPolishDialog original={polishOriginal}

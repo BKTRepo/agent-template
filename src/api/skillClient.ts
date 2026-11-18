@@ -1,6 +1,6 @@
 import { authFetch } from './authFetch'
 import { useAuthStore } from '@/stores/authStore'
-import type { Implementation, SkillBuild, SkillUploads } from '@/types/developer'
+import type { Implementation, ResourceCategoryOption, SkillBuild, SkillUploads } from '@/types/developer'
 import { hasSkillSession, skillAccount } from './skillSession'
 
 interface Issue { field: string; reason: string }
@@ -44,11 +44,13 @@ export async function buildSkill(item: Implementation, uploads: SkillUploads): P
   if (item.resourceIds.some(id => !item.knowledgeBases?.some(row => row.id === id && row.source === 'backend'))) throw new SkillApiError('示例资源不能参与真实生成。', { resourceIds: '请选择真实知识库。' })
   if (!item.backendSkillId) throw new SkillApiError('尚未创建后端技能记录。')
   const all = [...uploads.references, ...uploads.scripts]
-  const categoryNames: Record<string, string> = { '参考资料': 'reference', '模板': 'template', '静态资源': 'asset', '脚本': 'script' }
+  const metadata = all.length ? await request<{ resource_categories: ResourceCategoryOption[] }>('/skills/developer/get-form-metadata') : undefined
+  const categoryNames = new Map(metadata?.resource_categories.map(category => [category.name, category.code]) ?? [])
   const resourceCategories = all.map(upload => {
     const category = item.uploadedResources?.find(row => row.id === upload.id)?.category
-    if (!category || !categoryNames[category]) throw new SkillApiError(`请选择 ${upload.file.name} 的资源用途分类。`, { uploadedResources: '每个上传资源都需要选择分类。' })
-    return categoryNames[category]
+    const code = category ? categoryNames.get(category) : undefined
+    if (!code) throw new SkillApiError(`请选择 ${upload.file.name} 已启用的资源用途分类。`, { uploadedResources: '每个上传资源都需要选择已启用的分类。' })
+    return code
   })
   const source = { skill_id: Number(item.backendSkillId), skill_name: item.name, skill_class_id: item.classId, application: item.applicationIds?.[0] || null, description: item.description, version: item.version, expected_version: item.backendVersion || item.version, instructions: item.instructions, compatibility: item.compatibility ?? '', resource_usage: item.resourceUsage ?? '', knowledge_base_ids: item.resourceIds, resource_categories: resourceCategories }
   const form = new FormData()
