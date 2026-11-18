@@ -52,6 +52,7 @@ async def _model_groups(cases):
 
     sample = [{
         "id": case["id"], "name": case["name"], "preconditions": case["preconditions"][:120],
+        "sheet_name": case.get("sheet_name"),
         "steps": [step["action"][:80] for step in case["steps"][:3]],
         "expected": (case["expected"] or "")[:120],
     } for case in cases]
@@ -157,11 +158,15 @@ async def derive_case_groups(artifact: Artifact, metadata: dict, *, use_legacy=T
         try:
             # Bound each request while covering every case, including workbooks over 80 rows.
             merged = {}
-            for offset in range(0, len(cases), 80):
-                batch = cases[offset:offset + 80]
-                model_groups = await _model_groups_complete(batch)
-                for group in model_groups:
-                    merged.setdefault(group["title"].strip(), []).extend(group["case_ids"])
+            sheets = {}
+            for case in cases:
+                sheets.setdefault(case.get("sheet_index"), []).append(case)
+            for sheet_cases in sheets.values():
+                for offset in range(0, len(sheet_cases), 80):
+                    batch = sheet_cases[offset:offset + 80]
+                    model_groups = await _model_groups_complete(batch)
+                    for group in model_groups:
+                        merged.setdefault(group["title"].strip(), []).extend(group["case_ids"])
             groups = [{"title": title, "case_ids": ids} for title, ids in merged.items()]
         except Exception:
             LOGGER.warning("模型归纳测试要点失败")

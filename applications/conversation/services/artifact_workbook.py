@@ -34,6 +34,8 @@ class TestCase(BaseModel):
     preconditions: str = Field(max_length=8000)
     steps: list[CaseStep] = Field(max_length=MAX_ROWS)
     expected: str | None = Field(default=None, max_length=8000)
+    sheet_index: int | None = Field(default=None, ge=0)
+    sheet_name: str | None = Field(default=None, max_length=31)
 
 
 def _bytes(book) -> bytes:
@@ -87,9 +89,8 @@ FLAT_HEADERS = {
 
 
 def _read_flat(book, *, standard_only=False):
-    for sheet in book.worksheets:
-        if sheet.max_row > MAX_ROWS + 20:
-            continue
+    layouts = {}
+    for sheet_index, sheet in enumerate(book.worksheets):
         for header_row in sheet.iter_rows(max_row=min(sheet.max_row, 20)):
             header = tuple(str(cell.value or "").strip() for cell in header_row)
             if header[:len(STANDARD_CASE_HEADER)] == STANDARD_CASE_HEADER:
@@ -104,30 +105,45 @@ def _read_flat(book, *, standard_only=False):
                         columns[field] = hits[0]
                 if not {"id", "name", "preconditions", "steps", "expected"}.issubset(columns):
                     continue
-            cases, case_rows, step_rows = {}, {}, {}
-            for number in range(header_row[0].row + 1, sheet.max_row + 1):
-                def value(field):
-                    return str(sheet.cell(number, columns[field]).value if sheet.cell(number, columns[field]).value is not None else "") if field in columns else ""
-                key = value("id").strip()
-                if not key:
-                    if not value("name").strip():
-                        continue
-                    sequence = value("sequence").strip()
-                    if not sequence or sheet.cell(number, columns["sequence"]).data_type == "f":
-                        raise ValueError("missing case id or sequence")
-                    # New-case exports leave the database ID blank. Keep their sequence as a stable editor ID.
-                    key = f"sequence:{sequence}"
-                if key in cases or sheet.cell(number, columns['id']).data_type == 'f':
-                    raise ValueError("invalid case id")
-                steps = [CaseStep(id=str(i), action=line) for i, line in
-                         enumerate((line for line in value("steps").splitlines() if line.strip()), 1)]
-                cases[key] = TestCase(id=key, name=value("name"), group=value("group"),
-                    preconditions=value("preconditions"), expected=value("expected"), steps=steps)
-                case_rows[key] = number
-                step_rows.update({(key, step.id): number for step in steps})
-            book._artifact_flat_layout = (sheet.title, columns)
-            return book, cases, case_rows, step_rows
-    raise ValueError("unsupported case workbook")
+            if sheet.max_row > MAX_ROWS + 20:
+                raise ValueError("too many rows")
+            layouts[sheet.title] = (sheet_index, header_row[0].row, columns)
+            break
+    if not layouts:
+        raise ValueError("unsupported case workbook")
+
+    cases, case_rows, step_rows = {}, {}, {}
+    for sheet_name, (sheet_index, header_number, columns) in layouts.items():
+        sheet = book[sheet_name]
+        sheet_ids = set()
+        for number in range(header_number + 1, sheet.max_row + 1):
+            def value(field):
+                return str(sheet.cell(number, columns[field]).value if sheet.cell(number, columns[field]).value is not None else "") if field in columns else ""
+            key = value("id").strip()
+            if not key:
+                if not value("name").strip():
+                    continue
+                sequence = value("sequence").strip()
+                if not sequence or sheet.cell(number, columns["sequence"]).data_type == "f":
+                    raise ValueError("missing case id or sequence")
+                # New-case exports leave the database ID blank. Keep their sequence as a stable editor ID.
+                key = f"sequence:{sequence}"
+            if key in sheet_ids or sheet.cell(number, columns['id']).data_type == 'f':
+                raise ValueError("invalid case id")
+            sheet_ids.add(key)
+            if len(layouts) > 1:
+                key = f"sheet:{sheet_index}:{sha256(key.encode('utf-8')).hexdigest()}"
+            steps = [CaseStep(id=str(i), action=line) for i, line in
+                     enumerate((line for line in value("steps").splitlines() if line.strip()), 1)]
+            cases[key] = TestCase(id=key, name=value("name"), group=value("group"),
+                preconditions=value("preconditions"), expected=value("expected"), steps=steps,
+                sheet_index=sheet_index, sheet_name=sheet_name)
+            if len(cases) > MAX_ROWS:
+                raise ValueError("too many cases")
+            case_rows[key] = (sheet_name, number)
+            step_rows.update({(key, step.id): number for step in steps})
+    book._artifact_flat_layout = {name: columns for name, (_, _, columns) in layouts.items()}
+    return book, cases, case_rows, step_rows
 
 
 def read_workbook(content: bytes, *, standard_only=False):
@@ -146,7 +162,8 @@ def read_workbook(content: bytes, *, standard_only=False):
         case_rows = {}
         for row, (key, group, name, preconditions, expected) in _read_sheet(book, CASE_SHEET, CASE_HEADER):
             case = TestCase(id=key, group=group or "", name=name, preconditions=preconditions or "",
-                            expected=expected or "", steps=[])
+                            expected=expected or "", steps=[], sheet_index=book.sheetnames.index(CASE_SHEET),
+                            sheet_name=CASE_SHEET)
             if key in cases:
                 raise ValueError("duplicate case id")
             cases[key] = case
@@ -204,15 +221,18 @@ def update_workbook(content: bytes, updated: list[TestCase]) -> bytes:
                 kept_steps[key] = step
         flat = getattr(book, '_artifact_flat_layout', None)
         if flat:
-            sheet_name, columns = flat
-            sheet = book[sheet_name]
             for key, case in kept_cases.items():
+                sheet_name, row = case_rows[key]
+                sheet = book[sheet_name]
+                columns = flat[sheet_name]
                 for field in ('name', 'preconditions', 'expected', 'steps'):
                     if field in columns:
                         text = '\n'.join(step.action for step in case.steps) if field == 'steps' else getattr(case, field) or ''
-                        _write_text(sheet, case_rows[key], columns[field], text)
-            for row in sorted((row for key, row in case_rows.items() if key not in kept_cases), reverse=True):
-                sheet.delete_rows(row)
+                        _write_text(sheet, row, columns[field], text)
+            for sheet_name in flat:
+                removed_rows = [row for key, (name, row) in case_rows.items() if name == sheet_name and key not in kept_cases]
+                for row in sorted(removed_rows, reverse=True):
+                    book[sheet_name].delete_rows(row)
             return _bytes(book)
         case_sheet = book[CASE_SHEET]
         step_sheet = book[STEP_SHEET]
