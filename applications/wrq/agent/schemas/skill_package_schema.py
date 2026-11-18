@@ -25,7 +25,7 @@ class SkillResourceBinding(BaseModel):
                                     description="用途目录下的相对路径；为空时沿用原文件名")
     content_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$",
                                      description="可选，固定挂载文件的 SHA256")
-    category: Literal["reference", "template", "asset", "script"] | None = None
+    category: Annotated[str, StringConstraints(min_length=1, max_length=16)] | None = None
 
 
 class SkillPackageSource(BaseModel):
@@ -80,7 +80,7 @@ class SkillDeveloperForm(BaseModel):
     skill_class_id: int | str = Field(default="")
     application_paso: str | None = Field(default=None, max_length=100,
         validation_alias=AliasChoices('application_paso', 'application'))
-    resource_categories: list[Literal["reference", "template", "asset", "script"]] = Field(default_factory=list, max_length=100)
+    resource_categories: list[Annotated[str, StringConstraints(min_length=1, max_length=16)]] = Field(default_factory=list, max_length=100)
     skill_markdown: str | None = Field(default=None, max_length=200_000)
     expected_version: str | None = Field(default=None, max_length=64)
     instructions: str = Field(default="", max_length=100_000)

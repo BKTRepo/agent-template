@@ -69,6 +69,8 @@
 | GET | /download-resource-file | 查询参数：file_id |
 | POST | /upload-resource-version | 已停用旧功能，仅保留明确的停用提示；multipart：source_id、files、categories |
 
+`get-form-metadata` 的 `resource_categories` 从 `keenrobot_resource_categories` 查询已启用项，包含 `id`、`code`、`name`。上传下拉框显示字典名称，上传时传当前名称，构建时映射为当前字典代码。空字典提示管理员配置。停用项保留历史显示，重新保存前需选择已启用项。构建按已持久化附件的分类读取代码，分类名称或代码均支持配置。`reference`、`template`、`asset`、`script` 保持原有目录分配，其余分类按文件类型分配到现有资料、脚本或静态资源目录。
+
 示例：
 
 ```http

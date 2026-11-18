@@ -48,7 +48,7 @@ def source_from_developer_form(form: SkillDeveloperForm, filenames: list[str], *
             report.errors.append(ValidationIssue(field=f"files[{index}]", reason="同名资源已存在，请先移除旧文件"))
         names.add(key)
         category = form.resource_categories[index]
-        role = "asset" if category == "template" else category
+        role = {"template": "asset", "asset": "asset", "reference": "reference", "script": "script"}.get(category, role)
         resources.append(SkillResourceBinding(upload_index=index, role=role, category=category, usage=form.resource_usage))
     if not report.finish().valid:
         raise SkillPackageError(report)
