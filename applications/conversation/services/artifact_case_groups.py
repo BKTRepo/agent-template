@@ -124,6 +124,9 @@ async def with_case_groups(artifact: Artifact, metadata: dict) -> dict:
             stored, _ = await ArtifactCaseGroups.get_or_create(
                 artifact_id=artifact.id, defaults={"groups": grouped["groups"]},
             )
+            if not _valid_groups(stored.groups, metadata["cases"]):
+                stored.groups = grouped["groups"]
+                await stored.save(update_fields=["groups", "updated_time"])
             grouped["groups"] = stored.groups
     return grouped
 

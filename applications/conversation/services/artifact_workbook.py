@@ -16,7 +16,7 @@ STANDARD_CASE_HEADER = (
     "案例id", "序号", "案例名称", "描述", "应用系统", "优先级", "正/反", "前置条件", "备注",
     "步骤", "预期值", "创建人", "创建时间", "维护人", "维护时间", "案例目录", "案例类型", "案例标签",
 )
-STANDARD_CASE_COLUMNS = {"id": 1, "name": 3, "preconditions": 8, "steps": 10, "expected": 11, "group": 17}
+STANDARD_CASE_COLUMNS = {"id": 1, "sequence": 2, "name": 3, "preconditions": 8, "steps": 10, "expected": 11, "group": 17}
 MAX_ROWS = 5000
 MAX_EXPANDED_BYTES = 64 * 1024 * 1024
 
@@ -110,7 +110,13 @@ def _read_flat(book, *, standard_only=False):
                     return str(sheet.cell(number, columns[field]).value if sheet.cell(number, columns[field]).value is not None else "") if field in columns else ""
                 key = value("id").strip()
                 if not key:
-                    continue
+                    if not value("name").strip():
+                        continue
+                    sequence = value("sequence").strip()
+                    if not sequence or sheet.cell(number, columns["sequence"]).data_type == "f":
+                        raise ValueError("missing case id or sequence")
+                    # New-case exports leave the database ID blank. Keep their sequence as a stable editor ID.
+                    key = f"sequence:{sequence}"
                 if key in cases or sheet.cell(number, columns['id']).data_type == 'f':
                     raise ValueError("invalid case id")
                 steps = [CaseStep(id=str(i), action=line) for i, line in
