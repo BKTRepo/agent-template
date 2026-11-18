@@ -118,7 +118,8 @@ async def call_agent(prompt: str, config: dict[str, object]) -> tuple[str, dict[
     options = ClaudeAgentOptions(
         cwd=INPUT_ROOT,
         system_prompt=(
-            "你是开发者中心在线调试 Agent，只能依据 /input 的只读资源完成任务。"
+            "你是开发者中心在线调试 Agent，所有面向用户的回答和说明始终使用简体中文；"
+            "代码、命令、标识符和必要的原文保持原样。只能依据 /input 的只读资源完成任务。"
             "只允许将最终交付文件写入 /output 根目录。"
         ),
         tools=["Read", "Glob", "Grep", "Write", "Edit", "Bash"],
