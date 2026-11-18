@@ -255,14 +255,14 @@ async function monitor(item: Implementation, first: RealtimeTask, initial: Debug
 }
 
 export async function restoreRealtimeDebug(item: Implementation, signal?: AbortSignal, options: DebugMonitorOptions = {}): Promise<DebugRun | undefined> {
-  // 目录测试不参与发布校验；latest-run不携带构建版本，不能拿历史任务套当前发布版。
-  if (item.catalog) return item.debug
   const skillId = item.backendSkillId || item.id
-  const pending = receipt(item)
+  const pending = item.catalog ? undefined : receipt(item)
   let task = await getLatestRealtimeRun(skillId, signal)
   if (pending && (!task || pending.runId !== task.run_id)) task = await getRealtimeRun(skillId, pending.runId, signal)
   if (!task) return undefined
   let debug: DebugRun = { id: task.run_id, runId: task.run_id, buildId: '', input: '', status: 'idle', output: '', origin: 'backend', isCurrentVersion: false }
+  // Published tests restore the authorized latest task without registering it as a developer-version pass.
+  if (item.catalog) return monitor(item, task, debug, signal, options)
   try { debug = await verifyLink(item, debug) }
   catch (error) {
     if (!(error instanceof DeveloperCenterError) || error.statusCode !== 404) throw error

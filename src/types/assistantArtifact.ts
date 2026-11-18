@@ -16,6 +16,8 @@ export interface TestCase {
   preconditions: string
   steps: { id: string; action: string; expected?: string }[]
   expected?: string
+  sheet_index?: number | null
+  sheet_name?: string | null
 }
 
 export interface TestCaseArtifact extends ArtifactFile {

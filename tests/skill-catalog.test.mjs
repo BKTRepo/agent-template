@@ -61,6 +61,7 @@ test('目录测试只提交需求，后端固定发布资源且不写开发者�
   const paths = []
   await mocked(async (url, options) => {
     paths.push(url.pathname)
+    if (url.pathname.endsWith('latest-run')) return new Response('', { status: 404 })
     if (url.pathname.endsWith('get-skill')) return success(row())
     if (url.pathname.endsWith('get-build')) return success(build)
     if (url.pathname.endsWith('download-resource')) {
@@ -79,6 +80,62 @@ test('目录测试只提交需求，后端固定发布资源且不写开发者�
     const result = await runRealtimeDebug(item, { conversation: 'Generate tests', documents: [] }, item.skillMarkdown, [])
     assert.equal(result.status, 'failed'); assert.equal(result.registrationError, undefined)
     assert.equal(paths.some(path => path.includes('/developer/')), false)
+  })
+})
+
+test('在线测试重新打开查询最新任务并恢复其结果文件，不登记开发者版本', async () => {
+  let latest = 'newest-run'
+  const downloads = []
+  await mocked(async url => {
+    if (url.pathname.endsWith('latest-run')) {
+      assert.equal(url.searchParams.get('skill_id'), '101')
+      return Response.json({ run_id: latest, skill_id: 101, status: 'completed', documents: [
+        { filename: `${latest}.xlsx`, download_url: `/realtime-test-case-gen/runs/document?run_id=${latest}&filename=${latest}.xlsx` },
+      ] })
+    }
+    assert.equal(url.pathname, '/realtime-test-case-gen/runs/document')
+    downloads.push(url.searchParams.get('run_id'))
+    return new Response(new Uint8Array([80, 75, 3, 4]), { headers: {
+      'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'content-disposition': `attachment; filename="${latest}.xlsx"`,
+    } })
+  }, async () => {
+    const item = { id: '101', name: 'Published skill', catalog: true, buildId: 'published-build', skillVersionId: 30,
+      debug: { id: 'old-cached-run', runId: 'old-cached-run', artifacts: [{ key: 'old', name: 'old.xlsx' }] } }
+    const first = await restoreRealtimeDebug(item)
+    assert.equal(first.runId, 'newest-run')
+    assert.equal(first.status, 'passed')
+    assert.equal(first.artifacts[0].name, 'newest-run.xlsx')
+    assert.equal(first.buildId, '')
+    assert.equal(first.versionRegistered, undefined)
+    latest = 'newer-run'
+    const second = await restoreRealtimeDebug({ ...item, debug: first })
+    assert.equal(second.runId, 'newer-run')
+    assert.equal(second.artifacts[0].name, 'newer-run.xlsx')
+    assert.deepEqual(downloads, ['newest-run', 'newer-run'])
+  })
+})
+
+test('在线测试恢复最新的运行或失败状态，暂无任务时清空旧结果，权限失败如实提示', async () => {
+  let status = 'running'
+  const seen = []
+  await mocked(async url => {
+    if (url.pathname.endsWith('/runs/get')) return Response.json({ run_id: 'latest-run', skill_id: 101, status: 'failed', error_message: 'Sandbox failed', documents: [] })
+    assert.ok(url.pathname.endsWith('latest-run'))
+    if (status === 'absent') return new Response('', { status: 404 })
+    if (status === 'forbidden') return new Response('', { status: 403 })
+    return Response.json({ run_id: 'latest-run', skill_id: 101, status, error_message: 'Sandbox failed', documents: [] })
+  }, async () => {
+    const item = { id: '101', catalog: true, debug: { id: 'stale-run' } }
+    const running = await restoreRealtimeDebug(item, undefined, { pollIntervalMs: 1, onProgress: debug => { seen.push(debug.status) } })
+    assert.equal(running.status, 'failed')
+    assert.deepEqual(seen, ['running', 'failed'])
+    status = 'failed'
+    assert.equal((await restoreRealtimeDebug(item)).output, 'Sandbox failed')
+    status = 'absent'
+    assert.equal(await restoreRealtimeDebug(item), undefined)
+    status = 'forbidden'
+    await assert.rejects(restoreRealtimeDebug(item), /权限/)
   })
 })
 

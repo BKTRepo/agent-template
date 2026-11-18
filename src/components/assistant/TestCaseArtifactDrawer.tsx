@@ -42,7 +42,16 @@ export default function TestCaseArtifactDrawer({ artifact, onSave, checkArchived
     })).filter(group => group.items.length)
     const ungrouped = cases.filter(item => !groupedIds.has(item.id))
     if (ungrouped.length) result.push({ title: '待归纳', items: ungrouped })
-    return result
+    return result.flatMap(group => {
+      const sheets = new Map<number | null, TestCase[]>()
+      for (const item of group.items) {
+        const key = item.sheet_index ?? null
+        const items = sheets.get(key) ?? []
+        items.push(item)
+        sheets.set(key, items)
+      }
+      return [...sheets.values()].map(items => ({ title: group.title, items }))
+    })
   }, [cases, saved.groups])
 
   async function save(syncAsset = false) {
@@ -112,8 +121,8 @@ export default function TestCaseArtifactDrawer({ artifact, onSave, checkArchived
         : !groups.length ? <p className="empty-table">暂无测试案例</p> : view === 'map' ?
         <CaseMindMap title={saved.name} groups={groups} selectedId={selectedId} disabled={blocked}
           onSelect={id => { setSelectedId(id); setEditing(cases.find(item => item.id === id)) }} actions={actions} /> :
-        <div className="artifact-case-list">{groups.map(({ title, items }) => <section key={title}>
-        <h3>{title}</h3>
+        <div className="artifact-case-list">{groups.map(({ title, items }) => <section key={`${items[0].sheet_index ?? 'legacy'}:${title}`}>
+        <h3>{items[0].sheet_name && `${items[0].sheet_name} · `}{title}</h3>
         {items.map(item => <article key={item.id}>
           <header><h4>{item.name}</h4>{actions(item)}</header>
           <dl><dt>前置条件</dt><dd>{item.preconditions || '—'}</dd></dl>

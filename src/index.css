@@ -548,13 +548,14 @@ h1,h2,h3,p { margin:0; }
 .artifact-case-tree { position:relative; display:grid; grid-template-columns:minmax(155px,1fr) minmax(410px,2.7fr); align-items:center; gap:52px; width:100%; min-width:690px; min-height:100%; padding:46px 32px 74px; }
 .artifact-case-connections { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
 .artifact-case-connections path { fill:none; stroke:var(--case-line); stroke-width:2.4; stroke-linecap:round; }
-.artifact-case-tree [data-palette='0'] { --case-line:#6797e6; --case-tint:#eaf2ff; --case-ink:#244c93; }
-.artifact-case-tree [data-palette='1'] { --case-line:#a180df; --case-tint:#f3edff; --case-ink:#65419b; }
-.artifact-case-tree [data-palette='2'] { --case-line:#55a995; --case-tint:#e8f7f1; --case-ink:#216958; }
-.artifact-case-tree [data-palette='3'] { --case-line:#d69855; --case-tint:#fff3e5; --case-ink:#834d20; }
+.artifact-case-maps [data-palette='0'] { --case-line:#6797e6; --case-tint:#eaf2ff; --case-ink:#244c93; }
+.artifact-case-maps [data-palette='1'] { --case-line:#a180df; --case-tint:#f3edff; --case-ink:#65419b; }
+.artifact-case-maps [data-palette='2'] { --case-line:#55a995; --case-tint:#e8f7f1; --case-ink:#216958; }
+.artifact-case-maps [data-palette='3'] { --case-line:#d69855; --case-tint:#fff3e5; --case-ink:#834d20; }
 .artifact-case-root { position:relative; display:grid; justify-items:start; gap:8px; padding:18px 16px; border-radius:14px; color:white; background:linear-gradient(145deg,#254fc5,#2469df); box-shadow:0 10px 24px #254fc53d; overflow-wrap:anywhere; }
 .artifact-case-root strong { font-size:18px; line-height:1.35; }
 .artifact-case-root span { font-size:12px; color:#f0f5ff; }
+.artifact-case-maps { position:relative; min-width:690px; width:100%; }
 .artifact-case-branches { display:grid; gap:30px; min-width:0; }
 .artifact-case-branch { display:grid; grid-template-columns:minmax(135px,.9fr) minmax(200px,1.35fr); align-items:center; gap:48px; min-width:0; }
 .artifact-case-point { position:relative; display:grid; gap:4px; padding:13px 12px; border:1px solid var(--case-line); border-radius:13px; background:var(--case-tint); color:var(--case-ink); box-shadow:0 3px 10px #17233d0d; overflow-wrap:anywhere; }

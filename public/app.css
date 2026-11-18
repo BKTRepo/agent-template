@@ -15914,7 +15914,7 @@ h1:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#
   stroke-width: 2.4;
   stroke-linecap: round;
 }
-.artifact-case-tree:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) [data-palette='0'] {
+.artifact-case-maps:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) [data-palette='0'] {
   --case-line: #6797e6;
   --case-line-rgb: 103 151 230;
   --case-tint: #eaf2ff;
@@ -15922,7 +15922,7 @@ h1:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#
   --case-ink: #244c93;
   --case-ink-rgb: 36 76 147;
 }
-.artifact-case-tree:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) [data-palette='1'] {
+.artifact-case-maps:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) [data-palette='1'] {
   --case-line: #a180df;
   --case-line-rgb: 161 128 223;
   --case-tint: #f3edff;
@@ -15930,7 +15930,7 @@ h1:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#
   --case-ink: #65419b;
   --case-ink-rgb: 101 65 155;
 }
-.artifact-case-tree:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) [data-palette='2'] {
+.artifact-case-maps:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) [data-palette='2'] {
   --case-line: #55a995;
   --case-line-rgb: 85 169 149;
   --case-tint: #e8f7f1;
@@ -15938,7 +15938,7 @@ h1:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#
   --case-ink: #216958;
   --case-ink-rgb: 33 105 88;
 }
-.artifact-case-tree:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) [data-palette='3'] {
+.artifact-case-maps:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) [data-palette='3'] {
   --case-line: #d69855;
   --case-line-rgb: 214 152 85;
   --case-tint: #fff3e5;
@@ -15965,6 +15965,11 @@ h1:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#
 .artifact-case-root:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) span {
   font-size: 12px;
   color: #f0f5ff;
+}
+.artifact-case-maps:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  position: relative;
+  min-width: 690px;
+  width: 100%;
 }
 .artifact-case-branches:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   display: grid;
