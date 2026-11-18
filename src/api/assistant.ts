@@ -7,7 +7,7 @@ export interface ChatArtifactReference { artifactId: string; fileName: string; a
 interface ArtifactReferenceResponse { artifact_id: string; file_name: string; artifact_type: string; created_time?: string }
 function artifactReferences(rows?: ArtifactReferenceResponse[]): ChatArtifactReference[] { return (rows ?? []).map(row => ({ artifactId: String(row.artifact_id), fileName: row.file_name, artifactType: row.artifact_type, createdAt: row.created_time })) }
 export type AssistantRole = 'user' | 'assistant'
-export interface AssistantMessage { id: string; serverId?: number; role: AssistantRole; text: string; unread?: boolean; createdAt?: string; attachments?: string[]; artifacts?: ChatArtifactReference[]; taskId?: number; status?: 'generating' | 'completed' | 'stopped' | 'failed'; feedback?: 'up' | 'down'; feedbackReason?: string; context?: object }
+export interface AssistantMessage { id: string; serverId?: number; role: AssistantRole; text: string; unread?: boolean; createdAt?: string; attachments?: string[]; artifacts?: ChatArtifactReference[]; taskId?: number; durationMs?: number | null; status?: 'generating' | 'completed' | 'stopped' | 'failed'; feedback?: 'up' | 'down'; feedbackReason?: string; context?: object }
 export interface ChatConversation { id: string; title: string; favorite: boolean; generation: number; skills: number[]; knowledgeBases: number[]; model: string | null; unreadCount: number; createdAt: string; updatedAt: string }
 export interface ChatModel { name: string; displayName: string }
 export interface ChatModelHealth { model: string; status: 'healthy' | 'busy' | 'unavailable' | 'unconfigured' | 'checking'; latencyMs: number | null; checkedAt: string | null; stale: boolean; refreshing: boolean }
