@@ -21,16 +21,18 @@ export default function ArtifactSpreadsheet({ artifact, editing, changes, onChan
   const [retry, setRetry] = useState(0)
   const [cell, setCell] = useState<{ original: SheetCell; type: EditableCellType; value: string }>()
   const sheet = artifact.sheets.find(row => row.index === index)
+  const { artifactId, baseHash } = artifact
+  const hasSheet = !!sheet
 
   useEffect(() => {
     const controller = new AbortController()
     setPage(undefined)
     setError('')
-    if (sheet) void getArtifactSheet(artifact, index, offset, columnOffset, controller.signal)
+    if (hasSheet) void getArtifactSheet({ artifactId, baseHash }, index, offset, columnOffset, controller.signal)
       .then(result => { if (!controller.signal.aborted) setPage(result) })
       .catch(reason => { if (!controller.signal.aborted) setError((reason as Error).message) })
     return () => controller.abort()
-  }, [artifact, sheet, index, offset, columnOffset, retry])
+  }, [artifactId, baseHash, hasSheet, index, offset, columnOffset, retry])
 
   const invalid = cell?.type === 'number' && (!cell.value.trim() || !Number.isFinite(Number(cell.value))) ||
     cell?.type === 'formula' && (!cell.value.startsWith('=') || cell.value.length < 2)

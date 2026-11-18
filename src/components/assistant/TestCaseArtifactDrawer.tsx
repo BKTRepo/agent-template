@@ -31,9 +31,18 @@ export default function TestCaseArtifactDrawer({ artifact, onSave, checkArchived
   const dirty = JSON.stringify(cases) !== JSON.stringify(saved.cases)
   const groups = useMemo(() => {
     const byId = new Map(cases.map(item => [item.id, item]))
-    return saved.groups.map(({ title, caseIds }) => ({
-      title, items: caseIds.flatMap(id => { const item = byId.get(id); return item ? [item] : [] }),
+    const groupedIds = new Set<string>()
+    const result = saved.groups.map(({ title, caseIds }) => ({
+      title, items: caseIds.flatMap(id => {
+        const item = byId.get(id)
+        if (!item || groupedIds.has(id)) return []
+        groupedIds.add(id)
+        return [item]
+      }),
     })).filter(group => group.items.length)
+    const ungrouped = cases.filter(item => !groupedIds.has(item.id))
+    if (ungrouped.length) result.push({ title: '待归纳', items: ungrouped })
+    return result
   }, [cases, saved.groups])
 
   async function save(syncAsset = false) {
