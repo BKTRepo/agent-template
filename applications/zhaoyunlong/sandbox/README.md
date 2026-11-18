@@ -20,7 +20,7 @@ applications/zhaoyunlong/sandbox_results/
 
 ## 模型网关
 
-在线调试沙箱与悬浮对话台共用项目 `.env` 中的模型网关配置。`CHAT_GATEWAY_MODE=direct`（默认）使用 `ANTHROPIC_BASE_URL`、`ANTHROPIC_API_KEY`；`CHAT_GATEWAY_MODE=ccr` 使用行内 CCR 的 `CHAT_CCR_BASE_URL`、`CHAT_CCR_AUTH_MODE`、`CHAT_CCR_API_KEY`。可通过 `CHAT_MODEL_REGISTRY` 自定义模型清单及公网、行内映射，默认模型由 `CHAT_DEFAULT_MODEL` 指定。兼容原有 `CHAT_MODEL_*` 和 `CHAT_CCR_MODEL_*` 映射，详见 [悬浮对话台模型配置](../../chat/README.md#模型配置) 与项目 `.env.example`。实际 CCR 的网络、路由、鉴权和模型功能需要在行内验证。
+在线调试沙箱与悬浮对话台共用项目 `.env` 中的模型网关配置。`CHAT_GATEWAY_MODE=direct`（默认）使用 `ANTHROPIC_BASE_URL`、`ANTHROPIC_API_KEY`；`CHAT_GATEWAY_MODE=ccr` 使用行内 CCR 的 `CHAT_CCR_BASE_URL`、`CHAT_CCR_AUTH_MODE`、`CHAT_CCR_API_KEY`。在线调试优先选择健康缓存中响应最快的模型，暂时没有有效探测结果时优先使用 `CHAT_DEFAULT_MODEL`。模型配置详见 [悬浮对话台模型配置](../../chat/README.md#模型配置) 与项目 `.env.example`。实际 CCR 的网络、路由、鉴权和模型功能需要在行内验证。
 
 ## 接口
 

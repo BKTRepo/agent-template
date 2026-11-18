@@ -70,8 +70,13 @@ class OnlineDebugRunService:
             error_message=None,
         )
         try:
+            from applications.chat.services.model_health import health, select_model
+            await health()
+            model_id = await select_model()
+            if model_id is None:
+                raise OnlineDebugError('当前没有可用的健康模型，请稍后重试')
             sandbox = OnlineDebugService()
-            result = await asyncio.to_thread(sandbox.run, payload, owner_id, run_id)
+            result = await asyncio.to_thread(sandbox.run, payload, owner_id, run_id, model_id=model_id)
             from applications.wrq.knowledge import verify_evidence
             await verify_evidence(run_id, payload.get('_knowledge_receipts', []), required=bool(payload.get('_knowledge_token')))
             finished_at = datetime.now()
