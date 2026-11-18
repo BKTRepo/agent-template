@@ -101,11 +101,12 @@ class OnlineDebugService:
         self.retention_seconds = self._read_retention_seconds()
         self.runs_dir.mkdir(parents=True, exist_ok=True)
 
-    def run(self, payload: dict[str, Any], owner_id: int, run_id: str | None = None) -> OnlineDebugRun:
+    def run(self, payload: dict[str, Any], owner_id: int, run_id: str | None = None,
+            *, model_id: str | None = None) -> OnlineDebugRun:
         """同步运行容器，并保留 Skill 在本次运行目录中生成的最终文件。"""
         self._validate_payload(payload)
         self.cleanup_expired_runs()
-        model_environment = self._model_environment()
+        model_environment = self._model_environment(model_id)
         if not (self.skill_dir / "SKILL.md").is_file() or not (self.skill_dir / "run.py").is_file():
             raise OnlineDebugError("在线调试容器入口文件不完整")
 
@@ -463,10 +464,10 @@ class OnlineDebugService:
         return paths
 
     @staticmethod
-    def _model_environment() -> dict[str, str]:
+    def _model_environment(model_id: str | None = None) -> dict[str, str]:
         """在线调试与悬浮对话台使用同一套网关和默认模型配置。"""
         try:
-            return sandbox_model_environment(default_model())
+            return sandbox_model_environment(model_id or default_model())
         except RuntimeError as exc:
             raise OnlineDebugError(str(exc)) from exc
 
