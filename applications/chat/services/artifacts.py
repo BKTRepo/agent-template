@@ -1,4 +1,4 @@
-"""产物统计：测试用例以“用例编号”非空的行计数。"""
+"""产物统计：汇总各有效案例工作表，统计记录按产物编号幂等保存。"""
 
 import asyncio
 from pathlib import Path
@@ -22,6 +22,7 @@ def artifact_path(key: str) -> Path:
 
 
 def count_cases(path: Path) -> int:
+    """Use the same multi-sheet case reader as preview and editing."""
     from applications.conversation.services.artifact_workbook import read_workbook
     from applications.conversation.exceptions import TestCaseWorkbookFormatError
     try:
