@@ -11,7 +11,8 @@ from applications.wrq.platform_catalog import validate_application
 
 
 def source_from_developer_form(form: SkillDeveloperForm, filenames: list[str], *,
-                               technical_name: str | None = None, version: str = "1.0.0", validate_catalog: bool = True) -> SkillPackageSource:
+                               technical_name: str | None = None, version: str = "1.0.0", validate_catalog: bool = True,
+                               relative_paths: list[str | None] | None = None) -> SkillPackageSource:
     """统一入口的分类仅是目录组织约定，不执行或解压资源。"""
     report = SkillValidationReport()
     for field in ("skill_id", "skill_name", "description", "skill_class_id", "instructions"):
@@ -29,27 +30,35 @@ def source_from_developer_form(form: SkillDeveloperForm, filenames: list[str], *
             validate_application(form.application, allow_all=True)
     except ValueError as exc:
         report.errors.append(ValidationIssue(field="application", reason=str(exc)))
-    if form.skill_markdown is not None and markdown_body(form.skill_markdown) != form.instructions.strip():
+    if form.skill_markdown is not None and markdown_body(form.skill_markdown) != markdown_body(form.instructions):
         report.errors.append(ValidationIssue(field="skill_markdown", reason="Markdown 正文与执行指令不一致，请同步内容后保存"))
     if len(filenames) > MAX_SKILL_UPLOAD_FILES:
         report.errors.append(ValidationIssue(field="files", reason=f"每次最多上传 {MAX_SKILL_UPLOAD_FILES} 个文件"))
     if not report.finish().valid:
         raise SkillPackageError(report)
 
+    relative_paths = relative_paths or [None] * len(filenames)
     resources, names = [], set()
     for index, filename in enumerate(filenames):
         try:
-            role = resource_role(filename)
+            relative = relative_paths[index]
+            if relative:
+                from .skill_package_builder import safe_relative_path
+                safe_relative_path(relative)
+                role = "script" if relative.lower().endswith((".py", ".js", ".sh")) else "asset"
+            else:
+                role = resource_role(filename)
         except ValueError as exc:
             report.errors.append(ValidationIssue(field=f"files[{index}]", reason=str(exc)))
             continue
-        key = resource_name_key(filename)
+        key = resource_name_key(relative_paths[index] or filename)
         if key in names:
             report.errors.append(ValidationIssue(field=f"files[{index}]", reason="同名资源已存在，请先移除旧文件"))
         names.add(key)
         category = form.resource_categories[index]
-        role = {"template": "asset", "asset": "asset", "reference": "reference", "script": "script"}.get(category, role)
-        resources.append(SkillResourceBinding(upload_index=index, role=role, category=category, usage=form.resource_usage))
+        # 已有分类沿用目录规则，新增分类按文件格式确定内部目录。
+        role = {"reference": "reference", "template": "asset", "asset": "asset", "script": "script"}.get(category, role)
+        resources.append(SkillResourceBinding(upload_index=index, role=role, category=category, usage=form.resource_usage, relative_path=relative_paths[index]))
     if not report.finish().valid:
         raise SkillPackageError(report)
     return SkillPackageSource(

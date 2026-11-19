@@ -1,7 +1,7 @@
 """python -m applications.wrq.main；不初始化用户，不自动迁移任何表。"""
 import asyncio
 import sys
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 from fastapi import FastAPI
@@ -19,8 +19,15 @@ async def lifespan(app):
         'connections': wrq_connections(PROJECT_CONFIG.DATABASE_CONNECTIONS),
         'apps': {'models': {'models': PROJECT_CONFIG.APPLICATIONS_MODELS, 'default_connection': 'default'}},
         'use_tz': False, 'timezone': 'Asia/Shanghai'})
-    yield
-    await Tortoise.close_connections()
+    from applications.wrq.agent.services.skill_import_cleanup import cleanup_loop
+    cleanup_task = asyncio.create_task(cleanup_loop(), name='skill-import-cleanup')
+    try:
+        yield
+    finally:
+        cleanup_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await cleanup_task
+        await Tortoise.close_connections()
 
 app=FastAPI(title='WRQ 开发者中心',lifespan=lifespan)
 app.include_router(skills_router,prefix='/skills')

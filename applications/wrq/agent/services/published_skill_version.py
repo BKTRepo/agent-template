@@ -3,12 +3,25 @@ import json
 import re
 
 
-def display_skill_version(markdown: str, version: str | None) -> str:
+def display_skill_version(markdown: str, version: str | None, *, allow_missing_metadata: bool = False) -> str:
     """只替换 YAML 头部 metadata.version，不触碰正文或其他 version 字段。"""
     front = re.match(r'\A---\s*\r?\n(?P<header>.*?)^---[ \t]*\r?\n', markdown, re.M | re.S)
     if not front:
         raise ValueError('Skill YAML 头部无效')
     header = front.group('header')
+    if allow_missing_metadata:
+        # Imported drafts may predate platform metadata. Adapt the presentation
+        # without rewriting the stored source file or changing published rules.
+        import yaml
+        parsed = yaml.safe_load(header)
+        if not isinstance(parsed, dict):
+            raise ValueError('Skill YAML 头部无效')
+        metadata = parsed.get('metadata')
+        metadata = dict(metadata) if isinstance(metadata, dict) else {}
+        metadata['version'] = version or '-'
+        parsed['metadata'] = metadata
+        header = yaml.safe_dump(parsed, allow_unicode=True, sort_keys=False)
+        return markdown[:front.start('header')] + header + markdown[front.end('header'):]
     metadata = re.search(r'^metadata:[ \t]*\r?\n(?P<body>(?:[ \t]+[^\r\n]*\r?\n|\r?\n)*)', header, re.M)
     if not metadata:
         raise ValueError('Skill 缺少 metadata')

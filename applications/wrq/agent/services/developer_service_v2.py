@@ -1,6 +1,7 @@
 """开发者中心事务入口；正文一版一份，任务只登记版本关联。"""
 from datetime import datetime
 import hashlib
+import unicodedata
 from tortoise.transactions import in_transaction
 from tortoise.exceptions import IntegrityError
 from applications.wrq.agent.models.agent_model import (
@@ -151,8 +152,23 @@ class DeveloperSkillCrud:
             if not category or row.get('category') != category.name:
                 raise DeveloperError('请选择并保存资源用途分类', field='uploaded_resources')
             files.append(file)
-        if len({f.id for f in files}) != len(files):
+        keys = []
+        for row, file in zip(data.uploaded_resources, files):
+            relative = row.get('relativePath')
+            if relative:
+                from .skill_package_builder import safe_relative_path
+                try:
+                    safe_relative_path(relative)
+                except ValueError as exc:
+                    raise DeveloperError(str(exc), field='uploaded_resources') from exc
+                if relative.casefold() == 'skill.md':
+                    raise DeveloperError('附件不能覆盖SKILL.md', field='uploaded_resources')
+            keys.append(unicodedata.normalize('NFKC', relative).casefold() if relative else f'file:{file.id}')
+        if len(set(keys)) != len(keys):
             raise DeveloperError('不能重复挂载同一文件', field='uploaded_resources')
+        paths = [key for row, key in zip(data.uploaded_resources, keys) if row.get('relativePath')]
+        if any(a.startswith(b + '/') or b.startswith(a + '/') for i,a in enumerate(paths) for b in paths[i+1:]):
+            raise DeveloperError('附件文件路径与目录冲突', field='uploaded_resources')
         if sum(f.byte_size for f in files) > 50*1024*1024 or any(f.byte_size > 50*1024*1024 for f in files):
             raise DeveloperError('单文件及资源总大小不能超过50MB', field='uploaded_resources')
         knowledge=[]
@@ -184,29 +200,33 @@ class DeveloperSkillCrud:
         if expected!=skill.current_revision:
             raise DeveloperError('技能已被修改或缺少版本信息，请刷新后重试',409)
 
-    async def _write(self,skill,data,user,files,knowledge,db,markdown=None,artifacts=None,extra_update_fields=()):
+    async def _write(self,skill,data,user,files,knowledge,db,markdown=None,artifacts=None,extra_update_fields=(),definition_origin="platform"):
         previous_version_id = skill.current_version_id
         published = await SkillVersion.filter(id=skill.published_version_id).using_db(db).first() if skill.published_version_id else None
         version=await SkillVersion.create(using_db=db,skill_id=skill.id,version=published.version if published else None,
             revision=skill.current_revision,create_user_login_name=user_login_name(user),
             update_user_login_name=user_login_name(user))
+        technical=data.technical_name or 'skill-'+hashlib.sha256(str(skill.id).encode()).hexdigest()[:24]
+        if definition_origin == 'import' and markdown:
+            from .skill_definition import sync_definition
+            markdown = sync_definition(markdown, data, technical, version=version.version)
         markdown_path = write_markdown(skill.id, markdown) if markdown else ''
         if markdown_path and artifacts is not None: artifacts.append(markdown_path)
-        technical=data.technical_name or 'skill-'+hashlib.sha256(str(skill.id).encode()).hexdigest()[:24]
         await SkillForm.create(using_db=db,skill_version_id=version.id,name=data.name.strip(),
             skill_class_id=data.class_id,application_paso=data.effective_application_paso,
             description=data.description.strip(),instructions=data.instructions.strip(),
             resource_usage=data.resource_usage or None,compatibility=data.compatibility or None,
-            technical_name=technical,skill_markdown_path=markdown_path)
+            technical_name=technical,skill_markdown_path=markdown_path,definition_origin=definition_origin)
         for index,file in enumerate(files):
             row=data.uploaded_resources[index]
             await SkillResourceBinding.create(using_db=db,skill_id=skill.id,skill_version_id=version.id,
                 source_type='upload',source_id=str(file.id),
-                file_id=file.id,display_name=file.original_name,
+                file_id=file.id,display_name=(row.get('relativePath') or file.original_name).split('/')[-1],relative_path=row.get('relativePath') or None,
+                resource_key=hashlib.sha256(unicodedata.normalize('NFKC', row.get('relativePath') or f'file:{file.id}').casefold().encode()).hexdigest(),
                 usage_text=row.get('usage') or row.get('usage_text'),content_hash=file.sha256,sort_order=index)
         for index,(kid,name) in enumerate(knowledge,len(files)):
             await SkillResourceBinding.create(using_db=db,skill_id=skill.id,skill_version_id=version.id,
-                source_type='knowledge_base',source_id=kid,
+                source_type='knowledge_base',source_id=kid,resource_key=hashlib.sha256(f'knowledge_base:{kid}'.encode()).hexdigest(),
                 display_name=name,usage_text=data.resource_usage or None,sort_order=index)
         skill.name=data.name.strip()
         skill.application_paso=data.effective_application_paso
@@ -228,42 +248,63 @@ class DeveloperSkillCrud:
         artifacts=[]
         try:
             async with in_transaction() as db:
+                await self.lock_name_catalog(db)
                 from .knowledge_notification_service import lock_mount_knowledge
                 await lock_mount_knowledge(None, knowledge_ids(data.resource_ids), db)
-                files,kbs=await self.validate(data,user,db)
-                if not await self.name_available(data.name,connection=db):
-                    raise DeveloperError('该技能名称已存在，请更换',409,'name')
-                skill=await Skill.create(using_db=db,name=data.name.strip(),create_user_login_name=user_login_name(user),
-                    update_user_login_name=user_login_name(user),skill_classes_id=data.class_id,application_paso=data.effective_application_paso)
-                return await self._write(skill,data,user,files,kbs,db,artifacts=artifacts)
+                return await self.create_in_transaction(user,data,db,artifacts=artifacts)
         except BaseException as exc:
             for relative in artifacts: discard_markdown(relative)
             if isinstance(exc, IntegrityError):
                 raise DeveloperError('名称或版本发生冲突，请刷新后重试',409) from exc
             raise
 
+    @staticmethod
+    async def lock_name_catalog(db):
+        # All create/save entry points acquire the same ordered catalog locks before
+        # checking names, including requests choosing different skill classes.
+        await DeveloperSkillClass.all().using_db(db).select_for_update().order_by('id')
+
+    async def create_in_transaction(self,user,data,db,*,artifacts,definition_origin='platform'):
+        await self.lock_name_catalog(db)
+        if not (data.effective_application_paso or '').strip():
+            raise DeveloperError('请选择所属应用', field='application_paso')
+        files,kbs=await self.validate(data,user,db)
+        if not await self.name_available(data.name,connection=db):
+            raise DeveloperError('该技能名称已存在，请更换',409,'name')
+        skill=await Skill.create(using_db=db,name=data.name.strip(),create_user_login_name=user_login_name(user),
+            update_user_login_name=user_login_name(user),skill_classes_id=data.class_id,application_paso=data.effective_application_paso)
+        return await self._write(skill,data,user,files,kbs,db,artifacts=artifacts,
+            markdown=data.skill_markdown if definition_origin == 'import' else None,definition_origin=definition_origin)
+
     async def save(self,skill_id,user,data,*,definition=False):
         artifacts=[]
         try:
             async with in_transaction() as db:
-                from .knowledge_notification_service import lock_mount_knowledge
-                await lock_mount_knowledge(skill_id, knowledge_ids(data.resource_ids), db)
-                skill=await self.get(skill_id,user,db)
-                self.check_revision(skill,data.expected_revision)
-                files,kbs=await self.validate(data,user,db,existing_application=skill.application_paso)
-                if not await self.name_available(data.name,skill.id,db):
-                    raise DeveloperError('该技能名称已存在，请更换',409,'name')
-                skill.current_revision+=1
-                skill.display_status='DRAFT'
-                skill.last_debug_run_id=None
-                return await self._write(skill,data,user,files,kbs,db,
-                    markdown=data.skill_markdown if definition else None,artifacts=artifacts,
-                    extra_update_fields=('current_revision', 'display_status', 'last_debug_run_id'))
+                return await self.save_in_transaction(skill_id,user,data,db,artifacts=artifacts,definition=definition)
         except BaseException as exc:
             for relative in artifacts: discard_markdown(relative)
             if isinstance(exc, IntegrityError):
                 raise DeveloperError('名称或版本发生冲突，请刷新后重试',409) from exc
             raise
+
+    async def save_in_transaction(self,skill_id,user,data,db,*,artifacts,definition=False):
+        await self.lock_name_catalog(db)
+        from .knowledge_notification_service import lock_mount_knowledge
+        await lock_mount_knowledge(skill_id, knowledge_ids(data.resource_ids), db)
+        skill=await self.get(skill_id,user,db)
+        self.check_revision(skill,data.expected_revision)
+        files,kbs=await self.validate(data,user,db,existing_application=skill.application_paso)
+        if not await self.name_available(data.name,skill.id,db):
+            raise DeveloperError('该技能名称已存在，请更换',409,'name')
+        _, previous_form = await version_and_form(skill.current_version_id,db)
+        imported = previous_form.definition_origin == 'import'
+        markdown = (data.skill_markdown or read_markdown(previous_form.skill_markdown_path)) if imported else (data.skill_markdown if definition else None)
+        skill.current_revision+=1
+        skill.display_status='DRAFT'
+        skill.last_debug_run_id=None
+        return await self._write(skill,data,user,files,kbs,db,
+            markdown=markdown,artifacts=artifacts,definition_origin='import' if imported else 'platform',
+            extra_update_fields=('current_revision', 'display_status', 'last_debug_run_id'))
 
     async def delete_draft(self,skill_id,user):
         async with in_transaction() as db:
@@ -437,8 +478,8 @@ class DeveloperSkillCrud:
                 file=await Source.get_or_none(id=binding.file_id)
                 if not file: raise DeveloperError('挂载文件不存在，请核对资源关系',409)
                 category=categories.get(file.category_id,'')
-                files.append({'id':f'file:{file.id}','fileId':file.id,
-                    'name':file.original_name,'size':file.byte_size,'lastModified':0,'category':category,'savedCategory':category,
+                files.append({'id':f'binding:{binding.id}' if binding.relative_path else f'file:{file.id}','fileId':file.id,'relativePath':binding.relative_path,
+                    'name':binding.display_name or file.original_name,'size':file.byte_size,'lastModified':0,'category':category,'savedCategory':category,
                     'downloadUrl':f'/skills/developer/download-resource-file?file_id={file.id}',
                     'usage':binding.usage_text or ''})
         link=await SkillDebugRun.filter(skill_id=skill.id,skill_version_id=version.id,
@@ -459,8 +500,8 @@ class DeveloperSkillCrud:
             'application_paso':form.application_paso,'application_ids':[form.application_paso] if form.application_paso else [],'description':form.description,
             'instructions':form.instructions,'resource_ids':[k['id'] for k in knowledge],
             'resource_usage':form.resource_usage or '','compatibility':form.compatibility or '',
-            'technical_name':form.technical_name,'uploaded_resources':files,'knowledge_bases':knowledge,
-            'skill_markdown':display_skill_version(read_markdown(form.skill_markdown_path), version.version) if include_markdown and form.skill_markdown_path else '', 'version':version.version,'current_revision':version.revision,
+            'definition_origin':form.definition_origin,'technical_name':form.technical_name,'uploaded_resources':files,'knowledge_bases':knowledge,
+            'skill_markdown':display_skill_version(read_markdown(form.skill_markdown_path), version.version, allow_missing_metadata=form.definition_origin == "import") if include_markdown and form.skill_markdown_path else '', 'version':version.version,'current_revision':version.revision,
             'skill_version_id':version.id,'status':page_status,'creator_login_name':skill.create_user_login_name,'updater_login_name':skill.update_user_login_name,
             'creator_name':user.alias or user.username,'updated_at':skill.updated_time,'backend_skill_id':skill.id,
             'build_id':version.build_id,'build_origin':'backend' if version.build_id else None,'debug':debug}

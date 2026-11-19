@@ -25,6 +25,7 @@ async def lifespan(app):
         raise RuntimeError("完整项目本地启动要求关闭 DATABASE_AUTO_MIGRATION")
     online_debug_scheduler = None
     chat_cleanup_task = None
+    skill_import_cleanup_task = None
     try:
         await Tortoise.init(config={
             "connections": wrq_connections(PROJECT_CONFIG.DATABASE_CONNECTIONS),
@@ -57,9 +58,15 @@ async def lifespan(app):
         online_debug_scheduler.start()
         from applications.chat.services.cleanup import cleanup_loop
         chat_cleanup_task = asyncio.create_task(cleanup_loop(), name="chat-cleanup")
+        from applications.wrq.agent.services.skill_import_cleanup import cleanup_loop as import_cleanup_loop
+        skill_import_cleanup_task = asyncio.create_task(import_cleanup_loop(), name="skill-import-cleanup")
         yield
     finally:
         try:
+            if skill_import_cleanup_task is not None:
+                skill_import_cleanup_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await skill_import_cleanup_task
             if chat_cleanup_task is not None:
                 chat_cleanup_task.cancel()
                 with suppress(asyncio.CancelledError):
