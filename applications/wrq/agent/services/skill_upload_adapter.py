@@ -17,8 +17,8 @@ def source_from_developer_form(form: SkillDeveloperForm, filenames: list[str], *
     for field in ("skill_id", "skill_name", "description", "skill_class_id", "instructions"):
         if not getattr(form, field):
             report.missing_fields.append(ValidationIssue(field=field, reason="请补充此字段"))
-    if (filenames or form.knowledge_base_ids) and not form.resource_usage:
-        report.missing_fields.append(ValidationIssue(field="resource_usage", reason="选择知识库或上传资源后，请填写资源使用说明"))
+    if not form.resource_usage.strip():
+        report.missing_fields.append(ValidationIssue(field="resource_usage", reason="请填写资源使用说明"))
     if validate_catalog and form.skill_class_id and form.skill_class_id not in SKILL_CLASS_IDS:
         report.errors.append(ValidationIssue(field="skill_class_id", reason="请选择平台提供的技能大类"))
     if len(form.resource_categories) != len(filenames):

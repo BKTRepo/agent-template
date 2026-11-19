@@ -133,8 +133,8 @@ class DeveloperSkillCrud:
         application_paso = data.effective_application_paso
         if application_paso and application_paso not in apps and application_paso != existing_application:
             raise DeveloperError('请选择应用目录中存在的应用',field='application_paso')
-        if (data.uploaded_resources or data.resource_ids) and not data.resource_usage.strip():
-            raise DeveloperError('已选择挂载知识库或上传资源，请填写资源使用说明',field='resource_usage')
+        if not data.resource_usage.strip():
+            raise DeveloperError('请填写资源使用说明',field='resource_usage')
         files=[]
         for row in data.uploaded_resources:
             file_id = row.get('fileId')

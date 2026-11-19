@@ -37,6 +37,10 @@ Word（DOCX）转 PDF 服务随 Compose 启动，默认地址为 `http://documen
 
 悬浮对话和在线调试使用 Anthropic 协议访问 `http://ccr:3456`，CCR 转成 OpenAI 兼容请求发往内网网关。浏览器访问 `http://部署机内网IP:3458/?ccr_web_token=<CCR_WEB_AUTH_TOKEN>` 打开 CCR 管理页。3456 仅在容器网络内提供服务。CCR 的配置和界面修改保存在 `/zdhgj/keenrobo/ccr`。首次启动会从 `.env` 初始化模型源及凭据。已有部署变更上游时需同时更新 CCR 管理页面和 `.env`，使知识库和 CCR 使用同一配置。
 
+CCR 使用 `keenrobot-ccr:3.1.3-20261119`，通过 `CCR_REQUEST_LOGS_ENABLED=true` 开启请求日志。SQLite 请求日志、正文和跟踪文件位于容器 `/data/.claude-code-router/app-data`，映射到宿主机 `${DATABASE_DATA_ROOT:-/zdhgj/keenrobo}/ccr/.claude-code-router/app-data`。已有 `/data` 根挂载也覆盖这个目录。入口会为已有配置启用请求日志，保留管理页面配置的上游模型和路由。容器重建后继续读取相同宿主机目录。
+
+本版技能描述保存取消 1024 字符限制。已有数据库先执行 `docs/migrations/20261119-skill-description-longtext.sql`，将 `keenrobot_skill_forms.description` 扩展为 LONGTEXT。脚本可重复执行，原描述保留。资源使用说明在新建、保存和调试提交时必填。
+
 知识库的文本模型和向量嵌入直接使用 `INTRANET_OPENAI_BASE_URL`，重排使用该地址下的 `/rerank`。默认网关是 `http://10.240.192.142:30003/v1`，默认模型分别为 `deepseek-v4-flash-local-thinkl`、`bge-m3` 和 `bge-rerank-v2-m3`。
 
 仅升级代码时，在打包机使用 `docker save -o keenrobot-platform-code.tar keenrobot-platform:<新标签>` 导出前后端应用镜像。部署机加载该 tar 后，将 `.env` 的 `PLATFORM_IMAGE` 改为新标签，然后在交付目录运行：

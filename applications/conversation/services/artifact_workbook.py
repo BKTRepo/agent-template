@@ -16,7 +16,7 @@ STANDARD_CASE_HEADER = (
     "案例id", "序号", "案例名称", "描述", "应用系统", "优先级", "正/反", "前置条件", "备注",
     "步骤", "预期值", "创建人", "创建时间", "维护人", "维护时间", "案例目录", "案例类型", "案例标签",
 )
-STANDARD_CASE_COLUMNS = {"id": 1, "sequence": 2, "name": 3, "preconditions": 8, "steps": 10, "expected": 11, "group": 17}
+STANDARD_CASE_COLUMNS = {"id": 1, "sequence": 2, "name": 3, "description": 4, "preconditions": 8, "steps": 10, "expected": 11, "group": 17}
 MAX_ROWS = 5000
 MAX_EXPANDED_BYTES = 64 * 1024 * 1024
 
@@ -31,6 +31,7 @@ class TestCase(BaseModel):
     id: str = Field(min_length=1, max_length=128)
     group: str = Field(max_length=128)
     name: str = Field(min_length=1, max_length=256)
+    description: str | None = None
     preconditions: str = Field(max_length=8000)
     steps: list[CaseStep] = Field(max_length=MAX_ROWS)
     expected: str | None = Field(default=None, max_length=8000)
@@ -81,6 +82,7 @@ def _read_sheet(book, title, header):
 FLAT_HEADERS = {
     "id": {"用例编号", "案例编号", "case_id", "test_case_id"},
     "name": {"案例名称", "用例名称", "测试用例名称", "用例标题", "标题", "title", "name"},
+    "description": {"案例描述", "用例描述", "描述", "description"},
     "preconditions": {"前置条件", "前提条件", "preconditions"},
     "steps": {"步骤", "操作步骤", "测试步骤", "操作内容", "steps"},
     "expected": {"预期结果", "预期", "expected", "expected_result"},
@@ -135,7 +137,7 @@ def _read_flat(book, *, standard_only=False):
                 key = f"sheet:{sheet_index}:{sha256(key.encode('utf-8')).hexdigest()}"
             steps = [CaseStep(id=str(i), action=line) for i, line in
                      enumerate((line for line in value("steps").splitlines() if line.strip()), 1)]
-            cases[key] = TestCase(id=key, name=value("name"), group=value("group"),
+            cases[key] = TestCase(id=key, name=value("name"), description=value("description"), group=value("group"),
                 preconditions=value("preconditions"), expected=value("expected"), steps=steps,
                 sheet_index=sheet_index, sheet_name=sheet_name)
             if len(cases) > MAX_ROWS:
@@ -225,7 +227,9 @@ def update_workbook(content: bytes, updated: list[TestCase]) -> bytes:
                 sheet_name, row = case_rows[key]
                 sheet = book[sheet_name]
                 columns = flat[sheet_name]
-                for field in ('name', 'preconditions', 'expected', 'steps'):
+                for field in ('name', 'description', 'preconditions', 'expected', 'steps'):
+                    if field == 'description' and case.description is None:
+                        continue
                     if field in columns:
                         text = '\n'.join(step.action for step in case.steps) if field == 'steps' else getattr(case, field) or ''
                         _write_text(sheet, row, columns[field], text)

@@ -33,7 +33,7 @@ class SkillPackageSource(BaseModel):
 
     name: str = Field(default="", max_length=64, description="Skill 技术名")
     display_name: str = Field(default="", max_length=128)
-    description: str = Field(default="", max_length=1024)
+    description: str = Field(default="")
     instructions: str = Field(default="", max_length=100_000)
     compatibility: str = Field(
         default="", max_length=500,
@@ -75,7 +75,7 @@ class SkillDeveloperForm(BaseModel):
 
     skill_id: int | None = Field(default=None, ge=1, le=2147483647)
     skill_name: str = Field(default="", max_length=128)
-    description: str = Field(default="", max_length=1024)
+    description: str = Field(default="")
     version: str = Field(default="", max_length=64)
     skill_class_id: int | str = Field(default="")
     application_paso: str | None = Field(default=None, max_length=100,

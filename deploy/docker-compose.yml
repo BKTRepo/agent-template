@@ -49,7 +49,7 @@ x-backend: &backend
 
 services:
   ccr:
-    image: ${CCR_IMAGE:-keenrobot-ccr:3.1.3}
+    image: ${CCR_IMAGE:-keenrobot-ccr:3.1.3-20261119}
     pull_policy: never
     init: true
     restart: unless-stopped
@@ -59,9 +59,12 @@ services:
       CCR_UPSTREAM_API_KEY: ${INTRANET_MODEL_API_KEY}
       CCR_PLATFORM_API_KEY: ${CHAT_CCR_API_KEY:?Set CHAT_CCR_API_KEY}
       CCR_WEB_AUTH_TOKEN: ${CCR_WEB_AUTH_TOKEN:?Set CCR_WEB_AUTH_TOKEN}
+      CCR_REQUEST_LOGS_ENABLED: ${CCR_REQUEST_LOGS_ENABLED:-true}
     ports:
       - "${CCR_WEB_BIND_ADDRESS:-0.0.0.0}:${CCR_WEB_PORT:-3458}:3458"
-    volumes: ["${DATABASE_DATA_ROOT:-/zdhgj/keenrobo}/ccr:/data"]
+    volumes:
+      - "${DATABASE_DATA_ROOT:-/zdhgj/keenrobo}/ccr:/data"
+      - "${DATABASE_DATA_ROOT:-/zdhgj/keenrobo}/ccr/.claude-code-router/app-data:/data/.claude-code-router/app-data"
     networks: [default, sandbox]
     healthcheck:
       test: ["CMD", "node", "-e", "Promise.all(['http://127.0.0.1:3458/', 'http://127.0.0.1:3456/health'].map(url => fetch(url))).then(results => process.exit(results.every(result => result.ok) ? 0 : 1)).catch(() => process.exit(1))"]

@@ -51,7 +51,8 @@ async def _model_groups(cases):
     from applications.knowledge_base.rag.llm import chat_completion
 
     sample = [{
-        "id": case["id"], "name": case["name"], "preconditions": case["preconditions"][:120],
+        "id": case["id"], "name": case["name"], "description": (case.get("description") or "")[:160],
+        "preconditions": case["preconditions"][:120],
         "sheet_name": case.get("sheet_name"),
         "steps": [step["action"][:80] for step in case["steps"][:3]],
         "expected": (case["expected"] or "")[:120],

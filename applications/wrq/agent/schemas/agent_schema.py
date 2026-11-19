@@ -43,7 +43,7 @@ class SkillOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-SkillDescription = Annotated[str, Field(max_length=1024)]
+SkillDescription = str
 SkillInstructions = Annotated[str, Field(max_length=100000)]
 SkillResourceUsage = Annotated[str, Field(max_length=10000)]
 SkillCompatibility = Annotated[str, Field(max_length=500)]
@@ -68,7 +68,7 @@ class DeveloperSkillForm(BaseModel):
     description: SkillDescription = Field(min_length=1)
     instructions: SkillInstructions = Field(min_length=1)
     resource_ids: list[str | int] = Field(default_factory=list)
-    resource_usage: SkillResourceUsage = ""
+    resource_usage: SkillResourceUsage = Field(min_length=1)
     compatibility: SkillCompatibility = ""
     technical_name: str = Field(default="", max_length=128)
     uploaded_resources: list[dict[str, Any]] = Field(default_factory=list)
