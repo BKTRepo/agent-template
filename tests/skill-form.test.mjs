@@ -3,7 +3,16 @@ import assert from 'node:assert/strict'
 import { debugDocumentLimits, documentExtensions, skillResourceExtensions, validateSkillForm, validateResourceFiles, knowledgeFileLimits, knowledgeExtensions } from '../src/lib/skillForm.ts'
 import { nextVersion } from '../src/lib/version.ts'
 import { withSystemVersion } from '../src/lib/skillModel.ts'
-const form = (changes = {}) => ({ classId: 'SKILL-CASE-001', name: '新技能', description: '生成业务用例', version: '', instructions: '生成业务用例', resourceIds: [], uploadedResources: [], ...changes })
+const form = (changes = {}) => ({ classId: 'SKILL-CASE-001', name: '新技能', description: '生成业务用例', version: '', instructions: '生成业务用例', resourceUsage: '执行时处理业务资源', applicationIds: ['APP'], resourceIds: [], uploadedResources: [], ...changes })
+
+test('完整描述可超过旧字符限制，资源使用说明在无附件时也必须填写', () => {
+ const values = form({ description: '完整技能描述'.repeat(20000) })
+ assert.deepEqual(validateSkillForm(values, []), {})
+ for (const resourceUsage of [undefined, '', '  ']) {
+  assert.ok(validateSkillForm({ ...values, resourceUsage }, [], undefined, true).resourceUsage)
+  assert.ok(validateSkillForm({ ...values, resourceUsage }, [], undefined, false).resourceUsage)
+ }
+})
 
 test('资源用途按当前字典校验，允许新增分类并拒绝缺失或停用的选择', () => {
  const categories = [{ id: 9, code: 'test_data', name: '业务测试数据' }]
@@ -27,7 +36,7 @@ test('定稿必填项在保存与调试时均校验，版本由系统生成，�
  }
 })
 test('每份资源分类与资源使用说明必填，所属应用不可多选', () => {
- assert.ok(validateSkillForm(form({ resourceIds:['kb'] }), []).resourceUsage)
+ assert.ok(validateSkillForm(form({ resourceIds:['kb'], resourceUsage:'' }), []).resourceUsage)
  assert.ok(validateSkillForm(form({ uploadedResources:[{ name:'a.py',size:1 }], resourceUsage:'校验' }), []).uploadedResources)
  for(const category of ['参考资料','模板','静态资源','脚本']) assert.deepEqual(validateSkillForm(form({ uploadedResources:[{ name:'a.py',size:1,category }],resourceUsage:'校验' }), []),{})
  assert.ok(validateSkillForm(form({ applicationIds:['ATPM','FNP'] }), []).applicationIds)

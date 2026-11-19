@@ -22,11 +22,10 @@ export function validateSkillForm(form: ImplementationForm, existing: { id: stri
   else if (existing.some(item => item.id !== id && (normalizedName(item.name) === normalizedName(form.name) || (item.pendingChanges && normalizedName(item.pendingChanges.name) === normalizedName(form.name))))) errors.name = '该技能名称已存在，请更换'
   if (form.name.trim().length > 128) errors.name = '技能名称最长 128 个字符'
   if (!form.description?.trim()) errors.description = '请填写描述'
-  if ((form.description?.length ?? 0) > 1024) errors.description = '描述最长 1024 个字符'
   // 草稿可保存未填写完的指令和使用说明；进入调试前执行完整校验。
   if (!form.instructions.trim()) errors.instructions = '请填写执行指令'
   if (form.instructions.length > 100000) errors.instructions = '执行指令最长 100000 个字符'
-  if ((form.resourceIds.length > 0 || (form.uploadedResources?.length ?? 0) > 0) && !form.resourceUsage?.trim()) errors.resourceUsage = '已选择挂载知识库或上传资源，请填写资源使用说明'
+  if (!form.resourceUsage?.trim()) errors.resourceUsage = '请填写资源使用说明'
   if (hasDuplicateKnowledge(form.resourceIds) || hasDuplicateKnowledge((form.knowledgeBases ?? []).map(row => row.id))) errors.resourceIds = '同一个技能不能重复挂载同一个知识库'
   if (form.uploadedResources?.some(file => !file.category?.trim() || (categories && !categories.some(option => option.name === file.category)))) errors.uploadedResources = '请为每份上传资源选择已启用的用途分类'
   if (form.uploadedResources?.some(file => file.size > skillResourceLimits.maxFileBytes!) || (form.uploadedResources ?? []).reduce((sum, file) => sum + file.size, 0) > skillResourceLimits.maxTotalBytes!) errors.uploadedResources = '单个资源文件及资源总大小均不能超过 50 MB'

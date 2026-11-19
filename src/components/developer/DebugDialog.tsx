@@ -55,7 +55,10 @@ export default function DebugDialog({ item, onClose, onEdit, onPublish, onSaveDe
   const markdown = item.buildOrigin === 'backend' ? item.skillMarkdown || definition?.map(([label,value]) => `## ${label}\n${value}`).join('\n\n') || '' : renderSkillMarkdown(item)
   const mounted = item.knowledgeBases ?? []
   const mountedResources = [...mounted.map(row => ({ id: `knowledge:${row.id}`, name: row.name, version: row.version })), ...(item.buildOrigin === 'backend' ? (item.build?.files ?? []).filter(row => !['SKILL.md', 'manifest.json'].includes(row.path)).map(row => ({ id: row.path, name: row.path, version: undefined })) : (item.uploadedResources ?? []).map(row => ({ ...row, version: undefined })))]
-  function change(value: DebugInput) { setInput(value); setError(''); setResult(undefined); void onResult(undefined) }
+  function change(value: DebugInput) {
+    setInput(value); setError('')
+    if (!item.catalog) { setResult(undefined); void onResult(undefined) }
+  }
   function addDocuments(selected: File[]) {
     const result = validateResourceFiles(selected, input.documents, documentExtensions, debugDocumentLimits)
     const accepted = realtimeDebugEnabled ? result.accepted.slice(0, Math.max(0, debugDocumentLimit - input.documents.length)) : result.accepted
@@ -129,7 +132,7 @@ export default function DebugDialog({ item, onClose, onEdit, onPublish, onSaveDe
     <ResourceUpload label="文档输入（上传文件）" hint="拖拽或点击上传需求文档" extensions={documentExtensions} limits={debugDocumentLimits} items={input.documents} activeIds={files.map(row => row.id)} disabled={locked} onAdd={addDocuments} onRemove={id => { setFiles(previous => previous.filter(row => row.id !== id)); change({ ...input, documents: input.documents.filter(row => row.id !== id) }) }} />
     <div className="form-field"><span>挂载资源（本次调试关联，只读确认）</span>{mountedResources.map(row => <div className="resource-row" key={row.id}><span>{row.name}{row.version && <small> · {row.version}</small>}</span><span className="status-tag blue">已挂载</span></div>)}{!mountedResources.length && <p className="helper-text">未挂载资源</p>}</div>
     <div ref={resultRef}><DebugResult result={result} running={running} downloading={busy === 'document'} onRetry={result?.runId ? retryDocument : undefined} onResume={!busy && result?.runId ? resume : undefined} /></div>
-    <p className="helper-text">运行调试将提交 Skill 定义、对话输入与原始文件；完成后可下载结果文档。最多10份需求文档、20份挂载资源。</p>
+    <p className="helper-text">关闭窗口或页面后，已提交的调试任务继续执行；重新打开时显示最新任务及结果。最多10份需求文档、20份挂载资源。</p>
     {error && editor === null && <p className="error-banner" role="alert">{error}{result?.runId && !busy && <button className="button small" onClick={resume}>继续查询</button>}</p>}
   </Dialog>{editor !== null && <Dialog wide title="编辑 Skill 定义（Markdown）" busy={!!busy} onClose={closeEditor} footer={discard ? <><span role="alert">存在未保存修改，确认放弃？</span><button className="button" onClick={() => setDiscard(false)}>继续编辑</button><button className="button danger" onClick={() => { setEditor(null); setDiscard(false) }}>放弃修改</button></> : <><button className="button" disabled={!!busy} onClick={closeEditor}>取消</button><button className="button primary" disabled={!!busy} onClick={saveDefinition}>{busy ? '保存中…' : '保存'}</button></>}><p className="helper-text">保存后同步至我创建的技能，旧调试结果失效；重新上线时系统生成新版本。</p><textarea className="markdown-editor" aria-label="Markdown Skill 定义" maxLength={200000} value={editor} disabled={!!busy} onChange={event => setEditor(event.target.value)} spellCheck={false} />{error && <p className="error-banner" role="alert">{error}</p>}</Dialog>}</>
 }

@@ -85,7 +85,9 @@ export default function CaseMindMap({ title, groups, selectedId, disabled, onSel
                 <h3>{point}</h3><small>{items.length} 条用例</small></div>
               <div className="artifact-case-leaves">{items.map(item => <div className="artifact-case-leaf" key={item.id}>
                 <button type="button" aria-expanded={item.id === selectedId} disabled={disabled}
-                  onClick={() => onSelect(item.id)}><FileText size={16} aria-hidden="true" />{item.name}</button>
+                  title={item.description?.trim() || item.name}
+                  onClick={() => onSelect(item.id)}><FileText size={16} aria-hidden="true" />
+                  <span className="artifact-case-node-text">{item.description?.trim() || item.name}</span></button>
                 {item.id === selectedId && actions(item)}
               </div>)}</div>
             </section>)}</div>

@@ -4,7 +4,7 @@ import Dialog from '@/components/developer/Dialog'
 import type { CellEdit, EditableCellType, SheetArtifact, SheetCell, SheetPage } from '@/types/assistantArtifact'
 
 const ROW_LIMIT = 25
-const COLUMN_LIMIT = 12
+const COLUMN_LIMIT = 20
 const cellTypes: { id: EditableCellType; label: string }[] = [
   { id: 'text', label: '文本' }, { id: 'number', label: '数字' }, { id: 'boolean', label: '布尔值' },
   { id: 'formula', label: '公式' }, { id: 'blank', label: '清空单元格' },
@@ -18,6 +18,7 @@ export default function ArtifactSpreadsheet({ artifact, editing, changes, onChan
   const [columnOffset, setColumnOffset] = useState(0)
   const [page, setPage] = useState<SheetPage>()
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
   const [retry, setRetry] = useState(0)
   const [cell, setCell] = useState<{ original: SheetCell; type: EditableCellType; value: string }>()
   const sheet = artifact.sheets.find(row => row.index === index)
@@ -26,11 +27,16 @@ export default function ArtifactSpreadsheet({ artifact, editing, changes, onChan
 
   useEffect(() => {
     const controller = new AbortController()
-    setPage(undefined)
+    if (offset === 0) setPage(undefined)
     setError('')
+    setLoading(true)
     if (hasSheet) void getArtifactSheet({ artifactId, baseHash }, index, offset, columnOffset, controller.signal)
-      .then(result => { if (!controller.signal.aborted) setPage(result) })
+      .then(result => {
+        if (!controller.signal.aborted) setPage(previous => offset > 0 && previous
+          ? { ...result, offset: 0, rows: [...previous.rows, ...result.rows] } : result)
+      })
       .catch(reason => { if (!controller.signal.aborted) setError((reason as Error).message) })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => controller.abort()
   }, [artifactId, baseHash, hasSheet, index, offset, columnOffset, retry])
 
@@ -51,15 +57,22 @@ export default function ArtifactSpreadsheet({ artifact, editing, changes, onChan
       <label>工作表 <select aria-label="选择工作表" value={index} onChange={event => {
         setIndex(Number(event.target.value)); setOffset(0); setColumnOffset(0)
       }}>{artifact.sheets.map(row => <option key={row.index} value={row.index}>{row.name}</option>)}</select></label>
-      <button className="button small" type="button" disabled={!offset} onClick={() => setOffset(Math.max(0, offset - ROW_LIMIT))}>上一组行</button>
-      <button className="button small" type="button" disabled={offset + ROW_LIMIT >= Math.min(sheet.rows + 1, 1048576)} onClick={() => setOffset(offset + ROW_LIMIT)}>下一组行</button>
-      <button className="button small" type="button" disabled={!columnOffset} onClick={() => setColumnOffset(Math.max(0, columnOffset - COLUMN_LIMIT))}>上一组列</button>
-      <button className="button small" type="button" disabled={columnOffset + COLUMN_LIMIT >= Math.min(sheet.columns + 1, 16384)} onClick={() => setColumnOffset(columnOffset + COLUMN_LIMIT)}>下一组列</button>
+      <button className="button small" type="button" disabled={loading || !columnOffset} onClick={() => {
+        setColumnOffset(Math.max(0, columnOffset - COLUMN_LIMIT)); setOffset(0); setPage(undefined)
+      }}>上一组列</button>
+      <button className="button small" type="button" disabled={loading || columnOffset + COLUMN_LIMIT >= Math.min(sheet.columns + 1, 16384)} onClick={() => {
+        setColumnOffset(columnOffset + COLUMN_LIMIT); setOffset(0); setPage(undefined)
+      }}>下一组列</button>
       <span className="helper-text">{editing ? '点击单元格修改内容或数据类型。' : `${sheet.rows} 行 · ${sheet.columns} 列`}</span>
     </div>
-    {error ? <div className="error-banner" role="alert">{error} <button className="button small" onClick={() => setRetry(value => value + 1)}>重试</button></div>
-      : !page ? <p className="empty-table" role="status">正在读取工作表…</p>
-        : <div className="artifact-sheet-scroll"><table aria-label={sheet.name}><thead><tr><th scope="col">#</th>{page.columns.map(column => <th scope="col" key={column}>{column}</th>)}</tr></thead>
+    {error && <div className="error-banner" role="alert">{error} <button className="button small" disabled={loading} onClick={() => setRetry(value => value + 1)}>重试</button></div>}
+    {!page && loading && <p className="empty-table" role="status">正在读取工作表…</p>}
+    {page && <div className="artifact-sheet-scroll" tabIndex={0} aria-label={`${sheet.name} 表格滚动区域`} onScroll={event => {
+      const element = event.currentTarget
+      if (!loading && !error && page.rows.length < sheet.rows && element.scrollHeight - element.scrollTop - element.clientHeight < 120) {
+        setOffset(offset + ROW_LIMIT)
+      }
+    }}><table aria-label={sheet.name}><thead><tr><th scope="col">#</th>{page.columns.map(column => <th scope="col" key={column}>{column}</th>)}</tr></thead>
           <tbody>{page.rows.map((row, rowIndex) => <tr key={rowIndex}><th scope="row">{page.offset + rowIndex + 1}</th>
             {row.map(original => {
               const draft = changes[`${index}:${original.address}`]
@@ -71,7 +84,10 @@ export default function ArtifactSpreadsheet({ artifact, editing, changes, onChan
                 })}>{content || ' '}</button> : content}
               </td>
             })}
-          </tr>)}</tbody></table></div>}
+          </tr>)}</tbody></table>
+          {loading && <p className="helper-text" role="status">正在读取更多行…</p>}
+          {!loading && !error && page.rows.length < sheet.rows && <button className="button small" onClick={() => setOffset(offset + ROW_LIMIT)}>加载更多行</button>}
+        </div>}
     {cell && <Dialog title={`编辑单元格 ${cell.original.address}`} onClose={() => setCell(undefined)}
       footer={<><button className="button" onClick={() => setCell(undefined)}>取消</button>
         <button className="button primary" disabled={invalid} onClick={confirmCell}>确认单元格</button></>}>

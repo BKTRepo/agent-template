@@ -139,6 +139,37 @@ test('在线测试恢复最新的运行或失败状态，暂无任务时清空�
   })
 })
 
+test('关闭页面停止前端查询，已提交的在线测试继续执行并在重开后恢复最新结果', async () => {
+  const controller = new AbortController()
+  let created = 0
+  const requests = []
+  await mocked(async (url, options) => {
+    requests.push(url.pathname)
+    if (url.pathname.endsWith('get-skill')) return success(row())
+    if (url.pathname.endsWith('create-test-run')) {
+      created++
+      assert.equal(options.signal, undefined)
+      controller.abort()
+      return Response.json({ run_id: 'running-after-close', skill_id: 101, status: 'running', documents: [] })
+    }
+    if (url.pathname.endsWith('latest-run')) return Response.json({ run_id: 'running-after-close', skill_id: 101,
+      status: 'completed', documents: [{ filename: 'latest.txt',
+        download_url: '/realtime-test-case-gen/runs/document?run_id=running-after-close&filename=latest.txt' }] })
+    assert.equal(url.pathname, '/realtime-test-case-gen/runs/document')
+    return new Response('Completed after page closed', { headers: { 'content-type': 'text/plain' } })
+  }, async () => {
+    const item = { id: '101', backendSkillId: '101', name: 'Published skill', catalog: true,
+      buildId: 'published-build', skillVersionId: 30, resourceIds: [], build: { files: [] } }
+    await assert.rejects(runRealtimeDebug(item, { conversation: 'Run', documents: [] }, '# Definition', [], controller.signal), { name: 'AbortError' })
+    const restored = await restoreRealtimeDebug(item)
+    assert.equal(restored.status, 'passed')
+    assert.equal(restored.runId, 'running-after-close')
+    assert.equal(restored.artifacts[0].name, 'latest.txt')
+    assert.equal(created, 1)
+    assert.equal(requests.some(path => /cancel|stop/.test(path)), false)
+  })
+})
+
 test('创建响应丢失后复用调用编号，成功后的下一次调用生成新编号', async () => {
   const ids = []
   await mocked(async (url, options) => {

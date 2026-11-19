@@ -14,6 +14,7 @@ export interface TestCase {
   group: string
   name: string
   preconditions: string
+  description?: string | null
   steps: { id: string; action: string; expected?: string }[]
   expected?: string
   sheet_index?: number | null

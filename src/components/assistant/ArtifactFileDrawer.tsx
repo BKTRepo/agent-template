@@ -72,7 +72,7 @@ export default function ArtifactFileDrawer({ artifact, onClose, toolbar, actionB
             else updated[id] = value
             return updated
           })} />}
-        {saved.editor === 'sheet' && <ArtifactSpreadsheet artifact={saved} editing={editing && !blocked} changes={cells}
+        {saved.editor === 'sheet' && <ArtifactSpreadsheet key={`${saved.artifactId}:${saved.baseHash}`} artifact={saved} editing={editing && !blocked} changes={cells}
           onChange={(edit, original) => setCells(previous => {
             const key = `${edit.sheet_index}:${edit.address}`
             const updated = { ...previous }

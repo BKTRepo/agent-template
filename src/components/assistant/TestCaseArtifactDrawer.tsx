@@ -117,7 +117,7 @@ export default function TestCaseArtifactDrawer({ artifact, onSave, checkArchived
       {(error || actionError) && <p className="error-banner artifact-case-error" role="alert">{error || actionError}</p>}
       {saved.groupingError && <p className="error-banner" role="alert">{saved.groupingError}</p>}
       {view === 'sheet' && saved.sheets?.length ?
-        <ArtifactSpreadsheet artifact={{ ...saved, editor: 'sheet', sheets: saved.sheets }} editing={false} changes={{}} onChange={() => {}} />
+        <ArtifactSpreadsheet key={`${saved.artifactId}:${saved.baseHash}`} artifact={{ ...saved, editor: 'sheet', sheets: saved.sheets }} editing={false} changes={{}} onChange={() => {}} />
         : !groups.length ? <p className="empty-table">暂无测试案例</p> : view === 'map' ?
         <CaseMindMap title={saved.name} groups={groups} selectedId={selectedId} disabled={blocked}
           onSelect={id => { setSelectedId(id); setEditing(cases.find(item => item.id === id)) }} actions={actions} /> :
@@ -125,6 +125,7 @@ export default function TestCaseArtifactDrawer({ artifact, onSave, checkArchived
         <h3>{items[0].sheet_name && `${items[0].sheet_name} · `}{title}</h3>
         {items.map(item => <article key={item.id}>
           <header><h4>{item.name}</h4>{actions(item)}</header>
+          {item.description && <p>{item.description}</p>}
           <dl><dt>前置条件</dt><dd>{item.preconditions || '—'}</dd></dl>
           <ol>{item.steps.map(step => <li key={step.id}>{step.action}
             {step.expected != null && <p>预期结果 · {step.expected || '—'}</p>}</li>)}</ol>
@@ -143,6 +144,7 @@ export default function TestCaseArtifactDrawer({ artifact, onSave, checkArchived
         setEditing(undefined)
       }}>
         <label>案例名称<input required value={editing.name} onChange={event => setEditing({ ...editing, name: event.target.value })} /></label>
+        <label>案例描述<textarea value={editing.description ?? ''} onChange={event => setEditing({ ...editing, description: event.target.value })} /></label>
         <label>前置条件<textarea aria-label="前置条件" value={editing.preconditions} onChange={event => setEditing({ ...editing, preconditions: event.target.value })} /></label>
         {editing.steps.map((step, index) => <fieldset key={step.id}>
           <legend>步骤 {index + 1}</legend>

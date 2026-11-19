@@ -83,7 +83,7 @@ export async function saveOrdinaryArtifact(revision: ArtifactRevision, changes: 
 
 export function getArtifactSheet(revision: ArtifactRevision, index: number, offset: number, columnOffset: number, signal: AbortSignal) {
   const query = new URLSearchParams({ artifact_id: revision.artifactId, base_hash: revision.baseHash,
-    sheet_index: String(index), offset: String(offset), column_offset: String(columnOffset) })
+    sheet_index: String(index), offset: String(offset), column_offset: String(columnOffset), limit: '25', column_limit: '20' })
   return request<SheetPage>(`/sheet?${query}`, undefined, signal)
 }
 
