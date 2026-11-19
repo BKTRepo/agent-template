@@ -103,6 +103,7 @@ class SkillForm(models.Model):
     compatibility = fields.TextField(null=True, description="运行环境要求")
     skill_markdown_path = fields.CharField(max_length=200, default="", description="Skill定义受控相对路径；未生成为空")
     technical_name = fields.CharField(max_length=128, default="", description="该版Skill技术名称")
+    definition_origin = fields.CharField(max_length=16, default="platform")
     class Meta:
         table = "keenrobot_skill_forms"
 
@@ -148,6 +149,8 @@ class SkillResourceBinding(models.Model):
     source_id = fields.IntField(null=True, description="来源对象整数编号")
     file_id = fields.IntField(null=True, description="上传文件编号；整库挂载为空")
     display_name = fields.CharField(max_length=255, default="", description="挂载时展示名称")
+    relative_path = fields.CharField(max_length=255, null=True)
+    resource_key = fields.CharField(max_length=64, null=True)
     usage_text = fields.TextField(null=True, description="单项资源使用说明")
     content_hash = fields.CharField(max_length=64, null=True, description="挂载内容校验摘要")
     knowledge_mount_revision = fields.IntField(null=True, description="本次连续挂载的知识库版本基线")
@@ -158,7 +161,7 @@ class SkillResourceBinding(models.Model):
     class Meta:
         table = "keenrobot_skill_resource_bindings"
         indexes = (("source_type", "source_id"),)
-        unique_together = (("skill_version_id", "source_type", "source_id"), ("skill_version_id", "file_id"))
+        unique_together = (("skill_version_id", "resource_key"),)
 
 class SkillDebugRun(models.Model):
     id = fields.IntField(pk=True, description="我方任务关联自增主键")
@@ -233,3 +236,28 @@ class SkillKnowledgeNotification(models.Model):
     class Meta:
         table = "keenrobot_skill_knowledge_notifications"
         unique_together = (("recipient_user_id", "skill_id", "knowledge_base_id"),)
+
+
+class SkillImportBatch(models.Model):
+    id = fields.CharField(pk=True, max_length=32)
+    owner_login = fields.CharField(max_length=10, index=True)
+    upload_mode = fields.CharField(max_length=16)
+    expires_at = fields.DatetimeField()
+    created_time = fields.DatetimeField(auto_now_add=True)
+    class Meta:
+        table = "keenrobot_skill_import_batches"
+
+
+class SkillImportItem(models.Model):
+    id = fields.CharField(pk=True, max_length=32)
+    batch_id = fields.CharField(max_length=32, index=True)
+    root_path = fields.CharField(max_length=255)
+    default_name = fields.CharField(max_length=128)
+    payload = fields.JSONField(default=dict)
+    status = fields.CharField(max_length=16, default="READY")
+    errors = fields.JSONField(default=list)
+    selection = fields.JSONField(default=dict)
+    skill_id = fields.IntField(null=True)
+    created_time = fields.DatetimeField(auto_now_add=True)
+    class Meta:
+        table = "keenrobot_skill_import_items"

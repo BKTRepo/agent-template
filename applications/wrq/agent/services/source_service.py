@@ -10,6 +10,7 @@ from applications.wrq.agent.models.agent_model import Source, ResourceCategory
 from applications.wrq.auth import user_login_name
 from applications.wrq.agent.services.developer_skill_crud import DeveloperError
 from applications.wrq.agent.services.skill_resource_rules import resource_role
+from applications.wrq.agent.services.skill_package_builder import safe_relative_path
 from configure import PROJECT_CONFIG
 
 MAX_BYTES = 50 * 1024 * 1024
@@ -30,7 +31,9 @@ class SourceService:
             for upload, category in zip(files, categories):
                 name = upload.filename or ''
                 try:
-                    resource_role(name)
+                    safe_relative_path(name)
+                    if '/' in name:
+                        raise ValueError('上传文件名不能包含目录路径')
                 except ValueError as exc:
                     raise DeveloperError(str(exc)) from exc
                 path = self.root / (uuid.uuid4().hex + Path(name).suffix.lower())
@@ -44,8 +47,16 @@ class SourceService:
                             raise DeveloperError('单文件及资源总大小不能超过50MB')
                         await stream.write(chunk)
                         digest.update(chunk)
-                if not size:
-                    raise DeveloperError('不能上传空文件')
+                # 已导入的附件可重新分类，包括 JSON/YAML 和空的 __init__.py。
+                # 新文件仍遵守普通上传入口的扩展名限制。
+                owned = await Source.filter(create_user_login_name=login, sha256=digest.hexdigest(), state='ACTIVE').exists()
+                if not owned:
+                    try:
+                        resource_role(name)
+                    except ValueError as exc:
+                        raise DeveloperError(str(exc)) from exc
+                    if not size:
+                        raise DeveloperError('不能上传空文件')
                 staged.append((name, path, size, category, digest.hexdigest()))
             results = []
             async with in_transaction() as db:
@@ -55,12 +66,13 @@ class SourceService:
                     kind = mapping.get(category)
                     if kind is None:
                         raise DeveloperError('请选择有效的资源用途分类')
-                    owned_source = Source.filter(
-                        create_user_login_name=login, category_id=kind.id, sha256=digest, state='ACTIVE',
-                    ).using_db(db)
-                    source = await owned_source.first()
+                    source = await Source.filter(create_user_login_name=login, category_id=kind.id, sha256=digest).using_db(db).first()
                     if source:
-                        path.unlink(missing_ok=True)
+                        if source.state == 'ACTIVE' and Path(source.storage_key).is_file():
+                            path.unlink(missing_ok=True)
+                        else:
+                            source.storage_key, source.state, source.deleted_at = str(path), 'ACTIVE', None
+                            await source.save(using_db=db, update_fields=['storage_key', 'state', 'deleted_at'])
                     else:
                         try:
                             source = await Source.create(using_db=db, original_name=name,
@@ -68,7 +80,7 @@ class SourceService:
                                 storage_key=str(path), byte_size=size, sha256=digest, category_id=kind.id,
                                 create_user_login_name=login, state='ACTIVE')
                         except IntegrityError:
-                            source = await owned_source.first()
+                            source = await Source.filter(create_user_login_name=login, category_id=kind.id, sha256=digest).using_db(db).first()
                             if not source:
                                 raise
                             path.unlink(missing_ok=True)

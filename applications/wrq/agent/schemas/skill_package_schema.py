@@ -21,11 +21,12 @@ class SkillResourceBinding(BaseModel):
     usage: Annotated[str, StringConstraints(strip_whitespace=True)] = Field(
         default="", max_length=10_000,
         description="资源使用说明：何时使用、用途及脚本调用方式；上传资源生成时必填，草稿允许为空")
+    relative_path: str | None = Field(default=None, max_length=255)
     target_path: str | None = Field(default=None, max_length=255,
                                     description="用途目录下的相对路径；为空时沿用原文件名")
     content_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$",
                                      description="可选，固定挂载文件的 SHA256")
-    category: Annotated[str, StringConstraints(min_length=1, max_length=16)] | None = None
+    category: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=16)] | None = None
 
 
 class SkillPackageSource(BaseModel):
@@ -58,6 +59,7 @@ class SkillUploadFileSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     usage: Annotated[str, StringConstraints(strip_whitespace=True)] = Field(default="", max_length=10_000)
+    relative_path: str | None = Field(default=None, max_length=255)
     target_path: str | None = Field(default=None, max_length=255,
                                     description="可选内部相对路径；省略时沿用文件名，不是服务器路径")
     content_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
@@ -80,7 +82,7 @@ class SkillDeveloperForm(BaseModel):
     skill_class_id: int | str = Field(default="")
     application_paso: str | None = Field(default=None, max_length=100,
         validation_alias=AliasChoices('application_paso', 'application'))
-    resource_categories: list[Annotated[str, StringConstraints(min_length=1, max_length=16)]] = Field(default_factory=list, max_length=100)
+    resource_categories: list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=16)]] = Field(default_factory=list, max_length=100)
     skill_markdown: str | None = Field(default=None, max_length=200_000)
     expected_version: str | None = Field(default=None, max_length=64)
     instructions: str = Field(default="", max_length=100_000)

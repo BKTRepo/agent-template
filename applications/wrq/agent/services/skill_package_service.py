@@ -206,7 +206,7 @@ class SkillPackageService(LegacySkillPackageService):
                                                     'skill_markdown': read_markdown(content.skill_markdown_path) or None})
                 # 未上线的草稿没有对外版本；构建内容以短横杠表示，数据库仍保留 NULL。
                 source = source_from_developer_form(normalized, [f.file_name for f in files], technical_name=content.technical_name,
-                    version=saved.version or "-", validate_catalog=False)
+                    version=saved.version or "-", validate_catalog=False, relative_paths=[r.relative_path for r in links])
                 source, resolved, report = await self.resolve(source, user)
                 if not report.valid:
                     raise SkillPackageError(report)

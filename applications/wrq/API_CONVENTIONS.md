@@ -208,3 +208,33 @@ APPLICATION_CATALOG_CACHE_SECONDS 默认 60 秒。原 WRQ_PORTAL_APPLICATIONS_UR
 在保留本地验收脚本的开发目录中执行（测试文件不随本次业务代码发布）：
 
 技能中心调用入口：POST `/skills/catalog/create-test-run`，form-data source JSON包含整数skill_id、build_id、request_id、conversation_input，可选documents；固定发布定义和资源由服务端读取。相同request_id仅创建/累计一次。
+
+
+## Skill 一键导入
+
+上线前显式执行 `python -m applications.wrq.migrations.skill_import --apply`，不带 `--apply` 只查询结构并打印待执行 SQL。迁移增加导入批次/明细、附件相对路径及自定义资源分类，并调整附件唯一索引。MySQL DDL 不支持整组事务回滚，应按部署流程备份并在维护窗口执行。
+
+- `GET /skills/import/get-limits` 查询上传限制。
+- `POST /skills/import/prepare` 使用 multipart：`files` 为文件数组，`manifest` 为 JSON 字符串，包含 `upload_mode`（file/directory/zip）和 `files:[{index,path}]`。目录路径使用 `/`，索引对应文件顺序。单文件仅接受 SKILL.md，ZIP 和目录递归识别技能根目录。
+- `POST /skills/import/confirm` 使用 JSON：`{import_id,items:[{item_id,name,class_id,application_paso}]}`。创建人由 token 确定，分类、描述、正文及附件均由后端校验及读取。返回每项的状态、errors 和 skill_id；批内部分失败以明细表达。对相同 item_id 重试不会重复创建。
+- `GET /skills/import/status?import_id=...` 返回本人批次状态，包含过期标志和逐项导入结果。
+
+暂存默认24小时、批次总量200MiB、单文件50MiB、每技能附件合计50MiB、单技能最多100个文件、批次最多1000个文件/50个技能。`SKILL_IMPORT_MAX_BATCH_BYTES` 和 `SKILL_IMPORT_EXPIRE_HOURS` 可配置。定时任务及上传时清理临时文件，成功草稿和正式导入结果保留。
+
+附件详情新增 `relativePath`，保存技能时必须回传；`definition_origin` 表示 platform/import。导入附件默认使用资源字典 `custom`（自定义资源），构建、调试、下载保留原相对路径。导入后 DRAFT、revision=1、version=NULL，首次调试前不产生构建或发布记录。
+
+目录导入支持同一文件夹下的多个ZIP技能包，及Skill子目录与ZIP混合。ZIP独立保留来源路径，解压后累计校验批次大小和文件数。发现外层PDF等未归属任何Skill的文件，或ZIP中没有SKILL.md时，整批拒绝并返回具体路径；Skill根目录内的附带文件保留为附件。
+### 导入完成后返回编辑
+
+- `POST /skills/import/restart`，JSON：`{"import_id":"原批次编号"}`。校验归属、有效期后恢复同一批次、同一候选为可填写状态；保留 `skill_id`，返回当前草稿归属信息及 `selection.expected_revision`。
+- 再次确认：已有 `skill_id` 的条目通过原技能保存逻辑更新，必须回传 `expected_revision`；未成功创建的条目才新增。权限、名称冲突及并发版本校验沿用开发者中心。已进入调试、发布流程的技能通过详情页处理，不从旧导入窗口覆盖。
+- 返回选择文件后重新上传，manifest 可带 `replaces_import_id`。服务端按原目录、技术名称等逐条匹配并保留原技能编号；数量不同或无法唯一匹配则拒绝，不猜测对应关系、不新增记录。关闭后重新打开的新一轮导入不带该字段。
+- `POST /skills/import/check-names`：JSON `{"import_id":"批次编号","items":[{"item_id":"候选编号","name":"名称"}]}`，返回 `{valid,errors:{候选编号:[错误文本]}}`。点击“开始导入”后调用并提示，进入填写页及修改输入时不调用；支持临时文件回执，不写业务表，并排除原 `skill_id`。真正保存仍在事务内复核名称和归属。
+
+### 上传校验、系统临时目录与正式导入（当前交互）
+
+- 选择文件后按技能调用 `POST /skills/import/stage`，multipart manifest 与 prepare 相同。服务端校验并抽取到临时文件，候选、归属及抽取结果以 `stage.json` 暂存，**不写技能、附件、导入批次/条目等业务表**。格式不合格的条目显示原因并拦截，合法项可进入填写页；全部不合法时清除本批临时文件。
+- Linux默认 `/tmp/keenrobot-skill-import`；Windows默认系统Temp下的同名专用子目录。`SKILL_IMPORT_TMP_DIR` 可配置为独立临时挂载目录，禁止指向 `/tmp`、系统Temp根目录或产物目录。`SKILL_IMPORT_EXPIRE_HOURS=24`、`SKILL_IMPORT_CLEANUP_SECONDS=300`、`SKILL_IMPORT_TMP_MAX_BYTES=2147483648`、`SKILL_IMPORT_TMP_MIN_FREE_BYTES=134217728`。定时及上传时优先清过期目录，压力下回收最旧的闲置暂存；跨进程锁跳过正在处理的批次，空间仍不足返回明确错误。只删除专用目录内受控批次，正式附件和定义不受影响。
+- 点击“开始导入”后检查名称（含批内重名），排除自己的 `skill_id`；不通过时在填写页标注错误。校验通过才调用 `POST /skills/import/confirm`，将临时回执正式写入导入表并创建/更新草稿。保存时复核名称、归属、权限、文件摘要及版本，防止并发覆盖。
+- `POST /skills/import/discard` JSON `{"import_id":"批次编号"}` 移除本人临时文件，删除单项、清空或关闭弹窗时调用；不删除正式技能。过期或被容量清理的暂存需重新上传。
+- ZIP按技能根目录分行；stage manifest 的 `selected_root` 限定提取范围。原ZIP由服务端解压和验证，不信任客户端解压数据。每项保留 `{import_id,item_id,skill_id,revision}`；返回编辑复用原编号，文件替换通过 replaces_import_id 关联原技能。确认响应中断先查同一回执，避免重复新增。正式导入后的纯信息修改无需临时文件，清理不影响原草稿。

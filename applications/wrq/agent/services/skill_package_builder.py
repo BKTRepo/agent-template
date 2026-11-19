@@ -97,6 +97,11 @@ def validate_source(source: SkillPackageSource) -> SkillValidationReport:
             report.missing_fields.append(ValidationIssue(field=f"{field}.usage", reason="请补充上传资源的使用说明"))
         if bool(binding.document_id) == (binding.upload_index is not None):
             report.errors.append(ValidationIssue(field=field, reason="document_id 和 upload_index 必须提供且只提供一个"))
+        if binding.relative_path is not None:
+            try:
+                safe_relative_path(binding.relative_path)
+            except ValueError as exc:
+                report.errors.append(ValidationIssue(field=f"{field}.relative_path", reason=str(exc)))
         if binding.target_path is not None:
             try:
                 safe_relative_path(binding.target_path)
@@ -152,7 +157,15 @@ class SkillPackageBuilder:
             value = getattr(source, field)
             if value:
                 metadata["application_paso" if field == "application" else field] = value
-        header = {"name": source.name, "description": source.description}
+        header = {}
+        if source.skill_markdown:
+            match = re.match(r"\A---\n(.*?)^---[ \t]*\n", source.skill_markdown.replace("\r\n", "\n"), flags=re.M | re.S)
+            if match:
+                header = yaml.safe_load(match[1]) or {}
+        old_metadata = header.get("metadata")
+        if isinstance(old_metadata, dict):
+            metadata = {**old_metadata, **metadata}
+        header.update({"name": source.name, "description": source.description})
         if source.compatibility:
             header["compatibility"] = source.compatibility
         header["metadata"] = metadata
@@ -210,7 +223,9 @@ class SkillPackageBuilder:
                 binding = source.resources[resource.binding_index]
                 field = f"resources[{resource.binding_index}]"
                 try:
-                    relative = ROLE_DIRS[binding.role] + "/" + safe_relative_path(binding.target_path or resource.filename)
+                    relative = safe_relative_path(binding.relative_path) if binding.relative_path else ROLE_DIRS[binding.role] + "/" + safe_relative_path(binding.target_path or resource.filename)
+                    if relative.casefold() == "skill.md":
+                        raise ValueError("附件不能覆盖技能定义文件")
                 except ValueError as exc:
                     raise self._issue(field, str(exc)) from exc
                 key = relative.casefold()
@@ -233,7 +248,7 @@ class SkillPackageBuilder:
                             dst.write(chunk)
                 except OSError as exc:
                     raise self._issue(field, "资源文件不存在、无法读取或无法保存") from exc
-                if size == 0:
+                if size == 0 and not binding.relative_path:
                     raise self._issue(field, "资源文件为空，请重新选择有效文件")
                 sha256 = digest.hexdigest()
                 expected = binding.content_hash or resource.expected_hash

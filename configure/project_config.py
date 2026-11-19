@@ -264,6 +264,12 @@ class ProjectConfig(BaseSettings):
     # 20261016 定稿：Skill 直接上传单文件/合计均为 50M；与前端统一使用 MiB。
     SKILL_RESOURCE_MAX_BYTES: int = Field(default=50 * 1024 * 1024, gt=0)
     SKILL_RESOURCE_TOTAL_MAX_BYTES: int = Field(default=50 * 1024 * 1024, gt=0)
+    SKILL_IMPORT_MAX_BATCH_BYTES: int = Field(default=200 * 1024 * 1024, gt=0)
+    SKILL_IMPORT_EXPIRE_HOURS: int = Field(default=24, gt=0, le=168)
+    SKILL_IMPORT_TMP_DIR: str = ""
+    SKILL_IMPORT_TMP_MAX_BYTES: int = Field(default=2 * 1024 * 1024 * 1024, gt=0)
+    SKILL_IMPORT_TMP_MIN_FREE_BYTES: int = Field(default=128 * 1024 * 1024, ge=0)
+    SKILL_IMPORT_CLEANUP_SECONDS: int = Field(default=300, ge=10)
     APPLICATION_CATALOG_MODE: Literal["mock", "remote"] = "mock"
     APPLICATION_CATALOG_URL: str = "http://10.240.105.84:9999/selfTest/queryAllApplication"
     APPLICATION_CATALOG_CACHE_SECONDS: int = Field(default=60, ge=0)
