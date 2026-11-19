@@ -154,6 +154,7 @@ async def preview_file(asset_id: int = Query(..., gt=0), file_id: int = Query(..
             with file_write_lock(path, timeout=0):
                 file, path = await _file(current_user, asset_id, file_id)
                 cases = await run_in_threadpool(_test_cases, file, path) if file.size_bytes <= 20 * 1024 * 1024 else None
+                sheets = await run_in_threadpool(preview.workbook_metadata, _fingerprint(path))
             if cases is not None:
                 from applications.conversation.services.artifact_case_groups import _valid_groups, legacy_groups
                 source = SimpleNamespace(id=f"asset-file-{file.id}", path=path)
@@ -169,8 +170,8 @@ async def preview_file(asset_id: int = Query(..., gt=0), file_id: int = Query(..
                                  if cases["cases"] else [], grouping_status="failed",
                                  grouping_error="该资产尚未保存测试要点，可从原产出物同步更新。")
                 await _asset(current_user, asset_id)
-                return _result({**data, "viewer": "case", "case_artifact": cases})
-            data.update(viewer="spreadsheet", sheets=await run_in_threadpool(preview.workbook_metadata, _fingerprint(path)))
+                return _result({**data, "viewer": "case", "case_artifact": cases, "sheets": sheets})
+            data.update(viewer="spreadsheet", sheets=sheets)
         elif suffix in {".docx", ".pdf"}:
             data["viewer"] = "pdf"
         elif suffix in SCRIPT_TYPES or suffix in {".txt", ".csv", ".md"}:

@@ -19,6 +19,7 @@ from configure import PROJECT_CONFIG
 from services.model_gateway import default_model, sandbox_model_environment
 
 from .docker_sandbox import DockerSandboxRunner, SandboxConfig, SandboxResult
+from .online_debug_file_parser import MAX_ORIGINAL_RESOURCE_BYTES, ORIGINAL_RESOURCE_SUFFIXES
 
 
 _RESULT_PREFIX = "SKILL_SANDBOX_RESULT="
@@ -419,7 +420,7 @@ class OnlineDebugService:
         document_paths = self._write_text_files(
             input_dir / "documents", payload["documents"], "文档", validate_text_suffix=True,
         )
-        # 已挂载资源由资源系统负责格式管理；在线调试只安全落盘其已解析文本。
+        # 已挂载资源由资源系统负责格式管理；保留指定附件的原始字节。
         resource_paths = self._write_text_files(
             input_dir / "resources", payload["mounted_resources"], "挂载资源", validate_text_suffix=False,
         )
@@ -437,28 +438,39 @@ class OnlineDebugService:
         *,
         validate_text_suffix: bool,
     ) -> list[str]:
-        """写入已解析文本资源，禁止路径穿越和同名覆盖。"""
+        """写入已解析文本或原样附件，禁止路径穿越和同名覆盖。"""
         paths: list[str] = []
         total_size = 0
+        original_size = 0
         for item in items:
             if not isinstance(item, dict):
                 raise OnlineDebugError(f"{label}中的每项必须是对象")
-            raw_name, content = str(item.get("filename", "")), str(item.get("content", ""))
-            filename = raw_name
+            filename = str(item.get("filename", ""))
+            content = item.get("content", "")
             if not OnlineDebugService._is_plain_filename(filename):
                 raise OnlineDebugError(f"{label}文件名不合法")
             if validate_text_suffix and Path(filename).suffix.lower() not in {".md", ".txt", ".json"}:
                 raise OnlineDebugError(f"{label}必须是已解析的 Markdown、TXT 或 JSON 文本")
-            if len(content) > 500_000:
-                raise OnlineDebugError(f"{label}文件过大：{filename}")
-            total_size += len(content)
-            if total_size > 1_000_000:
-                raise OnlineDebugError(f"{label}总长度不能超过 1000000 个字符")
+            if isinstance(content, bytes):
+                if validate_text_suffix or Path(filename).suffix.lower() not in ORIGINAL_RESOURCE_SUFFIXES:
+                    raise OnlineDebugError(f"{label}文件格式不受支持：{filename}")
+                original_size += len(content)
+                if not content or original_size > MAX_ORIGINAL_RESOURCE_BYTES:
+                    raise OnlineDebugError(f"{label}附件不能为空，原文件合计不能超过 50 MB")
+                data = content
+            else:
+                text = str(content)
+                if len(text) > 500_000:
+                    raise OnlineDebugError(f"{label}文件过大：{filename}")
+                total_size += len(text)
+                if total_size > 1_000_000:
+                    raise OnlineDebugError(f"{label}总长度不能超过 1000000 个字符")
+                data = text.encode("utf-8")
             directory.mkdir(parents=True, exist_ok=True)
             target = directory / filename
             if target.exists():
                 raise OnlineDebugError(f"{label}文件名重复：{filename}")
-            target.write_text(content, encoding="utf-8")
+            target.write_bytes(data)
             # 宿主机在 Windows 时 Path 字符串会生成反斜杠；容器内始终按 POSIX 路径读取。
             paths.append(target.relative_to(directory.parent).as_posix())
         return paths

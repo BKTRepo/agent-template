@@ -32,7 +32,7 @@ last_updated: 2026-11-12
 | POST | `/move-to-recycle-bin` | `asset_ids` 数组必须恰好1个正整数，限创建人操作；接口及业务层拒绝批量移入 |
 | POST | `/restore`、`/delete-recycled` | `asset_ids`，限创建人操作，彻底删除限回收站资产 |
 
-悬浮窗覆盖保存只更新原产出物。资产预览与下载读取纳入时的快照。
+已纳入资产管理的测试案例提供思维导图、用例列表和 Excel 原表三种只读视图。`/preview` 返回 `viewer: "case"`、`case_artifact` 和 `sheets`，原表通过 `/preview-sheet` 读取。预览和下载使用归档副本，通过原产出物保存时选择「同步修改」可更新该副本。
 
 ## 本地验收
 

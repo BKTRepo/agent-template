@@ -144,7 +144,7 @@ async def _parse_debug_request(request: Request) -> dict[str, Any]:
         "documents": await _parse_uploads(
             form.getlist("documents"), "documents", 10, extract_uploaded_file,
         ),
-        # 挂载资源已由资源系统管理，此处只读取文本，不重复进行格式白名单校验。
+        # 挂载资源已由资源系统管理，保留配置及编译附件的原始字节。
         "mounted_resources": await _parse_uploads(
             form.getlist("mounted_resources"), "mounted_resources", 20, extract_mounted_resource,
         ),
@@ -170,11 +170,11 @@ async def _parse_uploads(
     name: str,
     limit: int,
     parser: Any,
-) -> list[dict[str, str]]:
+) -> list[dict[str, str | bytes]]:
     """读取文件并交给对应来源的解析器；文档与已挂载资源采用不同校验策略。"""
     if len(items) > limit:
         raise ValueError(f"{name} 最多上传 {limit} 个文件")
-    result: list[dict[str, str]] = []
+    result: list[dict[str, str | bytes]] = []
     for item in items:
         if not isinstance(item, UploadFile):
             raise ValueError(f"{name} 必须为文件字段")

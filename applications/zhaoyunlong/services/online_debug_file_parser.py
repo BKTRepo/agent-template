@@ -1,4 +1,4 @@
-"""在线调试上传文件的受限文本提取。"""
+"""在线调试文档的受限文本提取及技能附件读取。"""
 
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ MAX_UPLOAD_BYTES: Final = 20 * 1024 * 1024
 MAX_EXTRACTED_CHARS: Final = 500_000
 TEXT_SUFFIXES: Final = {".md", ".txt", ".json"}
 FILE_SUFFIXES: Final = TEXT_SUFFIXES | {".pdf", ".docx", ".xlsx"}
+ORIGINAL_RESOURCE_SUFFIXES: Final = {".yaml", ".yml", ".jar", ".class", ".pyc"}
+MAX_ORIGINAL_RESOURCE_BYTES: Final = 50 * 1024 * 1024
 
 
 class FileParseError(ValueError):
@@ -26,10 +28,14 @@ def extract_uploaded_file(filename: str, content: bytes) -> dict[str, str]:
     return _extract_file_content(safe_name, suffix, content)
 
 
-def extract_mounted_resource(filename: str, content: bytes) -> dict[str, str]:
-    """提取已挂载资源文本，不重复执行前端上传文件的格式白名单校验。"""
+def extract_mounted_resource(filename: str, content: bytes) -> dict[str, str | bytes]:
+    """保留配置及编译附件的原始字节，其余资源沿用文本提取。"""
     safe_name = _safe_filename(filename)
     suffix = Path(safe_name).suffix.lower()
+    if suffix in ORIGINAL_RESOURCE_SUFFIXES:
+        if not content or len(content) > MAX_ORIGINAL_RESOURCE_BYTES:
+            raise FileParseError(f"附件不能为空或超过 50 MB：{safe_name}")
+        return {"filename": safe_name, "content": content}
     return _extract_file_content(safe_name, suffix, content, allow_other_text=True)
 
 
