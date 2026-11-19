@@ -1,4 +1,5 @@
 @import "@heroui/styles";
+@import "./components/developer/SkillImportDialog.css";
 .login-page { min-height:100vh; height:100dvh; display:grid; grid-template-columns:minmax(0,1.05fr) minmax(420px,1fr); overflow:auto; background:#f5f8fc; }
 .login-intro { display:flex; flex-direction:column; justify-content:space-between; gap:50px; padding:48px clamp(32px,5vw,84px); background:linear-gradient(145deg,#061a36,#123e72); color:#fff; }
 .login-brand { display:flex; align-items:center; gap:12px; font-size:20px; font-weight:700; }
