@@ -10,6 +10,6 @@ import TechnicalTestLoginPage from './pages/TechnicalTestLoginPage'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {window.location.pathname === '/' ? <TechnicalTestLoginPage showAppWhileWaiting /> : window.location.pathname === '/sso/technical-test' ? <TechnicalTestLoginPage /> : <App />}
+    {window.location.pathname === '/' ? <TechnicalTestLoginPage showAppWhileWaiting /> : <App />}
   </StrictMode>,
 )
