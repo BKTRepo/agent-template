@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import Dialog from '@/components/developer/Dialog'
 import CaseMindMap from './CaseMindMap'
+import { CaseList, CaseViewButtons, groupCases, type CaseView } from './CasePreview'
 import ArtifactTitle from './ArtifactTitle'
 import ArtifactSpreadsheet from './ArtifactSpreadsheet'
 import type { TestCase, TestCaseArtifact } from '@/types/assistantArtifact'
@@ -18,7 +19,7 @@ interface Props {
 export default function TestCaseArtifactDrawer({ artifact, onSave, checkArchived, onClose, toolbar, actionBusy, actionError }: Props) {
   const [saved, setSaved] = useState(artifact)
   const [cases, setCases] = useState(artifact.cases)
-  const [view, setView] = useState<'map' | 'list' | 'sheet'>('map')
+  const [view, setView] = useState<CaseView>('map')
   const [selectedId, setSelectedId] = useState<string>()
   const [editing, setEditing] = useState<TestCase>()
   const [pendingDelete, setPendingDelete] = useState<TestCase>()
@@ -29,30 +30,7 @@ export default function TestCaseArtifactDrawer({ artifact, onSave, checkArchived
   const [error, setError] = useState('')
   const blocked = saving || checkingArchive || actionBusy
   const dirty = JSON.stringify(cases) !== JSON.stringify(saved.cases)
-  const groups = useMemo(() => {
-    const byId = new Map(cases.map(item => [item.id, item]))
-    const groupedIds = new Set<string>()
-    const result = saved.groups.map(({ title, caseIds }) => ({
-      title, items: caseIds.flatMap(id => {
-        const item = byId.get(id)
-        if (!item || groupedIds.has(id)) return []
-        groupedIds.add(id)
-        return [item]
-      }),
-    })).filter(group => group.items.length)
-    const ungrouped = cases.filter(item => !groupedIds.has(item.id))
-    if (ungrouped.length) result.push({ title: '待归纳', items: ungrouped })
-    return result.flatMap(group => {
-      const sheets = new Map<number | null, TestCase[]>()
-      for (const item of group.items) {
-        const key = item.sheet_index ?? null
-        const items = sheets.get(key) ?? []
-        items.push(item)
-        sheets.set(key, items)
-      }
-      return [...sheets.values()].map(items => ({ title: group.title, items }))
-    })
-  }, [cases, saved.groups])
+  const groups = useMemo(() => groupCases(cases, saved.groups), [cases, saved.groups])
 
   async function save(syncAsset = false) {
     if (blocked || !dirty) return
@@ -107,11 +85,7 @@ export default function TestCaseArtifactDrawer({ artifact, onSave, checkArchived
         <button type="button" className="button primary" disabled={!dirty || blocked}
           onClick={() => void requestSave()}>{saving || checkingArchive ? '保存中…' : '保存修改'}</button></>}>
       <div className="artifact-case-views">
-        <div role="group" aria-label="测试案例视图">
-        <button type="button" aria-pressed={view === 'map'} onClick={() => setView('map')}>思维导图</button>
-        <button type="button" aria-pressed={view === 'list'} onClick={() => setView('list')}>用例</button>
-        {!!saved.sheets?.length && <button type="button" disabled={dirty || blocked} aria-pressed={view === 'sheet'} onClick={() => setView('sheet')}>原表</button>}
-        </div>
+        <CaseViewButtons view={view} onChange={setView} hasSheets={!!saved.sheets?.length} sheetDisabled={dirty || blocked} />
         <div className="artifact-case-toolbar">{toolbar(saved, dirty || blocked)}</div>
       </div>
       {(error || actionError) && <p className="error-banner artifact-case-error" role="alert">{error || actionError}</p>}
@@ -121,17 +95,7 @@ export default function TestCaseArtifactDrawer({ artifact, onSave, checkArchived
         : !groups.length ? <p className="empty-table">暂无测试案例</p> : view === 'map' ?
         <CaseMindMap title={saved.name} groups={groups} selectedId={selectedId} disabled={blocked}
           onSelect={id => { setSelectedId(id); setEditing(cases.find(item => item.id === id)) }} actions={actions} /> :
-        <div className="artifact-case-list">{groups.map(({ title, items }) => <section key={`${items[0].sheet_index ?? 'legacy'}:${title}`}>
-        <h3>{items[0].sheet_name && `${items[0].sheet_name} · `}{title}</h3>
-        {items.map(item => <article key={item.id}>
-          <header><h4>{item.name}</h4>{actions(item)}</header>
-          {item.description && <p>{item.description}</p>}
-          <dl><dt>前置条件</dt><dd>{item.preconditions || '—'}</dd></dl>
-          <ol>{item.steps.map(step => <li key={step.id}>{step.action}
-            {step.expected != null && <p>预期结果 · {step.expected || '—'}</p>}</li>)}</ol>
-          {item.expected != null && <dl><dt>预期结果</dt><dd>{item.expected || '—'}</dd></dl>}
-        </article>)}
-      </section>)}</div>}
+        <CaseList groups={groups} actions={actions} />}
     </Dialog>
 
     {editing && <Dialog className="assistant-owned-dialog" title="编辑测试案例" onClose={() => setEditing(undefined)}

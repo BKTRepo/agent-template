@@ -584,6 +584,21 @@ h1,h2,h3,p { margin:0; }
 .artifact-case-list dd,.artifact-case-list li { white-space:pre-wrap; }
 .artifact-case-list ol { padding-left:20px; list-style:decimal; margin:8px 0; }
 .artifact-case-list li p { color:var(--platform-muted); }
+.aip-conversation-body { position:relative; display:flex; flex:1 1 0; min-width:0; min-height:0; }
+.aip-conversation-body .aip-messages { min-width:0; }
+.aip-artifact-summary { display:inline-flex; align-items:center; gap:4px; padding:3px 0; border:0; background:transparent; color:#526783; }
+.aip-artifact-summary:hover,.aip-artifact-summary[aria-expanded="true"] { color:#0b5bd3; }
+.aip-single-artifact { max-width:100%; }
+.aip-single-artifact strong,.aip-artifact-list li span { min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.aip-single-artifact svg,.aip-single-artifact time,.aip-artifact-list svg { flex-shrink:0; }
+.aip-artifact-list { position:absolute; z-index:3; inset:0 0 0 auto; display:flex; flex-direction:column; width:min(310px,84%); background:#fff; border-left:1px solid #e4ecf7; box-shadow:-8px 0 24px #091e4214; }
+.aip-artifact-list header { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid #edf2f8; }
+.aip-artifact-list header h3 { margin:0; color:#12324f; font-weight:600; font-size:13px; }
+.aip-artifact-list ul { min-height:0; overflow:auto; padding:5px 6px; margin:0; list-style:none; }
+.aip-artifact-list li button { width:100%; display:flex; align-items:center; gap:8px; padding:8px; border:0; border-radius:6px; background:transparent; color:#41526b; text-align:left; font-size:12px; }
+.aip-artifact-list li button:hover { background:#eef5ff; color:#0b5bd3; }
+.aip-artifact-list li svg { color:#3974bd; }
+@media(min-width:1000px) { .aip-maximized .aip-artifact-list { position:static; flex:0 0 290px; box-shadow:none; } }
 .artifact-case-editor,.artifact-case-editor label { display:grid; gap:8px; }
 .artifact-case-editor fieldset { display:grid; gap:8px; min-width:0; padding:10px; border:1px solid var(--platform-line); border-radius:8px; }
 .artifact-case-editor input,.artifact-case-editor textarea { width:100%; min-width:0; padding:8px; border:1px solid #cdd9eb; border-radius:6px; }

@@ -1,7 +1,7 @@
 import { authFetch } from './authFetch'
 import { useAuthStore } from '@/stores/authStore'
 import { readBlob, saveBlobs } from '@/lib/resourceStorage'
-import { debugDocumentLimits, documentExtensions, validateResourceFiles } from '@/lib/skillForm'
+import { debugDocumentLimits, documentExtensions, skillResourceExtensions, validateResourceFiles } from '@/lib/skillForm'
 import { sha256Hex } from '@/lib/sha256'
 import { DeveloperCenterError, getDeveloperDebugLink, recordDeveloperDebugResult } from './developerCenter'
 import { skillResourceDownloadUrl } from './skillResourceDownload'
@@ -334,7 +334,10 @@ async function createDebugTask(item: Implementation, input: DebugInput, markdown
   const paths = new Set<string>()
   const filenames = new Set<string>()
   for (const { file } of resources) {
-    if (!file.size || /[\\/<>:"|?*\x00-\x1f]/.test(file.name) || (!item.catalog && !/\.(py|js|md|xlsx|docx|png|jpg|jpeg)$/i.test(file.name))) throw new Error(`技能资源文件不合法：${file.name}`)
+    if (!file.size || /[\\/<>:"|?*\x00-\x1f]/.test(file.name) ||
+      !skillResourceExtensions.some(extension => file.name.toLowerCase().endsWith(extension))) {
+      throw new Error(`技能资源文件不合法：${file.name}`)
+    }
     const filename = file.name.normalize('NFKC').toLowerCase()
     if (filenames.has(filename)) throw new Error(`挂载资源存在同名文件“${file.name}”，当前沙箱不支持目录传参，请联系维护人调整。`)
     filenames.add(filename)
