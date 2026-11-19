@@ -251,7 +251,7 @@ async def logging_middleware(request: Request, call_next):
                     audit_log["response_code"] = _response.get("code", "")
                     audit_log["response_message"] = _response.get("message", "")[:512]
                 audit_log["response_params"] = response_body
-                if request_router == LOGIN_ACCESS_TOKEN_PATH and isinstance(_response, dict):
+                if request_router in (LOGIN_ACCESS_TOKEN_PATH, '/base/auth/technical-test-login') and isinstance(_response, dict):
                     logged_response = dict(_response)
                     if isinstance(logged_response.get("data"), dict):
                         logged_response["data"] = dict(logged_response["data"])
