@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { Bot, Check, ChevronDown, ChevronLeft, Copy, FileText, History, ListTodo, Settings, LoaderCircle, Maximize2, MessageSquarePlus, Minimize2, Paperclip, Plus, RotateCcw, Send, Sparkles, Square, Star, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react'
+import { Bot, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, FileText, History, ListTodo, Settings, LoaderCircle, Maximize2, MessageSquarePlus, Minimize2, Paperclip, Plus, RotateCcw, Send, Sparkles, Square, Star, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import AssistantSessions from './AssistantSessions'
 import AssistantFeedback from './AssistantFeedback'
@@ -109,6 +109,9 @@ export default function FloatingAssistant({ contextLabel = '当前页面', conte
   const [skillIds, setSkillIds] = useState<string[]>([]), [manualKnowledgeIds, setManualKnowledgeIds] = useState<string[]>([]), [model, setModel] = useState<string | null>(null), [models, setModels] = useState<ChatModel[]>([]), [modelHealth, setModelHealth] = useState<Record<string, ChatModelHealth>>({})
   const [pickingSkills, setPickingSkills] = useState(false), [pickingKnowledge, setPickingKnowledge] = useState(false), [modelOpen, setModelOpen] = useState(false), [files, setFiles] = useState<File[]>([]), [text, setText] = useState('')
   const [selectedArtifact, setSelectedArtifact] = useState<ChatArtifactReference>()
+  const [artifactList, setArtifactList] = useState<{ conversationId: string; messageId: string }>()
+  const artifactListTrigger = useRef<HTMLButtonElement>(null)
+  const artifactListClose = useRef<HTMLButtonElement>(null)
   const [runningTasks, setRunningTasks] = useState<Record<number, ActiveTask>>({}), [taskRows, setTaskRows] = useState<TaskRow[]>([]), [error, setError] = useState(''), [notice, setNotice] = useState(''), [loading, setLoading] = useState(false)
   const { geometry, setGeometry, reset: resetGeometry } = useAssistantGeometry()
   const offset = geometry.offset
@@ -122,6 +125,14 @@ export default function FloatingAssistant({ contextLabel = '当前页面', conte
   const task = Object.values(runningTasks).find(item => item.conversationId === activeId)
   const active = sessions.find(session => session.id === activeId)
   const activeMessages = active ? messages[active.id] ?? [] : []
+  const artifactMessage = artifactList?.conversationId === activeId
+    ? activeMessages.find(message => message.id === artifactList.messageId && (message.artifacts?.length ?? 0) > 1)
+    : undefined
+  const hasArtifactList = !!artifactMessage
+  useEffect(() => {
+    if (hasArtifactList) artifactListClose.current?.focus()
+  }, [hasArtifactList, artifactMessage?.id])
+  useEffect(() => { setArtifactList(undefined) }, [activeId])
   const selectedSkills = skillIds.map(id => catalog.find(row => row.id === id) ?? { id, name: `不可用技能 ${id}` })
   const knowledgeSourceMap = knowledgeSources(skillIds, catalog)
   const knowledgeIds = effectiveKnowledgeIds(skillIds, manualKnowledgeIds, catalog)
@@ -234,7 +245,7 @@ export default function FloatingAssistant({ contextLabel = '当前页面', conte
       if (conversation) await loadConversation(conversation.id)
     } catch (reason) { setError((reason as Error).message) } finally { setLoading(false) }
   }
-  function close() { setOpen(false); setDrawer(false); trigger.current?.focus() }
+  function close() { setOpen(false); setDrawer(false); setArtifactList(undefined); trigger.current?.focus() }
   async function newSession() {
     setLoading(true); setError('')
     try { const conversation = await createChatConversation(); patchSession(conversation); setActiveId(conversation.id); setMessages(current => ({ ...current, [conversation.id]: [] })); setSkillIds([]); setManualKnowledgeIds([]); setModel(null); setFiles([]); setText(''); setDrawer(false); setResendSource(undefined) }
@@ -336,6 +347,32 @@ export default function FloatingAssistant({ contextLabel = '当前页面', conte
     setText(message.text); setFiles([]); setResendSource(message.taskId)
     setNotice(message.attachments?.length ? '已取回原输入，请重新上传或替换附件后发送。' : '已取回原输入，修改后发送将创建新消息。')
   }
+  function closeArtifactList() {
+    setArtifactList(undefined)
+    artifactListTrigger.current?.focus()
+  }
+
+  function messageArtifacts(message: ChatMessage) {
+    const artifacts = message.artifacts
+    if (!artifacts?.length) return null
+    if (artifacts.length === 1) {
+      const [artifact] = artifacts
+      return <div className="aip-message-meta"><button type="button" className="aip-action aip-single-artifact"
+        onClick={() => setSelectedArtifact(artifact)} title={artifact.fileName}>
+        <FileText size={14} /><strong>{artifact.fileName}</strong><ArtifactTime value={artifact.createdAt || message.createdAt} />
+      </button></div>
+    }
+    const expanded = artifactMessage?.id === message.id
+    return <div className="aip-message-meta"><button type="button" className="aip-artifact-summary"
+      aria-expanded={expanded} aria-controls={expanded ? 'aip-artifact-list' : undefined} onClick={event => {
+        if (expanded) { closeArtifactList(); return }
+        artifactListTrigger.current = event.currentTarget
+        setArtifactList({ conversationId: activeId, messageId: message.id })
+      }}>
+      查看所有产物（{artifacts.length}）<ChevronRight size={14} />
+    </button></div>
+  }
+
   async function copy(textToCopy: string) { setNotice(await copyText(textToCopy) ? '已复制到剪贴板' : '浏览器未授予剪贴板权限') }
   function startDrag(event: ReactPointerEvent<HTMLElement>) {
     const target = event.target as Element
@@ -358,7 +395,20 @@ export default function FloatingAssistant({ contextLabel = '当前页面', conte
         <header className="aip-header"><span className="aip-avatar"><span className="aip-avatar-face">AI</span></span><div className="aip-brand"><div className="aip-title">AI 助手 <span>全局</span></div><div className="aip-sub"><i />{busy ? '正在生成回复…' : loading ? '正在加载服务端会话…' : '已连接对话服务'}</div></div><div className="aip-head-actions"><button aria-label="后台任务" onClick={() => setTaskListOpen(true)}><ListTodo size={15} /></button><button aria-label="偏好设置" onClick={() => setPreferences(true)}><Settings size={15} /></button><button className={drawer ? 'on' : ''} aria-label="查看会话" title="会话" onPointerDown={event => event.stopPropagation()} onClick={() => setDrawer(value => !value)}><History size={15} />{unread > 0 && <i className="aip-unread-dot" />}</button><button aria-label="新建会话" title="新建会话" disabled={loading} onPointerDown={event => event.stopPropagation()} onClick={() => void newSession()}><MessageSquarePlus size={15} /></button><button aria-label={maximized ? '还原窗口' : '最大化窗口'} title={maximized ? '还原窗口' : '最大化窗口'} onPointerDown={event => event.stopPropagation()} onClick={() => setMaximized(value => !value)}>{maximized ? <Minimize2 size={15} /> : <Maximize2 size={15} />}</button><button className="aip-close" aria-label="关闭助手" title="关闭" onPointerDown={event => event.stopPropagation()} onClick={close}><X size={16} /></button></div></header>
         {import.meta.env.VITE_ASSISTANT_ARTIFACT_MOCK === 'true' && <ArtifactDemo />}
         <section className="aip-resources" aria-label="本次会话资源"><div><b>SKILL</b><span>{selectedSkills.length ? selectedSkills.map(skill => <em key={skill.id}><Sparkles size={11} />{skill.name}<button disabled={busy} title="移除 Skill；仅移除它带入的知识库来源" aria-label={`移除 ${skill.name}`} onClick={() => void changeResources({ skills: skillIds.filter(id => id !== skill.id) })}>×</button></em>) : <small>未加载 · 使用通用对话</small>}<button className="aip-add" disabled={busy} onClick={() => setPickingSkills(true)}>+ 加载</button></span></div><div><b>知识库</b><span>{selectedKnowledge.length ? selectedKnowledge.map(item => { const id = String(item.id); const sources = knowledgeSourceMap.get(id) ?? []; const manual = manualKnowledgeIds.includes(id); return <em key={id} className={sources.length ? 'context' : ''} title={sources.length ? `由 Skill 自动挂载：${sources.join('、')}` : '手动挂载'}><Check size={11} />{item.name}{sources.length ? <i className="aip-resource-origin">来自 {sources.join('、')}</i> : manual ? <i className="aip-resource-origin">手动</i> : null}{!sources.length && manual && <button disabled={busy} aria-label={`移除 ${item.name}`} onClick={() => void changeResources({ manualKnowledge: manualKnowledgeIds.filter(knowledgeId => knowledgeId !== id) })}>×</button>}</em> }) : <small>未加载</small>}<button className="aip-add" disabled={busy} onClick={() => setPickingKnowledge(true)}>+ 加载</button></span></div></section>
-        <div className="aip-messages" role="log" aria-live="polite">{loading && !active ? <p className="aip-working"><LoaderCircle size={13} className="spin" />正在加载会话记录…</p> : !activeMessages.length && <section className="aip-welcome"><h3>你好，我是AI 助手</h3><p>消息、会话、已选资源和模型均保存到后端；可加载已上线 Skill 后发起真实任务。</p><div>{suggestions.map(([tag, value]) => <button key={tag} onClick={() => setText(value)}><span>{tag}</span>{value}</button>)}</div></section>}{activeMessages.map(message => message.role === 'user' ? <article className="aip-message user" key={message.id}><p>{message.text}</p><footer><MessageTime value={message.createdAt} /><button className="aip-action" onClick={() => void copy(message.text)}>复制</button><button className="aip-action" disabled={busy} onClick={() => resend(message)}>修改后重发</button></footer>{message.attachments?.length ? <div className="aip-message-meta">{message.attachments.map(name => <span key={name}><Paperclip size={11} />{name}</span>)}</div> : null}</article> : <article className={`aip-message bot ${message.status ?? 'completed'}`} key={message.id}>{message.status === 'generating' ? <><header><Sparkles size={14} /><b>对话服务 · 生成中</b><span>流式返回</span></header><div className="aip-progress"><i /></div>{message.text ? <p>{message.text}</p> : <p className="aip-working"><LoaderCircle size={13} className="spin" />正在调用后端模型…</p>}<footer><MessageTime value={message.createdAt} />{task?.taskId === message.taskId && <button className="aip-action danger" onClick={() => void stop()}><Square size={12} />停止生成</button>}<button className="aip-action ghost" onClick={close}>转入后台</button></footer></> : <><header>{message.status === 'failed' ? <X size={14} /> : message.status === 'stopped' ? <Square size={13} /> : <Check size={14} />}<b>{message.status === 'failed' ? '生成失败' : message.status === 'stopped' ? '已停止生成' : 'AI 助手'}</b><span>{message.status === 'completed' || message.status === 'failed' || message.status === 'stopped' ? `耗时 ${formatTaskDuration(message.durationMs) || '—'}` : ''}</span></header><p>{message.text}</p>{!!message.artifacts?.length && <div className="aip-message-meta">{message.artifacts.map(artifact => <button type="button" className="aip-action" key={artifact.artifactId} onClick={() => setSelectedArtifact(artifact)}><FileText size={14} />查看产出物：<strong>{artifact.fileName}</strong><ArtifactTime value={artifact.createdAt || message.createdAt} /></button>)}</div>}<footer><MessageTime value={message.createdAt} /><button className="aip-action" onClick={() => void copy(message.text)}><Copy size={12} />复制</button>{message.taskId && <><button className="aip-action" disabled={busy} onClick={() => void retry(message)}><RotateCcw size={12} />重新生成</button></>}{message.status === 'completed' && <span className="aip-feedback"><button className={message.feedback === 'up' ? 'selected up' : ''} aria-label="有帮助" onClick={() => void feedback(message, 'up').catch(reason => setError((reason as Error).message))}><ThumbsUp size={13} /></button><button className={message.feedback === 'down' ? 'selected down' : ''} aria-label="需改进" onClick={() => setFeedbackTarget(message)}><ThumbsDown size={13} /></button></span>}</footer></>}</article>)}<div ref={bottom} /></div>
+        <div className="aip-conversation-body">
+        <div className="aip-messages" role="log" aria-live="polite">{loading && !active ? <p className="aip-working"><LoaderCircle size={13} className="spin" />正在加载会话记录…</p> : !activeMessages.length && <section className="aip-welcome"><h3>你好，我是AI 助手</h3><p>消息、会话、已选资源和模型均保存到后端；可加载已上线 Skill 后发起真实任务。</p><div>{suggestions.map(([tag, value]) => <button key={tag} onClick={() => setText(value)}><span>{tag}</span>{value}</button>)}</div></section>}{activeMessages.map(message => message.role === 'user' ? <article className="aip-message user" key={message.id}><p>{message.text}</p><footer><MessageTime value={message.createdAt} /><button className="aip-action" onClick={() => void copy(message.text)}>复制</button><button className="aip-action" disabled={busy} onClick={() => resend(message)}>修改后重发</button></footer>{message.attachments?.length ? <div className="aip-message-meta">{message.attachments.map(name => <span key={name}><Paperclip size={11} />{name}</span>)}</div> : null}</article> : <article className={`aip-message bot ${message.status ?? 'completed'}`} key={message.id}>{message.status === 'generating' ? <><header><Sparkles size={14} /><b>对话服务 · 生成中</b><span>流式返回</span></header><div className="aip-progress"><i /></div>{message.text ? <p>{message.text}</p> : <p className="aip-working"><LoaderCircle size={13} className="spin" />正在调用后端模型…</p>}<footer><MessageTime value={message.createdAt} />{task?.taskId === message.taskId && <button className="aip-action danger" onClick={() => void stop()}><Square size={12} />停止生成</button>}<button className="aip-action ghost" onClick={close}>转入后台</button></footer></> : <><header>{message.status === 'failed' ? <X size={14} /> : message.status === 'stopped' ? <Square size={13} /> : <Check size={14} />}<b>{message.status === 'failed' ? '生成失败' : message.status === 'stopped' ? '已停止生成' : 'AI 助手'}</b><span>{message.status === 'completed' || message.status === 'failed' || message.status === 'stopped' ? `耗时 ${formatTaskDuration(message.durationMs) || '—'}` : ''}</span></header><p>{message.text}</p>{messageArtifacts(message)}<footer><MessageTime value={message.createdAt} /><button className="aip-action" onClick={() => void copy(message.text)}><Copy size={12} />复制</button>{message.taskId && <><button className="aip-action" disabled={busy} onClick={() => void retry(message)}><RotateCcw size={12} />重新生成</button></>}{message.status === 'completed' && <span className="aip-feedback"><button className={message.feedback === 'up' ? 'selected up' : ''} aria-label="有帮助" onClick={() => void feedback(message, 'up').catch(reason => setError((reason as Error).message))}><ThumbsUp size={13} /></button><button className={message.feedback === 'down' ? 'selected down' : ''} aria-label="需改进" onClick={() => setFeedbackTarget(message)}><ThumbsDown size={13} /></button></span>}</footer></>}</article>)}<div ref={bottom} /></div>
+        {artifactMessage && <aside className="aip-artifact-list" id="aip-artifact-list" aria-label="产物列表"
+          onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); closeArtifactList() } }}>
+          <header><h3>产物（{artifactMessage.artifacts?.length}）</h3>
+            <button ref={artifactListClose} type="button" className="aip-action ghost" aria-label="关闭产物列表"
+              onClick={closeArtifactList}><X size={15} /></button></header>
+          <ul>{artifactMessage.artifacts?.map(artifact => <li key={artifact.artifactId}>
+            <button type="button" onClick={() => setSelectedArtifact(artifact)} title={artifact.fileName}>
+              <FileText size={15} /><span>{artifact.fileName}</span>
+            </button>
+          </li>)}</ul>
+        </aside>}
+        </div>
         <section className="aip-composer"><button className="aip-action" disabled={busy || !active} onClick={() => setConfirmClear(true)}>清空当前会话</button>{resendSource && <p className="helper-text">正在修改原请求；发送后保留原消息。<button onClick={() => setResendSource(undefined)}>取消重发</button></p>}<div className="aip-attachments">{files.map((file, index) => <span key={`${file.name}-${index}`}><Paperclip size={11} />{file.name}<button disabled={busy} aria-label={`移除 ${file.name}`} onClick={() => setFiles(current => current.filter((_, fileIndex) => fileIndex !== index))}>×</button></span>)}</div><div className="aip-input"><textarea aria-label="向智能助手提问" placeholder="描述你的诉求，Enter 发送，Shift + Enter 换行" maxLength={40000} value={text} disabled={busy || loading} onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() } }} /><div><label className={busy ? 'disabled' : ''}><Paperclip size={16} /><input type="file" multiple accept={chatFileExtensions.join(',')} disabled={busy} aria-label="上传本次对话文件" onChange={event => { addFiles(Array.from(event.target.files ?? [])); event.target.value = '' }} /></label><small>单文件 ≤ 20 MB，最多 10 个</small><span className="aip-model-picker"><button className={`aip-model ${modelOpen ? 'on' : ''}`} type="button" aria-label="选择对话模型" aria-haspopup="dialog" aria-expanded={modelOpen} disabled={busy} onClick={() => setModelOpen(value => !value)}><Sparkles size={12} /><span>{modelLabel}</span><ChevronDown size={12} /></button>{modelOpen && <span className="aip-model-pop" role="dialog" aria-label="模型选择"><button className={!model ? 'selected' : ''} onClick={() => { setModelOpen(false); void changeResources({ selectedModel: null }) }}><span><strong>自动 <em>推荐</em></strong><small>按诉求复杂度、已加载 Skill 和知识库自动选择健康模型</small></span>{!model && <Check size={16} />}</button>{models.map(item => <button key={item.name} className={model === item.name ? 'selected' : ''} disabled={['unavailable', 'unconfigured'].includes(healthFor(item.name)?.status ?? '')} onClick={() => { setModelOpen(false); void changeResources({ selectedModel: item.name }) }}><span><strong>{item.displayName}<em className={`model-tier ${healthFor(item.name)?.status ?? 'checking'}`}>{modelTier(item.name)}</em></strong><small>{modelDescription(item.name)}</small></span>{model === item.name && <Check size={16} />}</button>)}</span>}</span>{busy ? <button className="aip-stop" onClick={() => void stop()}><Square size={12} />停止</button> : <button className="aip-send" disabled={loading || (!text.trim() && !files.length)} onClick={() => void send()}><Send size={13} />发送</button>}</div></div>{error && <p className="aip-error" role="alert">{error}</p>}</section>
         {drawer && <AssistantSessions sessions={sessions} activeId={activeId} onClose={() => setDrawer(false)} onSelect={id => { setDrawer(false); void loadConversation(id) }}
           onNew={() => void newSession()} onFavorite={item => void toggleFavorite(item)} onDelete={removeSession} onRenamed={patchSession}

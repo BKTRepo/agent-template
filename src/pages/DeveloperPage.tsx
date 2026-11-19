@@ -6,6 +6,7 @@ import ListPagination from '@/components/common/ListPagination'
 import DebugDialog from '@/components/developer/DebugDialog'
 import SkillFields from '@/components/developer/SkillFields'
 import SkillPolishDialog from '@/components/developer/SkillPolishDialog'
+import SkillImportDialog from '@/components/developer/SkillImportDialog'
 import ImplementationSummaryCells, { implementationSummaryHeaders } from '@/components/developer/ImplementationSummaryCells'
 import SearchSelect from '@/components/developer/SearchSelect'
 import { restoreSkillUploads } from '@/api/skillArchive'
@@ -32,9 +33,11 @@ export default function DeveloperPage() {
   const actor = useAccessStore(state => state.actor)
   const team = ''
   const [preview, setPreview] = useState<Partial<Implementation>>({})
+  const [importOpen, setImportOpen] = useState(false)
   const [panel, setPanel] = useState<'form' | 'debug' | null>(null)
   const [uploads, setUploads] = useState<SkillUploads>({ references: [], scripts: [] })
   const [selectedId, setSelectedId] = useState<string>()
+  const [openingSkillId, setOpeningSkillId] = useState<string>()
   const [form, setForm] = useState<ImplementationForm>(() => blankForm(team))
   const [polishOriginal, setPolishOriginal] = useState<SkillPolishText>()
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -92,9 +95,10 @@ export default function DeveloperPage() {
     setForm(previous => ({ ...previous, [key]: value }))
     setErrors(previous => ({ ...previous, [key]: '', ...(key === 'resourceIds' || key === 'uploadedResources' ? { resourceUsage: '' } : {}) })); setMessage('')
   }
-  async function openForm(item?: Implementation) {
+  async function openForm(item?: Implementation, detailsLoaded = false) {
     const account = skillAccount()
-    if (item?.backendSkillId) {
+    if (item?.backendSkillId && !detailsLoaded) {
+      setOpeningSkillId(item.id)
       setBusy('read'); setMessage('')
       try {
         const current = await getDeveloperSkill(item.backendSkillId)
@@ -103,7 +107,7 @@ export default function DeveloperPage() {
       } catch (error) {
         if (skillAccount() === account) setMessage((error as Error).message)
         return
-      } finally { if (skillAccount() === account) setBusy(null) }
+      } finally { if (skillAccount() === account) { setBusy(null); setOpeningSkillId(undefined) } }
     }
     formDirty.current = false
     setDebugSavePrompt(false)
@@ -314,7 +318,7 @@ export default function DeveloperPage() {
   return <>
     <div className="developer-flow surface" aria-label="技能开发流程">{steps.map((step, index) => <div className="flow-step" key={step}><span className={`flow-node ${index === 0 ? 'done' : index === 1 ? 'current' : ''}`}><span>{['①', '②', '③'][index]}</span> {step}</span>{index < steps.length - 1 && <ArrowRight size={20} aria-hidden="true" />}</div>)}</div>
     <section className="surface implementation-section" aria-labelledby="implementation-title">
-      <div className="section-heading"><h2 id="implementation-title">我创建的技能</h2><div className="section-actions"><button className="button" disabled={loading || !!busy} onClick={() => void refreshList()}><RefreshCw size={14} className={loading ? 'spin' : undefined} />刷新</button><button className="button primary" disabled={loading || !!busy} onClick={() => openForm()}><Plus size={16} />新建技能</button></div></div>
+      <div className="section-heading"><h2 id="implementation-title">我创建的技能</h2><div className="section-actions"><button className="button" disabled={loading || !!busy} onClick={() => void refreshList()}><RefreshCw size={14} className={loading ? 'spin' : undefined} />刷新</button><button className="button" disabled={loading || !!busy} onClick={() => setImportOpen(true)}>一键导入</button><button className="button primary" disabled={loading || !!busy} onClick={() => openForm()}><Plus size={16} />新建技能</button></div></div>
       <form className="management-filters developer-list-filters" role="search" aria-label="本人技能筛选" onSubmit={event => { event.preventDefault(); void searchSkills() }}>
         <input aria-label="实现名称模糊搜索" placeholder="实现名称模糊搜索" maxLength={128} value={filters.name} onChange={event => setFilters(previous => ({ ...previous, name: event.target.value }))} />
         <SearchSelect label="筛选技能类" value={filters.classId} options={filterSkillClasses} placeholder="全部技能类" onChange={value => setFilters(previous => ({ ...previous, classId: value }))} />
@@ -323,14 +327,21 @@ export default function DeveloperPage() {
         <button className="button primary" disabled={loading || !!busy}>搜索</button>
         <button type="button" className="button" disabled={loading || !!busy} onClick={() => { setFilters({ ...emptyDeveloperFilters }); void searchSkills({ ...emptyDeveloperFilters }) }}>重置</button>
       </form>
+      {!panel && message && <p className="error-banner" role="alert">{message}</p>}
+      {openingSkillId && <p className="helper-text" role="status">正在加载技能详情…</p>}
       <div className="implementation-table-wrap"><table className="implementation-table"><thead><tr>{[...implementationSummaryHeaders, '更新时间', '操作'].map(label => <th key={label} scope="col">{label}</th>)}</tr></thead><tbody>
-        {mine.map(item => <tr key={item.id}><ImplementationSummaryCells item={item} skillClasses={skillClasses} knowledgeUpdates /><td>{dateText(item.updatedAt)}</td><td><button className="button small" disabled={!!busy || loading} onClick={() => { if (['调试中', '调试成功', '调试失败'].includes(item.status)) openDebug(item); else openForm(item) }}>{['调试中', '调试成功', '调试失败'].includes(item.status) ? '调试' : '详情'}</button></td></tr>)}
+        {mine.map(item => <tr key={item.id}><ImplementationSummaryCells item={item} skillClasses={skillClasses} knowledgeUpdates /><td>{dateText(item.updatedAt)}</td><td><button className="button small" disabled={!!busy || loading} onClick={() => { if (['调试中', '调试成功', '调试失败'].includes(item.status)) openDebug(item); else openForm(item) }}>{openingSkillId === item.id ? '加载中…' : ['调试中', '调试成功', '调试失败'].includes(item.status) ? '调试' : '详情'}</button></td></tr>)}
           {!mine.length && <tr><td colSpan={7} className="empty-table">{loading ? '正在加载技能…' : Object.values(appliedFilters).some(Boolean) ? '暂无符合筛选条件的实现类，请调整条件或重置。' : '暂无实现类，点击“新建技能”开始创建。'}</td></tr>}
       </tbody></table></div>
       <ListPagination total={total} page={page} pages={pages} label="技能列表分页" busy={loading} onPageChange={goToPage} />
     </section>
-    {!panel && message && <p className="error-banner" role="alert">{message}</p>}
 
+    {importOpen && <SkillImportDialog onClose={() => setImportOpen(false)} onImported={async () => { await refresh(1) }} onOpen={async id => {
+      const item = await getDeveloperSkill(String(id))
+      replace(item)
+      setImportOpen(false)
+      await openForm(item, true)
+    }} />}
     {panel === 'form' && <Dialog key="form" wide title={selected ? <>{readonly ? '实现类详情' : '编辑实现类'} · {selected.name}</> : '新建技能类'} onClose={closePanel} busy={!!busy}
       headerActions={!selectedId && <button type="button" className="button small" disabled={!!busy || !polishKeys.some(key => form[key]?.trim())}
         title="填写至少一个待润色字段后使用" onClick={() => setPolishOriginal(polishText(form))}><Sparkles size={14} />润色</button>} footer={<>

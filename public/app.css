@@ -93,12 +93,17 @@
   --ease-out: cubic-bezier(0, 0, 0.2, 1);
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   --animate-pulse: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --blur-sm: 8px;
   --blur-md: 12px;
   --default-transition-duration: 150ms;
   --default-transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
   --default-font-family: var(--font-sans);
   --default-mono-font-family: var(--font-mono);
   --shadow-overlay: var(--overlay-shadow);
+  --color-field: var(--field-background, var(--default));
+  --color-field-rgb: 24 24 27;
+  --color-field-hover: var(--field-hover);
+  --radius-field: var(--field-radius, calc(var(--radius) * 1.5));
   --border-width-field: var(--field-border-width, var(--border-width));
   --ease-smooth: ease;
   --ease-out-quad: cubic-bezier(0.25, 0.46, 0.45, 0.94);
@@ -12620,6 +12625,487 @@ button:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):n
     --success-soft-foreground: color-mix(in oklab, var(--success) 92%, var(--foreground) 8%);
   }
 }
+.developer-dialog.wide.skill-import-dialog:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  width: 1100px;
+  max-width: calc(100vw - 48px);
+  height: 776px;
+  max-height: calc(100vh - 80px);
+  border-radius: 16px;
+}
+.developer-dialog.skill-import-dialog:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) > .dialog-header {
+  min-height: 80px;
+  padding: 20px 24px 14px;
+  align-items: flex-start;
+  border-bottom: 1px solid #eaf0f8;
+}
+.developer-dialog.skill-import-dialog:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) .dialog-title-group h2 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 25px;
+  color: #14243e;
+}
+.developer-dialog.skill-import-dialog:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) .dialog-subtitle {
+  margin: 3px 0 0;
+  color: #8092af;
+  font-size: 13px;
+  line-height: 20px;
+}
+.developer-dialog.skill-import-dialog:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) .dialog-header > .icon-button {
+  width: 26px;
+  height: 26px;
+  color: #8c9bb1;
+}
+.developer-dialog.skill-import-dialog:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) > .dialog-top-content {
+  flex-shrink: 0;
+  padding: 0 24px;
+  background: #fbfdff;
+  border-bottom: 1px solid #eaf0f8;
+}
+.skill-import-steps:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  display: flex;
+  align-items: center;
+  list-style: none;
+  padding: 13px 0;
+  margin: 0;
+}
+.skill-import-steps:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) li {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #8a9bb5;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.skill-import-steps:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) li:last-child {
+  flex: 0 0 auto;
+}
+.skill-import-steps:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) li:not(:last-child)::after {
+  content: '';
+  height: 1px;
+  flex: 1;
+  margin: 0 9px;
+  background: #e5edf8;
+}
+.skill-import-steps:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) li > span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 23px;
+  height: 23px;
+  border-radius: 50%;
+  color: #8497b5;
+  background: #eef3fa;
+  font-size: 13px;
+  font-weight: 600;
+}
+.skill-import-steps:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) li.current {
+  color: #1677ff;
+  font-weight: 600;
+}
+.skill-import-steps:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) li.current > span {
+  color: #fff;
+  background: #1677ff;
+  box-shadow: 0 0 0 4px #e7f1ff;
+}
+.skill-import-steps:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) li.complete > span {
+  color: #0c956b;
+  background: #e8f7f0;
+}
+.developer-dialog.skill-import-dialog:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) > .dialog-body {
+  flex: 1;
+  min-height: 0;
+  padding: 22px 24px;
+  overflow: auto;
+}
+.skill-import-drop:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  min-height: 380px;
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border: 1px dashed #348aff;
+  border-radius: 13px;
+  background: #f3f7fe;
+  color: #183254;
+  text-align: center;
+}
+.skill-import-drop.dragging:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  border-color: #095ee7;
+  background: #e8f1ff;
+}
+.skill-import-upload-icon:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 50px;
+  height: 50px;
+  margin-bottom: 4px;
+  border-radius: 14px;
+  background: #e6f0ff;
+  color: #1677ff;
+}
+.skill-import-drop:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) > strong {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+}
+.skill-import-drop:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) > p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: #8194b1;
+}
+.skill-import-drop:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) > small {
+  color: #8da0ba;
+  font-size: 12px;
+  line-height: 20px;
+}
+.skill-import-drop:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) .section-actions {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 2px;
+}
+.developer-dialog.skill-import-dialog:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) .skill-import-drop .button {
+  height: 39px;
+  min-height: 39px;
+  padding: 0 14px;
+  font-size: 13px;
+}
+.skill-import-fill:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  padding-top: 14px;
+}
+.skill-import-fill-heading:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 10px;
+}
+.skill-import-fill-heading:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) > h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #183254;
+}
+.skill-import-fill-heading:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) > p {
+  margin: 0;
+  font-size: 12px;
+  color: #8b9bb4;
+}
+.skill-import-table-wrap:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  width: 100%;
+  overflow: auto;
+  border: 1px solid #e1eaf7;
+  border-radius: 11px;
+}
+.skill-import-table:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+.skill-import-table:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) th {
+  padding: 9px 10px;
+  text-align: left;
+  font-size: 12px;
+  line-height: 17px;
+  font-weight: 600;
+  background: #f7faff;
+  color: #7187a7;
+  border-bottom: 1px solid #e5edf8;
+}
+.skill-import-table:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) th:first-child {
+  width: 26%;
+}
+.skill-import-table:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) th:nth-child(2) {
+  width: 40%;
+}
+.skill-import-table:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) th:nth-child(3) {
+  width: 19%;
+}
+.skill-import-table:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) th:nth-child(4) {
+  width: 15%;
+}
+.skill-import-table:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) td {
+  padding: 9px 10px;
+  vertical-align: top;
+  border-bottom: 1px solid #edf2fa;
+  overflow-wrap: anywhere;
+}
+.skill-import-table:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) tr:last-child td {
+  border-bottom: 0;
+}
+.skill-import-table:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) td > strong {
+  display: block;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 600;
+  color: #203451;
+}
+.skill-import-file-size:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  display: block;
+  margin-top: 1px;
+  font-size: 11px;
+  line-height: 16px;
+  color: #8c9fbc;
+}
+.skill-import-table:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) td > input, .skill-import-table:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) td > select {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  margin: 0;
+  padding: 0 9px;
+  border: 1px solid #d8e4f6;
+  border-radius: 8px;
+  background: #fff;
+  color: #243955;
+  font: inherit;
+  font-size: 12px;
+  line-height: 32px;
+  outline: none;
+}
+.skill-import-table:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) td > input:focus, .skill-import-table:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) td > select:focus {
+  border-color: #1677ff;
+  box-shadow: 0 0 0 2px #1677ff15;
+}
+.skill-import-table:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) td > input[aria-invalid="true"] {
+  border-color: #e45d65;
+  background: #fffafa;
+}
+.skill-import-name-error:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  margin: 6px 0 0;
+  color: #d44450;
+  font-size: 12px;
+  line-height: 18px;
+}
+.skill-import-results:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) article .skill-import-name-error {
+  color: #d44450;
+}
+.skill-import-candidates:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) article .skill-import-name-error {
+  color: #d44450;
+}
+.skill-import-name-checking:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  margin: 0 0 8px;
+  color: #8092af;
+  font-size: 12px;
+}
+.skill-import-table:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) td > input:disabled, .skill-import-table:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) td > select:disabled {
+  color: #8595ad;
+  background: #f8fafc;
+}
+.skill-import-table:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) details {
+  margin-top: 5px;
+  font-size: 11px;
+  line-height: 17px;
+  color: #8a9cb6;
+}
+.skill-import-table:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) summary {
+  cursor: pointer;
+}
+.skill-import-table:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) details p {
+  margin: 3px 0;
+  word-break: break-word;
+}
+.skill-import-candidates:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  margin-top: 18px;
+}
+.skill-import-queue-heading:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.skill-import-queue-heading:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) h3 {
+  margin: 0;
+  font-size: 13px;
+  color: #526b8e;
+}
+.skill-import-candidates:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) > h3 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: #526b8e;
+}
+.skill-import-candidates:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) article, .skill-import-results:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) article {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 9px;
+  border: 1px solid #e2eaf7;
+  border-radius: 9px;
+  background: #fbfdff;
+}
+.skill-import-candidates:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) article > div, .skill-import-results:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) article > div {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.skill-import-candidates:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) article strong, .skill-import-results:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) article strong {
+  font-size: 13px;
+}
+.skill-import-candidates:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) article p, .skill-import-results:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) article p {
+  margin: 3px 0 0;
+  font-size: 12px;
+  color: #7a8fac;
+}
+.skill-import-candidates:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) article > svg {
+  flex-shrink: 0;
+  color: #1677ff;
+}
+.skill-import-candidates:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) article > .platform-field-error {
+  flex-basis: 100%;
+  color: #d34c4c;
+}
+.skill-import-results:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) > h3 {
+  margin: 12px 0 18px;
+  color: #203451;
+  font-size: 17px;
+}
+.developer-dialog.skill-import-dialog:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) > .dialog-footer {
+  min-height: 83px;
+  padding: 18px 24px;
+  gap: 10px;
+  border-top: 1px solid #e5edf8;
+}
+.skill-import-footer-note:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  flex: 1;
+  color: #8c9fbc;
+  font-size: 12px;
+  line-height: 20px;
+}
+.developer-dialog.skill-import-dialog:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) > .dialog-footer .button {
+  min-height: 46px;
+  padding: 0 18px;
+  border-radius: 9px;
+  font-size: 14px;
+}
+@media (max-width:700px) {
+  .developer-dialog.wide.skill-import-dialog:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+    max-width: calc(100vw - 24px);
+    height: calc(100vh - 40px);
+    max-height: calc(100vh - 40px);
+  }
+  .developer-dialog.skill-import-dialog:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) > .dialog-header {
+    padding: 16px;
+  }
+  .developer-dialog.skill-import-dialog:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) > .dialog-top-content {
+    padding: 0 16px;
+  }
+  .developer-dialog.skill-import-dialog:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) > .dialog-body {
+    padding: 18px 16px;
+  }
+  .skill-import-table:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+    min-width: 760px;
+  }
+  .skill-import-drop:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+    min-height: 320px;
+    padding: 20px 12px;
+  }
+  .skill-import-footer-note:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+    flex-basis: 100%;
+  }
+}
+.skill-import-table:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) th em {
+  color: #ef666b;
+  font-style: normal;
+  margin-left: 2px;
+}
+.skill-import-completion:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0 35px;
+  text-align: center;
+}
+.skill-import-completion-icon:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 60px;
+  margin-bottom: 17px;
+  border-radius: 50%;
+  color: #14956d;
+  background: #e7f6ef;
+}
+.skill-import-completion.partial:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) .skill-import-completion-icon {
+  color: #bd7b1f;
+  background: #fff5df;
+}
+.skill-import-completion:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) h3 {
+  margin: 0 0 14px;
+  color: #19304c;
+  font-size: 19px;
+  font-weight: 700;
+}
+.skill-import-completion:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) p {
+  margin: 0;
+  color: #8397b5;
+  font-size: 13px;
+  line-height: 21px;
+}
+.skill-import-statistics:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  display: grid;
+  grid-template-columns: repeat(3,minmax(0,1fr));
+  gap: 12px;
+}
+.skill-import-statistics:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) > div {
+  padding: 13px 15px;
+  border: 1px solid #e2eaf8;
+  border-radius: 11px;
+  background: #fbfdff;
+}
+.skill-import-statistics:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) span {
+  display: block;
+  color: #8498b6;
+  font-size: 12px;
+  line-height: 19px;
+}
+.skill-import-statistics:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) strong {
+  display: block;
+  margin-top: 1px;
+  color: #8999ae;
+  font-size: 25px;
+  font-weight: 700;
+  line-height: 29px;
+}
+.skill-import-statistics:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) strong.success {
+  color: #168b64;
+}
+.skill-import-statistics:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) strong.attachments {
+  color: #1677e8;
+}
+.skill-import-statistics:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) strong.pending {
+  color: #bd7b1f;
+}
+.skill-import-completion-note:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  margin: 14px 0 0;
+  padding: 13px 15px;
+  border: 1px solid #cbdfff;
+  border-radius: 9px;
+  background: #f4f8ff;
+  color: #326bad;
+  font-size: 12px;
+  line-height: 20px;
+}
+.skill-import-result-details:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  margin-top: 18px;
+}
+.skill-import-result-details:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) > summary {
+  width: fit-content;
+  margin-bottom: 12px;
+  color: #5b789f;
+  cursor: pointer;
+  font-size: 12px;
+}
 .login-page:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   min-height: 100vh;
   height: 100dvh;
@@ -16136,6 +16622,98 @@ h1:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#
 }
 .artifact-case-list:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) li p {
   color: var(--platform-muted);
+}
+.aip-conversation-body:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+.aip-conversation-body:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) .aip-messages {
+  min-width: 0;
+}
+.aip-artifact-summary:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  color: #526783;
+}
+.aip-artifact-summary:hover:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),.aip-artifact-summary[aria-expanded="true"]:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  color: #0b5bd3;
+}
+.aip-single-artifact:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  max-width: 100%;
+}
+.aip-single-artifact:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) strong,.aip-artifact-list:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) li span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.aip-single-artifact:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) svg,.aip-single-artifact:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) time,.aip-artifact-list:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) svg {
+  flex-shrink: 0;
+}
+.aip-artifact-list:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  position: absolute;
+  z-index: 3;
+  inset: 0 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  width: min(310px,84%);
+  background: #fff;
+  border-left: 1px solid #e4ecf7;
+  box-shadow: -8px 0 24px #091e4214;
+}
+.aip-artifact-list:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid #edf2f8;
+}
+.aip-artifact-list:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) header h3 {
+  margin: 0;
+  color: #12324f;
+  font-weight: 600;
+  font-size: 13px;
+}
+.aip-artifact-list:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) ul {
+  min-height: 0;
+  overflow: auto;
+  padding: 5px 6px;
+  margin: 0;
+  list-style: none;
+}
+.aip-artifact-list:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) li button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #41526b;
+  text-align: left;
+  font-size: 12px;
+}
+.aip-artifact-list:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) li button:hover {
+  background: #eef5ff;
+  color: #0b5bd3;
+}
+.aip-artifact-list:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) li svg {
+  color: #3974bd;
+}
+@media (min-width:1000px) {
+  .aip-maximized:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) .aip-artifact-list {
+    position: static;
+    flex: 0 0 290px;
+    box-shadow: none;
+  }
 }
 .artifact-case-editor:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#),.artifact-case-editor:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) label {
   display: grid;

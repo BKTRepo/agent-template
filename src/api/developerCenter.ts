@@ -10,7 +10,7 @@ export interface ServerSkill {
   knowledge_update_count?: number
   id: string | number; name: string; class_id: string | number; application_ids?: string[]; application_paso?: string; description: string
   instructions: string; resource_ids: (string | number)[]; resource_usage: string; compatibility: string
-  technical_name: string; uploaded_resources: Implementation['uploadedResources']; knowledge_bases: Implementation['knowledgeBases']
+  definition_origin?: 'platform' | 'import'; technical_name: string; uploaded_resources: Implementation['uploadedResources']; knowledge_bases: Implementation['knowledgeBases']
   current_revision: number; skill_version_id: number; skill_markdown?: string; version: string | null; status: Implementation['status']; creator_id?: string; creator_login_name?: string; creator_name: string; updated_at: string
   backend_skill_id?: string | number; build_id?: string; build_origin?: 'backend'
   debug?: { id: string; runId: string; buildId?: string; skillVersionId?: number; status: 'queued' | 'running' | 'passed' | 'failed' | 'timeout'; output: string; origin: 'backend' }
@@ -48,7 +48,7 @@ export function toImplementation(row: ServerSkill): Implementation {
     system: applicationIds.includes('*') ? '全应用适用' : applicationIds[0] || '', team: '',
     technicalName: row.technical_name, description: row.description, instructions: row.instructions,
     resourceIds: [...new Set(row.resource_ids.map(knowledgeIdentity))], resourceUsage: row.resource_usage, compatibility: row.compatibility,
-    uploadedResources: row.uploaded_resources ?? [], knowledgeBases: uniqueKnowledgeSelections(row.knowledge_bases ?? []), skillMarkdown: row.skill_markdown,
+    definitionOrigin: row.definition_origin, uploadedResources: row.uploaded_resources ?? [], knowledgeBases: uniqueKnowledgeSelections(row.knowledge_bases ?? []), skillMarkdown: row.skill_markdown,
     version: row.version ?? '', modelTier: 'standard', status: row.status, creatorId: row.creator_id ?? row.creator_login_name,
     creatorName: row.creator_name, updatedAt: row.updated_at,
     backendSkillId: String(row.backend_skill_id ?? row.id), buildId: row.build_id,
@@ -73,7 +73,7 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
   if (!hasSkillSession()) throw new DeveloperCenterError('平台认证未配置，请检查接口代理的token配置。')
   let response: Response
   try { response = await authFetch(path, { ...options, cache: options.cache ?? 'no-store', headers: { ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...(token ? { token } : {}), ...options.headers } }) }
-  catch (error) { if (options.signal?.aborted) throw error; throw new DeveloperCenterError('无法连接后端，请检查后端服务是否已启动。') }
+  catch (error) { if (options.signal?.aborted) throw error; throw new DeveloperCenterError('请求未完成，请检查网络连接后重试。', 0) }
   if (response.status === 401) {
     throw new DeveloperCenterError('平台凭证已失效，请重新登录。')
   }
@@ -145,7 +145,7 @@ export async function persistSkillResources(form: ImplementationForm, uploads: S
     const data = new FormData(); data.append('files', file, row.name); data.append('categories', JSON.stringify([row.category]))
     const path = '/skills/developer/upload-resource-files'
     const result = await request<NonNullable<ImplementationForm['uploadedResources']>>(path, { method: 'POST', body: data })
-    saved.push({ ...result[0], savedCategory: result[0].category, fileId: result[0].fileId })
+    saved.push({ ...row, ...result[0], id: row.id, relativePath: row.relativePath, savedCategory: result[0].category, fileId: result[0].fileId })
   }
   return { ...form, uploadedResources: saved }
 }

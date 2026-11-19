@@ -1,7 +1,7 @@
 import type { ImplementationForm } from '@/types/developer'
 export function copySkillForm(form: ImplementationForm, version: string): ImplementationForm {
-  const result = { classId: form.classId === 'SKILL-API-003' ? 'SKILL-POINT-005' : form.classId, name: form.name.trim(), technicalName: form.technicalName, system: form.system, team: form.team ?? '', version, modelTier: form.modelTier, description: form.description, instructions: form.instructions, compatibility: form.compatibility ?? '', applicationIds: [...(form.applicationIds ?? [])], resourceIds: [...form.resourceIds], resourceUsage: form.resourceUsage ?? '', knowledgeBases: form.knowledgeBases?.map(row => ({ ...row })) ?? [], uploadedResources: form.uploadedResources?.map(row => ({ ...row })) ?? [], skillMarkdown: form.skillMarkdown }
-  if (result.skillMarkdown) result.skillMarkdown = syncMarkdownFields(result)
+  const result = { classId: form.classId === 'SKILL-API-003' ? 'SKILL-POINT-005' : form.classId, name: form.name.trim(), technicalName: form.technicalName, system: form.system, team: form.team ?? '', version, modelTier: form.modelTier, description: form.description, instructions: form.instructions, compatibility: form.compatibility ?? '', applicationIds: [...(form.applicationIds ?? [])], resourceIds: [...form.resourceIds], resourceUsage: form.resourceUsage ?? '', knowledgeBases: form.knowledgeBases?.map(row => ({ ...row })) ?? [], uploadedResources: form.uploadedResources?.map(row => ({ ...row })) ?? [], skillMarkdown: form.skillMarkdown, definitionOrigin: form.definitionOrigin }
+  if (result.skillMarkdown && result.definitionOrigin !== 'import') result.skillMarkdown = syncMarkdownFields(result)
   return result
 }
 export function markdownBody(value: string) {
