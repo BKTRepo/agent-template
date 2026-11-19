@@ -1,0 +1,82 @@
+.developer-dialog.wide.skill-import-dialog { width:1100px; max-width:calc(100vw - 48px); height:776px; max-height:calc(100vh - 80px); border-radius:16px; }
+.developer-dialog.skill-import-dialog > .dialog-header { min-height:80px; padding:20px 24px 14px; align-items:flex-start; border-bottom:1px solid #eaf0f8; }
+.developer-dialog.skill-import-dialog .dialog-title-group h2 { margin:0; font-size:18px; line-height:25px; color:#14243e; }
+.developer-dialog.skill-import-dialog .dialog-subtitle { margin:3px 0 0; color:#8092af; font-size:13px; line-height:20px; }
+.developer-dialog.skill-import-dialog .dialog-header > .icon-button { width:26px; height:26px; color:#8c9bb1; }
+.developer-dialog.skill-import-dialog > .dialog-top-content { flex-shrink:0; padding:0 24px; background:#fbfdff; border-bottom:1px solid #eaf0f8; }
+.skill-import-steps { display:flex; align-items:center; list-style:none; padding:13px 0; margin:0; }
+.skill-import-steps li { flex:1; display:flex; align-items:center; gap:8px; color:#8a9bb5; font-size:13px; white-space:nowrap; }
+.skill-import-steps li:last-child { flex:0 0 auto; }
+.skill-import-steps li:not(:last-child)::after { content:''; height:1px; flex:1; margin:0 9px; background:#e5edf8; }
+.skill-import-steps li > span { display:flex; align-items:center; justify-content:center; width:23px; height:23px; border-radius:50%; color:#8497b5; background:#eef3fa; font-size:13px; font-weight:600; }
+.skill-import-steps li.current { color:#1677ff; font-weight:600; }
+.skill-import-steps li.current > span { color:#fff; background:#1677ff; box-shadow:0 0 0 4px #e7f1ff; }
+.skill-import-steps li.complete > span { color:#0c956b; background:#e8f7f0; }
+.developer-dialog.skill-import-dialog > .dialog-body { flex:1; min-height:0; padding:22px 24px; overflow:auto; }
+.skill-import-drop { min-height:380px; padding:28px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; border:1px dashed #348aff; border-radius:13px; background:#f3f7fe; color:#183254; text-align:center; }
+.skill-import-drop.dragging { border-color:#095ee7; background:#e8f1ff; }
+.skill-import-upload-icon { display:flex; align-items:center; justify-content:center; width:50px; height:50px; margin-bottom:4px; border-radius:14px; background:#e6f0ff; color:#1677ff; }
+.skill-import-drop > strong { font-size:16px; line-height:24px; font-weight:600; }
+.skill-import-drop > p { margin:0; font-size:13px; line-height:20px; color:#8194b1; }
+.skill-import-drop > small { color:#8da0ba; font-size:12px; line-height:20px; }
+.skill-import-drop .section-actions { display:flex; gap:8px; margin:0 0 2px; }
+.developer-dialog.skill-import-dialog .skill-import-drop .button { height:39px; min-height:39px; padding:0 14px; font-size:13px; }
+.skill-import-fill { padding-top:14px; }
+.skill-import-fill-heading { display:flex; align-items:baseline; flex-wrap:wrap; gap:10px; margin:0 0 10px; }
+.skill-import-fill-heading > h3 { margin:0; font-size:13px; font-weight:600; color:#183254; }
+.skill-import-fill-heading > p { margin:0; font-size:12px; color:#8b9bb4; }
+.skill-import-table-wrap { width:100%; overflow:auto; border:1px solid #e1eaf7; border-radius:11px; }
+.skill-import-table { width:100%; table-layout:fixed; border-collapse:separate; border-spacing:0; font-size:13px; }
+.skill-import-table th { padding:9px 10px; text-align:left; font-size:12px; line-height:17px; font-weight:600; background:#f7faff; color:#7187a7; border-bottom:1px solid #e5edf8; }
+.skill-import-table th:first-child { width:26%; }
+.skill-import-table th:nth-child(2) { width:40%; }
+.skill-import-table th:nth-child(3) { width:19%; }
+.skill-import-table th:nth-child(4) { width:15%; }
+.skill-import-table td { padding:9px 10px; vertical-align:top; border-bottom:1px solid #edf2fa; overflow-wrap:anywhere; }
+.skill-import-table tr:last-child td { border-bottom:0; }
+.skill-import-table td > strong { display:block; font-size:13px; line-height:20px; font-weight:600; color:#203451; }
+.skill-import-file-size { display:block; margin-top:1px; font-size:11px; line-height:16px; color:#8c9fbc; }
+.skill-import-table td > input, .skill-import-table td > select { display:block; box-sizing:border-box; width:100%; min-width:0; height:34px; margin:0; padding:0 9px; border:1px solid #d8e4f6; border-radius:8px; background:#fff; color:#243955; font:inherit; font-size:12px; line-height:32px; outline:none; }
+.skill-import-table td > input:focus, .skill-import-table td > select:focus { border-color:#1677ff; box-shadow:0 0 0 2px #1677ff15; }
+.skill-import-table td > input[aria-invalid="true"] { border-color:#e45d65; background:#fffafa; }
+.skill-import-name-error { margin:6px 0 0; color:#d44450; font-size:12px; line-height:18px; }
+.skill-import-results article .skill-import-name-error { color:#d44450; }
+.skill-import-candidates article .skill-import-name-error { color:#d44450; }
+.skill-import-name-checking { margin:0 0 8px; color:#8092af; font-size:12px; }
+.skill-import-table td > input:disabled, .skill-import-table td > select:disabled { color:#8595ad; background:#f8fafc; }
+.skill-import-table details { margin-top:5px; font-size:11px; line-height:17px; color:#8a9cb6; }
+.skill-import-table summary { cursor:pointer; }
+.skill-import-table details p { margin:3px 0; word-break:break-word; }
+.skill-import-candidates { margin-top:18px; }
+.skill-import-queue-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
+.skill-import-queue-heading h3 { margin:0; font-size:13px; color:#526b8e; }
+.skill-import-candidates > h3 { margin:0 0 10px; font-size:13px; color:#526b8e; }
+.skill-import-candidates article, .skill-import-results article { display:flex; align-items:center; flex-wrap:wrap; gap:12px; padding:12px 14px; margin-bottom:9px; border:1px solid #e2eaf7; border-radius:9px; background:#fbfdff; }
+.skill-import-candidates article > div, .skill-import-results article > div { flex:1; min-width:0; overflow-wrap:anywhere; }
+.skill-import-candidates article strong, .skill-import-results article strong { font-size:13px; }
+.skill-import-candidates article p, .skill-import-results article p { margin:3px 0 0; font-size:12px; color:#7a8fac; }
+.skill-import-candidates article > svg { flex-shrink:0; color:#1677ff; }
+.skill-import-candidates article > .platform-field-error { flex-basis:100%; color:#d34c4c; }
+.skill-import-results > h3 { margin:12px 0 18px; color:#203451; font-size:17px; }
+.developer-dialog.skill-import-dialog > .dialog-footer { min-height:83px; padding:18px 24px; gap:10px; border-top:1px solid #e5edf8; }
+.skill-import-footer-note { flex:1; color:#8c9fbc; font-size:12px; line-height:20px; }
+.developer-dialog.skill-import-dialog > .dialog-footer .button { min-height:46px; padding:0 18px; border-radius:9px; font-size:14px; }
+@media(max-width:700px) { .developer-dialog.wide.skill-import-dialog { max-width:calc(100vw - 24px); height:calc(100vh - 40px); max-height:calc(100vh - 40px); } .developer-dialog.skill-import-dialog > .dialog-header { padding:16px; } .developer-dialog.skill-import-dialog > .dialog-top-content { padding:0 16px; } .developer-dialog.skill-import-dialog > .dialog-body { padding:18px 16px; } .skill-import-table { min-width:760px; } .skill-import-drop { min-height:320px; padding:20px 12px; } .skill-import-footer-note { flex-basis:100%; } }
+
+.skill-import-table th em { color:#ef666b; font-style:normal; margin-left:2px; }
+
+.skill-import-completion { display:flex; flex-direction:column; align-items:center; padding:8px 0 35px; text-align:center; }
+.skill-import-completion-icon { display:flex; align-items:center; justify-content:center; width:60px; height:60px; margin-bottom:17px; border-radius:50%; color:#14956d; background:#e7f6ef; }
+.skill-import-completion.partial .skill-import-completion-icon { color:#bd7b1f; background:#fff5df; }
+.skill-import-completion h3 { margin:0 0 14px; color:#19304c; font-size:19px; font-weight:700; }
+.skill-import-completion p { margin:0; color:#8397b5; font-size:13px; line-height:21px; }
+.skill-import-statistics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+.skill-import-statistics > div { padding:13px 15px; border:1px solid #e2eaf8; border-radius:11px; background:#fbfdff; }
+.skill-import-statistics span { display:block; color:#8498b6; font-size:12px; line-height:19px; }
+.skill-import-statistics strong { display:block; margin-top:1px; color:#8999ae; font-size:25px; font-weight:700; line-height:29px; }
+.skill-import-statistics strong.success { color:#168b64; }
+.skill-import-statistics strong.attachments { color:#1677e8; }
+.skill-import-statistics strong.pending { color:#bd7b1f; }
+.skill-import-completion-note { margin:14px 0 0; padding:13px 15px; border:1px solid #cbdfff; border-radius:9px; background:#f4f8ff; color:#326bad; font-size:12px; line-height:20px; }
+.skill-import-result-details { margin-top:18px; }
+.skill-import-result-details > summary { width:fit-content; margin-bottom:12px; color:#5b789f; cursor:pointer; font-size:12px; }

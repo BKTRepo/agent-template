@@ -28,7 +28,7 @@ export default function ResourceUpload({ items, activeIds, disabled, error, onAd
       const invalid = !!error && (!item.category || !available)
       return <div className="resource-row" key={item.id}>
         <Paperclip size={16} />
-        <div className="uploaded-name"><b>{item.name}</b><small>{(item.size / 1024).toFixed(1)} KB{!activeIds.includes(item.id) && ' · 请重新选择文件'}</small></div>
+        <div className="uploaded-name"><b>{item.relativePath || item.name}</b><small>{(item.size / 1024).toFixed(1)} KB{!activeIds.includes(item.id) && ' · 请重新选择文件'}</small></div>
         {onCategory && <select aria-label={`${item.name} 的资源用途分类`} value={item.category ?? ''}
           aria-invalid={invalid} aria-describedby={invalid ? `${labelId}-error` : undefined}
           disabled={disabled || !categories.length} onChange={event => onCategory(item.id, event.target.value || undefined)}>
