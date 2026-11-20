@@ -90,6 +90,21 @@ test('原始文档与上传资源按multipart提交，固定版本同时交给MC
   })
 })
 
+test('导入技能保留原构建编号，附件由后端按原路径挂载',async()=>{
+  const f=fixture({status:'failed'})
+  const item={...f.item,definitionOrigin:'import',buildOrigin:'backend',
+    uploadedResources:[{id:'template',name:'01-分析结果JSON模板.md',relativePath:'templates/01-分析结果JSON模板.md'}],
+    build:{files:[{path:'templates/01-分析结果JSON模板.md',size:8,sha256:'fixture'}]}}
+  await use(f,async()=>{
+    await runRealtimeDebug(item,input,'# Skill',[],undefined,options)
+    const request=f.calls.find(call=>call.method==='POST' && call.path==='/realtime-test-case-gen/runs')
+    assert.ok(request)
+    assert.equal(request.options.body.get('build_id'),'build-1')
+    assert.equal(request.options.body.get('skill_version_id'),'1')
+    assert.deepEqual(request.options.body.getAll('mounted_resources'),[])
+  })
+})
+
 test('真实failed任务显示error_message，不转成通过且不请求下载',async()=>{
   const f=fixture({status:'failed'})
   await use(f,async()=>{

@@ -31,6 +31,7 @@ test('目录独立读取后端分页与筛选，参数编码且保留真实维�
     assert.equal(url.searchParams.get('name'), '发布 & 中文'); assert.equal(url.searchParams.get('class_id'), '7')
     assert.equal(url.searchParams.get('application'), 'APP A'); assert.equal(url.searchParams.get('maintainer'), 'editor')
     assert.equal(url.searchParams.get('page'), '2')
+    assert.equal(url.searchParams.get('online_only'), 'true')
     return success({ items: [row()], total: 21, page: 2, pages: 2 })
   }, async () => {
     assert.equal((await getCatalogMetadata()).skill_classes[0].id, '7')

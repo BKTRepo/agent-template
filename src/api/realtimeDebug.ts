@@ -283,6 +283,37 @@ export async function resumeRealtimeDebug(item: Implementation, debug: DebugRun,
   return monitor(item, task, debug, signal, options)
 }
 
+async function appendMountedResources(form: FormData, item: Implementation) {
+  const resources = await Promise.all((await mountedDebugFiles(item)).map(async file => ({ file,
+    hash: await sha256Hex(await file.arrayBuffer()) })))
+  if (resources.length > mountedResourceLimit) throw new Error(`调试接口最多支持 ${mountedResourceLimit} 个挂载资源文件。`)
+  const entries = (item.build?.files ?? []).filter(row => row.path !== 'SKILL.md' && row.path !== 'manifest.json')
+  if (entries.length !== resources.length) throw new Error('挂载资源与当前构建清单不一致，请重新构建技能。')
+  const paths = new Set<string>()
+  const filenames = new Set<string>()
+  for (const { file } of resources) {
+    if (!file.size || /[\\/<>:"|?*\x00-\x1f]/.test(file.name) ||
+      !skillResourceExtensions.some(extension => file.name.toLowerCase().endsWith(extension))) {
+      throw new Error(`技能资源文件不合法：${file.name}`)
+    }
+    const filename = file.name.normalize('NFKC').toLowerCase()
+    if (filenames.has(filename)) throw new Error(`挂载资源存在同名文件“${file.name}”，当前沙箱不支持目录传参，请联系维护人调整。`)
+    filenames.add(filename)
+  }
+  for (const entry of entries) {
+    const parts = entry.path.split('/')
+    if (parts.length < 2 || !['scripts', 'assets', 'references'].includes(parts[0]) || parts.some(part => !part || part === '.' || part === '..' || /[\\<>:"|?*\x00-\x1f]/.test(part))) throw new Error(`资源路径不合法：${entry.path}`)
+    const key = entry.path.normalize('NFKC').toLowerCase()
+    if ([...paths].some(old => key === old || key.startsWith(old + '/') || old.startsWith(key + '/'))) throw new Error(`资源路径重复或冲突：${entry.path}`)
+    paths.add(key)
+    const index = resources.findIndex(row => row.hash === entry.sha256 && row.file.size === entry.size)
+    if (index < 0) throw new Error(`资源“${entry.path}”内容与当前构建不一致，请重新构建技能。`)
+    const [{ file }] = resources.splice(index, 1)
+    // 沿用同事既定接口：filename 为原文件名，不新增目录传参要求。
+    form.append('mounted_resources', file, file.name)
+  }
+}
+
 async function createDebugTask(item: Implementation, input: DebugInput, markdown: string, documents: DocumentUpload[]) {
   if (item.catalog) {
     const current = await getCatalogSkill(item.id)
@@ -325,34 +356,8 @@ async function createDebugTask(item: Implementation, input: DebugInput, markdown
       status: 'queued', output: '', origin: 'backend', versionRegistered: false }
     return { task, debug }
   }
-  const resources = await Promise.all((await mountedDebugFiles(item)).map(async file => ({ file,
-    hash: await sha256Hex(await file.arrayBuffer()) })))
-  if (resources.length > mountedResourceLimit) throw new Error(`调试接口最多支持 ${mountedResourceLimit} 个挂载资源文件。`)
-  const entries = (item.build?.files ?? []).filter(row => row.path !== 'SKILL.md' && row.path !== 'manifest.json')
-  if (entries.length !== resources.length) throw new Error('挂载资源与当前构建清单不一致，请重新构建技能。')
-  const paths = new Set<string>()
-  const filenames = new Set<string>()
-  for (const { file } of resources) {
-    if (!file.size || /[\\/<>:"|?*\x00-\x1f]/.test(file.name) ||
-      !skillResourceExtensions.some(extension => file.name.toLowerCase().endsWith(extension))) {
-      throw new Error(`技能资源文件不合法：${file.name}`)
-    }
-    const filename = file.name.normalize('NFKC').toLowerCase()
-    if (filenames.has(filename)) throw new Error(`挂载资源存在同名文件“${file.name}”，当前沙箱不支持目录传参，请联系维护人调整。`)
-    filenames.add(filename)
-  }
-  for (const entry of entries) {
-    const parts = entry.path.split('/')
-    if (parts.length < 2 || !['scripts', 'assets', 'references'].includes(parts[0]) || parts.some(part => !part || part === '.' || part === '..' || /[\\<>:"|?*\x00-\x1f]/.test(part))) throw new Error(`资源路径不合法：${entry.path}`)
-    const key = entry.path.normalize('NFKC').toLowerCase()
-    if ([...paths].some(old => key === old || key.startsWith(old + '/') || old.startsWith(key + '/'))) throw new Error(`资源路径重复或冲突：${entry.path}`)
-    paths.add(key)
-    const index = resources.findIndex(row => row.hash === entry.sha256 && row.file.size === entry.size)
-    if (index < 0) throw new Error(`资源“${entry.path}”内容与当前构建不一致，请重新构建技能。`)
-    const [{ file }] = resources.splice(index, 1)
-    // 沿用同事既定接口：filename 为原文件名，不新增目录传参要求。
-    form.append('mounted_resources', file, file.name)
-  }
+  // Imported attachments are loaded by the server from the authorized build with their original paths.
+  if (item.definitionOrigin !== 'import') await appendMountedResources(form, item)
   const response = await authFetch(`${base}/runs`, { method: 'POST', headers: authHeaders(), body: form })
   const task = await taskResponse(response, item.backendSkillId || item.id)
   const debug: DebugRun = { id: task.run_id, runId: task.run_id, buildId: item.buildId,
