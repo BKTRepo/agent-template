@@ -93,17 +93,12 @@
   --ease-out: cubic-bezier(0, 0, 0.2, 1);
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   --animate-pulse: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  --blur-sm: 8px;
   --blur-md: 12px;
   --default-transition-duration: 150ms;
   --default-transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
   --default-font-family: var(--font-sans);
   --default-mono-font-family: var(--font-mono);
   --shadow-overlay: var(--overlay-shadow);
-  --color-field: var(--field-background, var(--default));
-  --color-field-rgb: 24 24 27;
-  --color-field-hover: var(--field-hover);
-  --radius-field: var(--field-radius, calc(var(--radius) * 1.5));
   --border-width-field: var(--field-border-width, var(--border-width));
   --ease-smooth: ease;
   --ease-out-quad: cubic-bezier(0.25, 0.46, 0.45, 0.94);
@@ -15163,6 +15158,10 @@ h1:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#
   color: var(--platform-muted);
   line-height: 1.6;
 }
+.skill-class-description:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .skill-group:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) .implementation-table td {
   padding: 16px 14px;
 }
@@ -16220,6 +16219,12 @@ h1:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#
 .artifact-code-editor:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) .cm-editor.cm-focused {
   outline: 2px solid var(--platform-blue);
   outline-offset: -2px;
+}
+.artifact-code-editor[data-editable='true'] .cm-editor.cm-focused :is(.cm-content, .cm-line) {
+  caret-color: #17233d !important;
+}
+.artifact-code-editor[data-editable='true']:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) .cm-cursor-primary {
+  visibility: hidden;
 }
 .artifact-word-paper:not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#):not(#\#) {
   max-width: 780px;

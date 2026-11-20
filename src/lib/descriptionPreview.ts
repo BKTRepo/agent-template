@@ -1,6 +1,11 @@
+export function formatSkillClassDescription(description: string | undefined | null): string {
+  return (description ?? '').replace(/\\r\\n|\\n|\r\n?/g, '\n')
+}
+
 export function descriptionLines(description: string | undefined | null): string[] {
-  const characters = Array.from((description || '').replace(/\s+/gu, ' ').trim())
-  if (!characters.length) return []
-  const visible = characters.length > 44 ? [...characters.slice(0, 41), '.', '.', '.'] : characters
-  return [visible.slice(0, 22).join(''), visible.slice(22).join('')].filter(Boolean)
+  const value = (description ?? '').replace(/\r\n?/g, '\n').trim()
+  if (!value) return []
+  const lines = value.split('\n').flatMap(line => line.replace(/\s+/gu, ' ').trim().match(/.{1,22}/gu) ?? [''])
+  if (lines.length <= 2) return lines
+  return [lines[0], Array.from(lines[1]).slice(0, 19).join('') + '...']
 }

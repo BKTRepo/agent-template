@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { ChevronDown, ChevronUp, Download, Sparkles } from 'lucide-react'
 import NameDescription, { DescriptionPreview } from '@/components/common/NameDescription'
 import ListPagination from '@/components/common/ListPagination'
+import { formatSkillClassDescription } from '@/lib/descriptionPreview'
 import { listCatalogSkills, type CatalogClass, type CatalogFilters } from '@/api/skillCatalog'
 import type { Implementation } from '@/types/developer'
 
@@ -29,7 +30,7 @@ export default function SkillCatalogGroup({ skillClass, filters, expanded, onTog
   const filtering = !!(filters.name || filters.system || filters.maintainer)
   if (filtering && !loading && !error && result.total === 0) return null
   return <section className="surface skill-group" aria-label={skillClass.name}>
-    <div className="skill-group-heading"><Sparkles size={22} /><div><h2><button className="skill-class-title" aria-expanded={expanded} onClick={onToggle}>{skillClass.name}</button></h2><DescriptionPreview description={skillClass.description} /></div>
+    <div className="skill-group-heading"><Sparkles size={22} /><div><h2><button className="skill-class-title" aria-expanded={expanded} onClick={onToggle}>{skillClass.name}</button></h2><DescriptionPreview description={formatSkillClassDescription(skillClass.description)} /></div>
       <span className="status-tag neutral">{result.total} 个实现</span><span className={`status-tag ${skillClass.is_enabled ? 'green' : 'neutral'}`}>{skillClass.is_enabled ? '已启用' : '已停用'}</span>
       <button className="button small" disabled={!!busy} onClick={() => onInspectClass(skillClass.id)}>类详情</button>
       <button className="icon-button" aria-expanded={expanded} aria-label={`${expanded ? '收起' : '展开'} ${skillClass.name}`} onClick={onToggle}>{expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}</button>

@@ -36,7 +36,12 @@ export default function ArtifactCodeEditor({ text, type, readOnly, onChange }: {
       ],
     })
     view.current = editor
-    return () => { view.current = null; editor.destroy() }
+    const focus = readOnly ? undefined : window.requestAnimationFrame(() => editor.focus())
+    return () => {
+      if (focus !== undefined) window.cancelAnimationFrame(focus)
+      view.current = null
+      editor.destroy()
+    }
   }, [type, readOnly])
 
   useEffect(() => {
@@ -47,5 +52,5 @@ export default function ArtifactCodeEditor({ text, type, readOnly, onChange }: {
     }
   }, [text])
 
-  return <div className="artifact-code-editor" ref={parent} />
+  return <div className="artifact-code-editor" data-editable={!readOnly} ref={parent} />
 }

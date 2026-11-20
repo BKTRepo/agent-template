@@ -169,6 +169,13 @@ export default function DeveloperPage() {
     } catch (error) { if (skillAccount() === account) { setMessage((error as Error).message); setPanel(null) } }
     finally { if (skillAccount() === account) setBusy(null) }
   }
+  function acceptSavedSkill(saved: Implementation) {
+    formDirty.current = false
+    replace(saved)
+    setSelectedId(saved.id)
+    // 保存后留在当前窗口时，后续操作使用服务端返回的新修订号。
+    setForm(previous => ({ ...previous, revision: saved.revision, skillVersionId: saved.skillVersionId, version: saved.version }))
+  }
   async function saveDraft() {
     const issues = validateSkillForm(form, implementations, selectedId, true, resourceCategories)
     if (showFormErrors(issues)) return
@@ -177,19 +184,9 @@ export default function DeveloperPage() {
       const ready = await persistSkillResources(form, uploads)
       setForm(ready)
       const saved = selectedId ? await updateDeveloperSkill(selectedId, ready) : await createDeveloperSkill(ready)
-      replace(saved)
-      // 从详情页保存时保留窗口和当前编辑内容，方便继续修改或直接进入调试。
-      if (selectedId) {
-        setSelectedId(saved.id)
-        // 保存会递增后端 revision；窗口不关闭时必须立即回填，否则下一次提交仍会携带旧的 expected_revision。
-        setForm(previous => ({ ...previous, revision: saved.revision, skillVersionId: saved.skillVersionId, version: saved.version }))
-        setNotice('修改已保存到后端数据库。')
-      }
-      else {
-        // 新建草稿后继续停留在当前窗口，并回填服务端版本信息以支持连续保存。
-        setSelectedId(saved.id)
-        setForm(previous => ({ ...previous, revision: saved.revision, skillVersionId: saved.skillVersionId, version: saved.version }))
-        setNotice('草稿已保存到后端数据库。')
+      acceptSavedSkill(saved)
+      setNotice(selectedId ? '修改已保存到后端数据库。' : '草稿已保存到后端数据库。')
+      if (!selectedId) {
         await refresh(1).catch(error => setMessage(`草稿已保存，列表刷新失败：${(error as Error).message}`))
       }
     } catch (error) { setMessage((error as Error).message) } finally { setBusy(null) }
@@ -203,9 +200,7 @@ export default function DeveloperPage() {
       const ready = await persistSkillResources(form, uploads)
       setForm(ready)
       const saved = await updateDeveloperSkill(selected.id, ready)
-      replace(saved); setSelectedId(saved.id)
-      // 已上线技能保存后同样要使用服务端返回的新版本信息，支持在当前窗口连续保存。
-      setForm(previous => ({ ...previous, revision: saved.revision, skillVersionId: saved.skillVersionId, version: saved.version }))
+      acceptSavedSkill(saved)
       setNotice('修改已保存为新草稿，需重新调试后再上线。')
     } catch (error) { setMessage((error as Error).message) } finally { setBusy(null) }
   }
@@ -239,12 +234,8 @@ export default function DeveloperPage() {
       const ready = await persistSkillResources(form, uploads)
       setForm(ready)
       const item = selectedId && selected && !saveChanges ? selected : selectedId ? await updateDeveloperSkill(selectedId, ready) : await createDeveloperSkill(ready)
-      formDirty.current = false
-      replace(item); setSelectedId(item.id)
+      acceptSavedSkill(item)
       if (!selectedId) await refresh(1).catch(() => {})
-      // 新建后立即进入构建流程时，当前表单仍然是创建前的草稿对象。
-      // 回填后端返回的修订号，后续重试保存/构建才能携带 expected_revision。
-      setForm(previous => ({ ...previous, revision: item.revision, skillVersionId: item.skillVersionId, version: item.version }))
       if (!skillBackendEnabled) throw new SkillApiError('后端生成服务尚未启用，不能使用前端模拟生成。')
       if (!hasSkillSession()) throw new SkillApiError('本地后端尚未配置有效会话，请检查联调服务与认证配置。')
       if (item.knowledgeBases?.some(row => row.source === 'mock')) throw new SkillApiError('真实生成不能使用示例知识库，请重新选择真实知识库或改用资源上传。', { resourceIds: '请使用真实知识库，或取消示例挂载。' })

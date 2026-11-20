@@ -4,7 +4,7 @@ import { hasDuplicateKnowledge } from './knowledgeSelection'
 const normalizedName = (value: string) => value.trim().normalize('NFKC').trim().toLowerCase()
 export const resourceExtensions = ['.py', '.js', '.sh', '.bash', '.ps1', '.zip', '.whl', '.gz', '.tgz', '.tar', '.md', '.txt', '.json', '.csv', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp']
 // 定稿中“资源上传”明确允许的 Skill 附件格式。
-export const skillResourceExtensions = ['.py', '.js', '.md', '.xlsx', '.docx', '.png', '.jpg', '.jpeg', '.yaml', '.yml', '.jar', '.class', '.pyc']
+export const skillResourceExtensions = ['.py', '.js', '.md', '.xlsx', '.docx', '.png', '.jpg', '.jpeg', '.yaml', '.yml', '.jar', '.class', '.pyc', '.json', '.csv', '.txt']
 // 在线调试仅接收当前 Office 格式，避免旧版 .doc/.xls 文档解析不稳定。
 export const documentExtensions = ['.pdf', '.docx', '.md', '.txt', '.xlsx', '.json']
 export interface ResourceFileLimits { maxFileBytes?: number; maxFiles?: number; maxTotalBytes?: number }
