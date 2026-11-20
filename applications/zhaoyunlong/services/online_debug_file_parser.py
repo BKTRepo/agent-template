@@ -11,7 +11,7 @@ MAX_UPLOAD_BYTES: Final = 20 * 1024 * 1024
 MAX_EXTRACTED_CHARS: Final = 500_000
 TEXT_SUFFIXES: Final = {".md", ".txt", ".json"}
 FILE_SUFFIXES: Final = TEXT_SUFFIXES | {".pdf", ".docx", ".xlsx"}
-ORIGINAL_RESOURCE_SUFFIXES: Final = {".yaml", ".yml", ".jar", ".class", ".pyc"}
+ORIGINAL_RESOURCE_SUFFIXES: Final = {".yaml", ".yml", ".jar", ".class", ".pyc", ".json", ".csv", ".txt"}
 MAX_ORIGINAL_RESOURCE_BYTES: Final = 50 * 1024 * 1024
 
 
@@ -29,7 +29,7 @@ def extract_uploaded_file(filename: str, content: bytes) -> dict[str, str]:
 
 
 def extract_mounted_resource(filename: str, content: bytes) -> dict[str, str | bytes]:
-    """保留配置及编译附件的原始字节，其余资源沿用文本提取。"""
+    """原样保留配置、数据和编译附件，其余资源沿用文本提取。"""
     safe_name = _safe_filename(filename)
     suffix = Path(safe_name).suffix.lower()
     if suffix in ORIGINAL_RESOURCE_SUFFIXES:

@@ -140,7 +140,8 @@ async def upload_version(source_id:int=Form(...),files:list[UploadFile]=File(...
 @developer_skills.get('/developer/download-resource-file',summary='开发者中心-按文件编号下载本人挂载资源原文件')
 async def download(file_id:int=Query(...,ge=1,description='文件编号'),current_user=DependAuth):
     path,name=await sources.download(file_id,current_user)
-    return FileResponse(path,filename=name)
+    # 资源下载返回原文件，JSON 附件也不能被当成业务接口响应。
+    return FileResponse(path,filename=name,media_type='application/octet-stream')
 
 @developer_skills.post('/developer/save-skill',summary='开发者中心-保存技能修改并校验修订号冲突')
 async def save(data:DeveloperSkillSaveRequest,current_user=DependAuth):
