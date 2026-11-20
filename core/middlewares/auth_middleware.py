@@ -71,6 +71,7 @@ async def auth_middleware(request: Request, call_next):
         # login
         "POST /user/create",
         "POST /base/auth/access_token",
+        "POST /base/auth/technical-test-login",
 
         # root
         "GET /",
