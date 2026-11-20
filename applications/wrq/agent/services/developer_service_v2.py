@@ -15,6 +15,7 @@ from applications.wrq.sandbox import SandboxResults
 from applications.wrq.agent.services.version_service import version_and_form
 from applications.wrq.agent.services.published_skill_version import display_skill_version
 from applications.wrq.agent.services.knowledge_reference_service import current_knowledge_references
+from common.skill_resource_limits import MAX_SKILL_UPLOAD_FILES
 
 STATUS_TEXT = {
     'DRAFT': '草稿',
@@ -136,6 +137,8 @@ class DeveloperSkillCrud:
             raise DeveloperError('请选择应用目录中存在的应用',field='application_paso')
         if not data.resource_usage.strip():
             raise DeveloperError('请填写资源使用说明',field='resource_usage')
+        if len(data.uploaded_resources) > MAX_SKILL_UPLOAD_FILES:
+            raise DeveloperError(f'每个技能最多挂载 {MAX_SKILL_UPLOAD_FILES} 个资源文件', field='uploaded_resources')
         files=[]
         for row in data.uploaded_resources:
             file_id = row.get('fileId')
@@ -501,7 +504,10 @@ class DeveloperSkillCrud:
             'instructions':form.instructions,'resource_ids':[k['id'] for k in knowledge],
             'resource_usage':form.resource_usage or '','compatibility':form.compatibility or '',
             'definition_origin':form.definition_origin,'technical_name':form.technical_name,'uploaded_resources':files,'knowledge_bases':knowledge,
-            'skill_markdown':display_skill_version(read_markdown(form.skill_markdown_path), version.version, allow_missing_metadata=form.definition_origin == "import") if include_markdown and form.skill_markdown_path else '', 'version':version.version,'current_revision':version.revision,
+            'skill_markdown':display_skill_version(read_markdown(form.skill_markdown_path), version.version,
+                allow_missing_metadata=form.definition_origin == "import",
+                omit_resource_notes=form.definition_origin == "import") if include_markdown and form.skill_markdown_path else '',
+            'version':version.version,'current_revision':version.revision,
             'skill_version_id':version.id,'status':page_status,'creator_login_name':skill.create_user_login_name,'updater_login_name':skill.update_user_login_name,
             'creator_name':user.alias or user.username,'updated_at':skill.updated_time,'backend_skill_id':skill.id,
             'build_id':version.build_id,'build_origin':'backend' if version.build_id else None,'debug':debug}

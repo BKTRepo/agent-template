@@ -3,8 +3,17 @@ import json
 import re
 
 
-def display_skill_version(markdown: str, version: str | None, *, allow_missing_metadata: bool = False) -> str:
-    """只替换 YAML 头部 metadata.version，不触碰正文或其他 version 字段。"""
+def strip_generated_resource_notes(markdown: str) -> str:
+    """Remove the platform-marked attachment section of an older imported build."""
+    return re.sub(r'^<!-- platform-resources:start -->[^\r\n]*\r?\n.*?^<!-- platform-resources:end -->[ \t]*(?:\r?\n|$)',
+                  '', markdown, flags=re.M | re.S)
+
+
+def display_skill_version(markdown: str, version: str | None, *, allow_missing_metadata: bool = False,
+                          omit_resource_notes: bool = False) -> str:
+    """呈现发布版本；导入技能可隐藏历史构建中自动加入的附件区。"""
+    if omit_resource_notes:
+        markdown = strip_generated_resource_notes(markdown)
     front = re.match(r'\A---\s*\r?\n(?P<header>.*?)^---[ \t]*\r?\n', markdown, re.M | re.S)
     if not front:
         raise ValueError('Skill YAML 头部无效')

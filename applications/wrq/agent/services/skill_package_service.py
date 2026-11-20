@@ -219,7 +219,8 @@ class SkillPackageService(LegacySkillPackageService):
                         if actual != file.sha256:
                             raise DeveloperError("挂载原文件校验失败", 409)
                     resolved.append(ResolvedSkillResource(index, path, file.file_name, expected_hash=file.sha256))
-                built = await asyncio.to_thread(self.builder.build, source, resolved, user_id=user_login_name(user), skill_id=skill.id)
+                built = await asyncio.to_thread(self.builder.build, source, resolved, user_id=user_login_name(user), skill_id=skill.id,
+                                                include_resource_notes=content.definition_origin != "import")
                 saved.build_id = built['build_id']
                 saved.package_storage_key = str(Path(built['workspace_dir'])/'package.zip')
                 manifest = Path(built['workspace_dir'])/'manifest.json'
@@ -318,7 +319,9 @@ class SkillPackageService(LegacySkillPackageService):
         if not version or not content or not version.build_id:
             raise SkillBuildNotFound("请先生成当前版本的Skill定义")
         built = await self.get(skill_id, version.build_id, user, verify=True)
-        return {'build': built, 'markdown': display_skill_version(read_markdown(content.skill_markdown_path), version.version), 'version': version.version}
+        markdown = display_skill_version(read_markdown(content.skill_markdown_path), version.version,
+                                         omit_resource_notes=content.definition_origin == "import")
+        return {'build': built, 'markdown': markdown, 'version': version.version}
 
     async def rebuild_saved(self, skill_id, user, *, markdown=None, expected_version=None, knowledge_base_id=None, resource_usage=None):
         async with in_transaction():

@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import ValidationError
 from starlette.datastructures import UploadFile
+from common.skill_resource_limits import MAX_SKILL_UPLOAD_FILES
 
 from applications.user.models.user_model import User
 from applications.zhaoyunlong.schemas.online_debug_schema import OnlineModelDebugRequest
@@ -25,6 +26,7 @@ from applications.wrq.agent.services.developer_skill_crud import DeveloperError
 from services import DependAuth
 
 realtime_test_case_router = APIRouter()
+MAX_DEBUG_DOCUMENTS = 10
 
 
 @realtime_test_case_router.post(
@@ -38,7 +40,7 @@ realtime_test_case_router = APIRouter()
             "skill_definition": {"type": "string", "description": "Markdown 格式的 Skill 定义文本"},
             "conversation_input": {"type": "string", "description": "自然语言调试诉求"},
             "documents": {"type": "array", "description": "需求文档文件，最多 10 个", "items": {"type": "string", "format": "binary"}},
-            "mounted_resources": {"type": "array", "description": "已挂载的只读资源，最多 20 个；不重复进行前端上传格式白名单校验", "items": {"type": "string", "format": "binary"}},
+            "mounted_resources": {"type": "array", "description": f"已挂载的只读资源，最多 {MAX_SKILL_UPLOAD_FILES} 个", "items": {"type": "string", "format": "binary"}},
         }}},
     }}},
 )
@@ -130,7 +132,7 @@ async def _parse_debug_request(request: Request) -> dict[str, Any]:
     content_type = request.headers.get("content-type", "").lower()
     if not content_type.startswith("multipart/form-data"):
         raise ValueError("Content-Type 必须为 multipart/form-data")
-    form = await request.form(max_files=30, max_fields=20)
+    form = await request.form(max_files=MAX_DEBUG_DOCUMENTS + MAX_SKILL_UPLOAD_FILES, max_fields=20)
     text_fields = OnlineModelDebugRequest.model_validate({
         "skill_id": _form_text(form.get("skill_id"), "skill_id", required=True),
         "skill_definition": _form_text(form.get("skill_definition"), "skill_definition", required=True),
@@ -142,11 +144,11 @@ async def _parse_debug_request(request: Request) -> dict[str, Any]:
         "skill_version_id": _form_text(form.get("skill_version_id"), "skill_version_id"),
         # 文档输入来自本次前端上传，必须执行允许格式校验。
         "documents": await _parse_uploads(
-            form.getlist("documents"), "documents", 10, extract_uploaded_file,
+            form.getlist("documents"), "documents", MAX_DEBUG_DOCUMENTS, extract_uploaded_file,
         ),
         # 挂载资源已由资源系统管理，保留配置及编译附件的原始字节。
         "mounted_resources": await _parse_uploads(
-            form.getlist("mounted_resources"), "mounted_resources", 20, extract_mounted_resource,
+            form.getlist("mounted_resources"), "mounted_resources", MAX_SKILL_UPLOAD_FILES, extract_mounted_resource,
         ),
     }
 

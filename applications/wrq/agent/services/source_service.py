@@ -11,6 +11,7 @@ from applications.wrq.auth import user_login_name
 from applications.wrq.agent.services.developer_skill_crud import DeveloperError
 from applications.wrq.agent.services.skill_resource_rules import resource_role
 from applications.wrq.agent.services.skill_package_builder import safe_relative_path
+from common.skill_resource_limits import MAX_SKILL_UPLOAD_FILES
 from configure import PROJECT_CONFIG
 
 MAX_BYTES = 50 * 1024 * 1024
@@ -23,7 +24,9 @@ class SourceService:
         login = user_login_name(user)
         if not isinstance(categories, list) or not all(isinstance(v, str) for v in categories):
             raise DeveloperError('资源用途分类必须是按文件顺序排列的列表')
-        if not files or len(files) != len(categories) or len(files) > 100:
+        if len(files) > MAX_SKILL_UPLOAD_FILES:
+            raise DeveloperError(f'每次最多上传 {MAX_SKILL_UPLOAD_FILES} 个资源文件')
+        if not files or len(files) != len(categories):
             raise DeveloperError('每个上传文件都需要选择用途分类')
         paths, staged, total = [], [], 0
         self.root.mkdir(parents=True, exist_ok=True)

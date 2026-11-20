@@ -23,6 +23,7 @@ from tortoise.timezone import now
 from tortoise.transactions import in_transaction
 
 from configure import PROJECT_CONFIG, LOGGER
+from common.skill_resource_limits import MAX_SKILL_UPLOAD_FILES
 from applications.wrq.auth import user_login_name
 from applications.wrq.markdown_storage import discard_markdown, read_markdown
 from applications.wrq.agent.models.agent_model import SkillImportBatch, SkillImportItem, Source, ResourceCategory, SkillForm, SkillResourceBinding, Skill
@@ -40,7 +41,8 @@ DEFAULT_USAGE = "相关参考资料、模板及脚本见附件，请结合执行
 def import_limits():
     return {"max_batch_bytes": PROJECT_CONFIG.SKILL_IMPORT_MAX_BATCH_BYTES,
             "max_file_bytes": 50 * MiB, "max_skill_bytes": 50 * MiB,
-            "max_files": 1000, "max_skills": 50, "max_skill_files": 100, "expires_hours": PROJECT_CONFIG.SKILL_IMPORT_EXPIRE_HOURS}
+            "max_files": 1000, "max_skills": 50, "max_skill_files": MAX_SKILL_UPLOAD_FILES + 1,
+            "expires_hours": PROJECT_CONFIG.SKILL_IMPORT_EXPIRE_HOURS}
 
 
 
@@ -169,8 +171,10 @@ def inspect_skills(entries, directory, limits, ensure_space=None):
                 raise DeveloperError("父子目录同时包含SKILL.md，技能根目录重叠")
             prefix = "" if root == "." else root + "/"
             files = [dict(entry, relative_path=entry["path"][len(prefix):]) for entry in entries if entry["path"].startswith(prefix)]
-            if len(files) > limits["max_skill_files"] or sum(f["size"] for f in files if f["path"] != definition["path"]) > limits["max_skill_bytes"]:
-                raise DeveloperError("单技能最多100个文件，附件合计不超过50MiB")
+            if len(files) > limits["max_skill_files"]:
+                raise DeveloperError(f'每个技能最多导入 {limits["max_skill_files"] - 1} 个附件')
+            if sum(f["size"] for f in files if f["path"] != definition["path"]) > limits["max_skill_bytes"]:
+                raise DeveloperError("单技能附件合计不超过50MiB")
             raw = (directory / definition["storage"]).read_bytes().decode("utf-8-sig")
             if len(raw) > 200000:
                 raise DeveloperError("SKILL.md不能超过200000字符")

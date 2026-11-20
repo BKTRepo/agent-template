@@ -115,7 +115,8 @@ class SkillCatalogService:
         skill_markdown = ''
         if form.skill_markdown_path:
             try:
-                skill_markdown = display_skill_version(read_markdown(form.skill_markdown_path), version.version)
+                skill_markdown = display_skill_version(read_markdown(form.skill_markdown_path), version.version,
+                                                       omit_resource_notes=form.definition_origin == "import")
             except FileNotFoundError:
                 # 对话台加载 Skill 仍需要其资源绑定；定义原件缺失不应阻断该只读元数据。
                 skill_markdown = ''

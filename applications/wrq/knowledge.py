@@ -62,6 +62,9 @@ async def prepare_execution(payload, user, run_id, *, published=False):
     form = await SkillForm.get_or_none(skill_version_id=version.id)
     if form and form.skill_markdown_path:
         payload['skill_definition'] = read_markdown(form.skill_markdown_path)
+        if form.definition_origin == 'import':
+            from applications.wrq.agent.services.published_skill_version import strip_generated_resource_notes
+            payload['skill_definition'] = strip_generated_resource_notes(payload['skill_definition'])
         if published:
             from applications.wrq.agent.services.published_skill_version import display_skill_version
             payload['skill_definition'] = display_skill_version(payload['skill_definition'], version.version)

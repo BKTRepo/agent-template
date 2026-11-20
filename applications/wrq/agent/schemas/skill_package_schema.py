@@ -3,9 +3,7 @@ from typing import Annotated, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, StringConstraints
 
-
-# 上传入口每次最多 5 个文件；知识库展开的原文件不是本次直接上传。
-MAX_SKILL_UPLOAD_FILES = 100  # 防止异常 multipart；定稿不再沿用旧的 5 个文件规则。
+from common.skill_resource_limits import MAX_SKILL_UPLOAD_FILES
 
 SKILL_CLASS_IDS = {"SKILL-POINT-005", "SKILL-CASE-001", "SKILL-BUG-004",
                    "SKILL-REPORT-006", "SKILL-DATA-002", "SKILL-UI-007"}

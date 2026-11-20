@@ -7,6 +7,7 @@ import zipfile
 from tortoise.transactions import in_transaction
 from tortoise.expressions import F
 from tortoise.exceptions import IntegrityError
+from common.skill_resource_limits import MAX_SKILL_UPLOAD_FILES
 
 from applications.wrq.agent.models.agent_model import Skill, SkillVersion, SkillDebugRun, DeveloperSkillClass
 from applications.wrq.agent.services.developer_skill_crud import DeveloperError
@@ -48,8 +49,8 @@ async def create_catalog_test(data, documents, user):
     try:
         document_entries = [await asyncio.to_thread(extract_uploaded_file, file.filename or '', await file.read()) for file in documents]
         entries = [row for row in built['files'] if row['path'] not in ('SKILL.md', 'manifest.json')]
-        if len(entries) > 20:
-            raise DeveloperError('在线测试最多20个挂载资源', 422)
+        if len(entries) > MAX_SKILL_UPLOAD_FILES:
+            raise DeveloperError(f'在线测试最多挂载 {MAX_SKILL_UPLOAD_FILES} 个资源文件', 422)
         # 不相信浏览器传来的定义和资源；从刚校验完整性的固定发布ZIP读取。
         archive = await asyncio.to_thread(packages._published_archive, built, version.version)
         with zipfile.ZipFile(io.BytesIO(archive[0])) as package:

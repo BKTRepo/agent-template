@@ -38,7 +38,7 @@ applications/zhaoyunlong/sandbox_results/
 | `skill_definition` | 文本 | 是 | Markdown 格式的 Skill 定义。 |
 | `conversation_input` | 文本 | 否 | 本次自然语言调试诉求。 |
 | `documents` | 文件数组 | 否 | 需求文档，最多 10 个。 |
-| `mounted_resources` | 文件数组 | 否 | 只读挂载资源，最多 20 个。 |
+| `mounted_resources` | 文件数组 | 否 | 只读挂载资源，最多 50 个。 |
 
 文件字段仅支持 PDF、DOCX、Markdown、TXT、XLSX、JSON。接口立即返回 `202` 和任务编号：
 

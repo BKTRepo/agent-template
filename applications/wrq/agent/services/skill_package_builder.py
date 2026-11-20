@@ -149,7 +149,8 @@ class SkillPackageBuilder:
         return SkillPackageError(SkillValidationReport(errors=[ValidationIssue(field=field, reason=reason)]))
 
     @staticmethod
-    def _render_skill(source: SkillPackageSource, entries: list[dict], *, user_id: int, skill_id: int | str) -> str:
+    def _render_skill(source: SkillPackageSource, entries: list[dict], *, user_id: int, skill_id: int | str,
+                      include_resource_notes: bool = True) -> str:
         """标准 YAML 字段与平台元信息分开；正文只采用用户提供的内容。"""
         metadata = {"version": source.version, "skill_id": skill_id, ("creator_login_name" if isinstance(user_id, str) else "creator_id"): str(user_id),
                     "display_name": source.display_name}
@@ -174,25 +175,26 @@ class SkillPackageBuilder:
                 f"## 执行指令\n\n{source.instructions}\n")
         if source.skill_markdown is not None:
             body = markdown_body(source.skill_markdown) + "\n"
-        if entries or source.resource_usage:
-            body += "\n<!-- platform-resources:start -->\n"
-        if source.resource_usage:
-            body += f"\n## 资源使用说明\n\n{source.resource_usage}\n"
-        for role, title, label in (("reference", "参考资料", "参考资料"),
-                                   ("script", "脚本", "脚本"),
-                                   ("asset", "模板与静态资源", "静态资源")):
-            group = [entry for entry in entries if entry["role"] == role]
-            if not group:
-                continue
-            body += f"\n## {title}\n\n"
-            for index, entry in enumerate(group, start=1):
-                body += f"- [{label} {index}]({quote(entry['path'], safe='/')})\n"
-                if entry["usage"] and source.resource_usage is None:
-                    # 缩进保留多行说明、列表及命令，保持属于当前资源条目。
-                    body += "\n" + "\n".join("  " + line for line in entry["usage"].splitlines()) + "\n"
-                body += "\n"
-        if entries or source.resource_usage:
-            body += "<!-- platform-resources:end -->\n"
+        if include_resource_notes:
+            if entries or source.resource_usage:
+                body += "\n<!-- platform-resources:start -->\n"
+            if source.resource_usage:
+                body += f"\n## 资源使用说明\n\n{source.resource_usage}\n"
+            for role, title, label in (("reference", "参考资料", "参考资料"),
+                                       ("script", "脚本", "脚本"),
+                                       ("asset", "模板与静态资源", "静态资源")):
+                group = [entry for entry in entries if entry["role"] == role]
+                if not group:
+                    continue
+                body += f"\n## {title}\n\n"
+                for index, entry in enumerate(group, start=1):
+                    body += f"- [{label} {index}]({quote(entry['path'], safe='/')})\n"
+                    if entry["usage"] and source.resource_usage is None:
+                        # 缩进保留多行说明、列表及命令，保持属于当前资源条目。
+                        body += "\n" + "\n".join("  " + line for line in entry["usage"].splitlines()) + "\n"
+                    body += "\n"
+            if entries or source.resource_usage:
+                body += "<!-- platform-resources:end -->\n"
         if source.knowledge_base_ids:
             body += "\n<!-- platform-knowledge:start -->\n## 知识库检索\n"
             body += "本技能挂载知识库：" + "、".join(source.knowledge_base_ids) + "\n"
@@ -201,7 +203,7 @@ class SkillPackageBuilder:
         return f"---\n{frontmatter}---\n\n{body}"
 
     def build(self, source: SkillPackageSource, resources: list[ResolvedSkillResource],
-              *, user_id: int, skill_id: int | str) -> dict:
+              *, user_id: int, skill_id: int | str, include_resource_notes: bool = True) -> dict:
         report = validate_source(source)
         if not report.valid:
             raise SkillPackageError(report)
@@ -258,7 +260,8 @@ class SkillPackageBuilder:
                                 "document_id": resource.document_id, "role": binding.role,
                                 "category": binding.category, "usage": binding.usage})
             (skill_dir / "SKILL.md").write_text(
-                self._render_skill(source, entries, user_id=user_id, skill_id=skill_id), encoding="utf-8")
+                self._render_skill(source, entries, user_id=user_id, skill_id=skill_id,
+                                   include_resource_notes=include_resource_notes), encoding="utf-8")
             self._validate_directory(skill_dir, source.name)
             entries.insert(0, {"path": "SKILL.md", "size": (skill_dir / "SKILL.md").stat().st_size,
                                "sha256": file_hash(skill_dir / "SKILL.md"), "role": "instructions",
