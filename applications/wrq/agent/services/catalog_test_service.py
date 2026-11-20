@@ -11,6 +11,7 @@ from common.skill_resource_limits import MAX_SKILL_UPLOAD_FILES
 
 from applications.wrq.agent.models.agent_model import Skill, SkillVersion, SkillDebugRun, DeveloperSkillClass
 from applications.wrq.agent.services.developer_skill_crud import DeveloperError
+from applications.wrq.agent.services.imported_debug_resources import read_imported_debug_resources
 from applications.wrq.agent.services.skill_catalog_service import SkillCatalogService
 from applications.wrq.auth import user_login_name
 from applications.zhaoyunlong.models.online_debug_run_model import OnlineDebugRun
@@ -46,6 +47,7 @@ async def create_catalog_test(data, documents, user):
     catalog = SkillCatalogService()
     packages, built, version = await catalog.package(data.skill_id, data.build_id, online=True)
     _, _, form = await catalog.published(data.skill_id, online=True)
+    packaged_resources = None
     try:
         document_entries = [await asyncio.to_thread(extract_uploaded_file, file.filename or '', await file.read()) for file in documents]
         entries = [row for row in built['files'] if row['path'] not in ('SKILL.md', 'manifest.json')]
@@ -55,19 +57,25 @@ async def create_catalog_test(data, documents, user):
         archive = await asyncio.to_thread(packages._published_archive, built, version.version)
         with zipfile.ZipFile(io.BytesIO(archive[0])) as package:
             markdown = package.read(f"{built['name']}/SKILL.md").decode('utf-8')
-            resources, names = [], set()
-            for entry in entries:
-                name = Path(entry['path']).name
-                key = name.casefold()
-                if key in names:
-                    raise DeveloperError('挂载资源存在同名文件，当前沙箱不支持目录传参', 422)
-                names.add(key)
-                content = package.read(f"{built['name']}/{entry['path']}")
-                resources.append(await asyncio.to_thread(extract_mounted_resource, name, content))
+            resources = []
+            if form.definition_origin == 'import':
+                packaged_resources = await asyncio.to_thread(read_imported_debug_resources, built)
+            else:
+                names = set()
+                for entry in entries:
+                    name = Path(entry['path']).name
+                    key = name.casefold()
+                    if key in names:
+                        raise DeveloperError('挂载资源存在同名文件，当前沙箱不支持目录传参', 422)
+                    names.add(key)
+                    content = package.read(f"{built['name']}/{entry['path']}")
+                    resources.append(await asyncio.to_thread(extract_mounted_resource, name, content))
     except FileParseError as exc:
         raise DeveloperError(str(exc), 422) from exc
     payload = {'skill_id': data.skill_id, 'build_id': data.build_id, 'skill_version_id': version.id, 'skill_definition': markdown,
                'conversation_input': data.conversation_input, 'documents': document_entries, 'mounted_resources': resources}
+    if packaged_resources is not None:
+        payload['_packaged_resources'] = packaged_resources
     if len(markdown) > 100000:
         raise DeveloperError('发布定义超过沙箱长度限制', 422)
     try:

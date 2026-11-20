@@ -68,7 +68,8 @@ class SkillCatalogService:
                             'description': row.description or ''})
         return {'skill_classes': classes, 'applications': await application_options(),
                 'maintainers': [{'id': name, 'name': name} for name in sorted({
-                    row.update_user_login_name or row.create_user_login_name for row in await self.visible()})]}
+                    row.update_user_login_name or row.create_user_login_name
+                    for row in await self.visible().filter(display_status='ONLINE')})]}
 
     async def class_detail(self, class_id):
         row = await DeveloperSkillClass.get_or_none(id=class_id)
@@ -78,7 +79,7 @@ class SkillCatalogService:
                 'description': row.description or '', 'input_schema': row.input_schema,
                 'output_schema': row.output_schema, 'template': row.template}
 
-    async def list(self, *, name='', class_id=None, application='', maintainer='', page=1, page_size=10, online_only=False):
+    async def list(self, *, name='', class_id=None, application='', maintainer='', page=1, page_size=10, online_only=True):
         page_size = max(1, min(page_size, 10))
         # 分类和应用取发布表单，避免当前草稿更换分类后污染目录。
         form_query = SkillForm.all()

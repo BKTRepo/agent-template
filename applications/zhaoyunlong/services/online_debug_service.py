@@ -421,14 +421,38 @@ class OnlineDebugService:
             input_dir / "documents", payload["documents"], "文档", validate_text_suffix=True,
         )
         # 已挂载资源由资源系统负责格式管理；保留指定附件的原始字节。
-        resource_paths = self._write_text_files(
-            input_dir / "resources", payload["mounted_resources"], "挂载资源", validate_text_suffix=False,
-        )
+        resource_dir = input_dir / "resources"
+        if "_packaged_resources" in payload:
+            resource_paths = self._write_packaged_resources(resource_dir, payload["_packaged_resources"])
+        else:
+            resource_paths = self._write_text_files(
+                resource_dir, payload["mounted_resources"], "挂载资源", validate_text_suffix=False,
+            )
         (input_dir / "online-debug-request.json").write_text(json.dumps({
             "skill_definition": payload["skill_definition"],
             "conversation_input": str(payload.get("conversation_input", "")).strip(),
             "document_paths": document_paths, "resource_paths": resource_paths,
         }, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    @staticmethod
+    def _write_packaged_resources(directory: Path, resources: list[dict[str, str | bytes]]) -> list[str]:
+        """Restore original relative paths from the server's verified build."""
+        from applications.wrq.agent.services.skill_package_builder import safe_relative_path
+
+        root = directory.resolve()
+        paths = []
+        for item in resources:
+            try:
+                target = directory / safe_relative_path(item["relative_path"])
+                if not target.resolve().is_relative_to(root):
+                    raise ValueError("附件路径超出挂载目录")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with target.open("xb") as stream:
+                    stream.write(item["content"])
+            except (OSError, ValueError) as exc:
+                raise OnlineDebugError(f"技能附件路径无效或冲突：{item['relative_path']}") from exc
+            paths.append(target.relative_to(directory.parent).as_posix())
+        return paths
 
     @staticmethod
     def _write_text_files(

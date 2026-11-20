@@ -65,6 +65,15 @@ async def prepare_execution(payload, user, run_id, *, published=False):
         if form.definition_origin == 'import':
             from applications.wrq.agent.services.published_skill_version import strip_generated_resource_notes
             payload['skill_definition'] = strip_generated_resource_notes(payload['skill_definition'])
+            if not published:
+                from applications.wrq.agent.services.imported_debug_resources import read_imported_debug_resources
+                from applications.wrq.agent.services.skill_package_builder import SkillPackageError
+                from applications.wrq.agent.services.skill_package_service import SkillBuildNotFound, SkillPackageService
+                try:
+                    built = await SkillPackageService().get(skill.id, version.build_id, user, verify=True)
+                except (OSError, ValueError, SkillBuildNotFound, SkillPackageError) as exc:
+                    raise DeveloperError('技能附件构建读取失败，请重新生成技能', 409) from exc
+                payload['_packaged_resources'] = await asyncio.to_thread(read_imported_debug_resources, built)
         if published:
             from applications.wrq.agent.services.published_skill_version import display_skill_version
             payload['skill_definition'] = display_skill_version(payload['skill_definition'], version.version)

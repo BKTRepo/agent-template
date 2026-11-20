@@ -221,7 +221,7 @@ APPLICATION_CATALOG_CACHE_SECONDS 默认 60 秒。原 WRQ_PORTAL_APPLICATIONS_UR
 
 暂存默认24小时、批次总量200MiB、单文件50MiB、每技能附件合计50MiB、单技能最多100个文件、批次最多1000个文件/50个技能。`SKILL_IMPORT_MAX_BATCH_BYTES` 和 `SKILL_IMPORT_EXPIRE_HOURS` 可配置。定时任务及上传时清理临时文件，成功草稿和正式导入结果保留。
 
-附件详情新增 `relativePath`，保存技能时必须回传；`definition_origin` 表示 platform/import。每个技能最多导入 50 个附件（不含 SKILL.md）。导入附件默认使用资源字典 `custom`（自定义资源），构建、调试、下载保留原相对路径。导入技能构建时保留正文里的原始附件引用，平台不另加附件清单。导入后 DRAFT、revision=1、version=NULL，首次调试前不产生构建或发布记录。
+附件详情新增 `relativePath`，保存技能时必须回传；`definition_origin` 表示 platform/import。每个技能最多导入 50 个附件（不含 SKILL.md）。导入附件默认使用资源字典 `custom`（自定义资源）。开发者调试和技能中心在线测试都由服务端从已校验的构建包读取导入附件，按原相对路径写入沙箱的 `/input/resources`，浏览器无需再提交 `mounted_resources`。导入技能构建时保留正文里的原始附件引用，平台不另加附件清单。导入后 DRAFT、revision=1、version=NULL，首次调试前不产生构建或发布记录。
 
 目录导入支持同一文件夹下的多个ZIP技能包，及Skill子目录与ZIP混合。ZIP独立保留来源路径，解压后累计校验批次大小和文件数。发现外层PDF等未归属任何Skill的文件，或ZIP中没有SKILL.md时，整批拒绝并返回具体路径；Skill根目录内的附带文件保留为附件。
 ### 导入完成后返回编辑
