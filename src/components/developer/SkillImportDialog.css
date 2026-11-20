@@ -38,6 +38,8 @@
 .skill-import-file-size { display:block; margin-top:1px; font-size:11px; line-height:16px; color:#8c9fbc; }
 .skill-import-table td > input, .skill-import-table td > select { display:block; box-sizing:border-box; width:100%; min-width:0; height:34px; margin:0; padding:0 9px; border:1px solid #d8e4f6; border-radius:8px; background:#fff; color:#243955; font:inherit; font-size:12px; line-height:32px; outline:none; }
 .skill-import-table td > input:focus, .skill-import-table td > select:focus { border-color:#1677ff; box-shadow:0 0 0 2px #1677ff15; }
+.skill-import-table .search-select { min-width:0; }
+.skill-import-table .search-select-control input { height:35px; min-width:0; }
 .skill-import-table td > input[aria-invalid="true"] { border-color:#e45d65; background:#fffafa; }
 .skill-import-name-error { margin:6px 0 0; color:#d44450; font-size:12px; line-height:18px; }
 .skill-import-results article .skill-import-name-error { color:#d44450; }

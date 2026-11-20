@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Upload, CheckCircle2, AlertCircle, FolderOpen, LoaderCircle, X } from 'lucide-react'
 import Dialog from './Dialog'
+import SearchSelect from './SearchSelect'
 import { getDeveloperMetadata, type DeveloperMetadata } from '@/api/developerCenter'
 import { getImportLimits, readDroppedSkills, discardSkillImport, type ImportLimits, type ImportUpload } from '@/api/skillImport'
 import { skillAccount } from '@/api/skillSession'
@@ -137,7 +138,7 @@ export default function SkillImportDialog({ onClose, onImported, onOpen }: { onC
         <span className="skill-import-upload-icon"><Upload size={24}/></span><strong>{busy ? '正在上传并校验文件…' : '将技能文件或文件夹拖到这里'}</strong>
         <p>支持 SKILL.md、ZIP 技能包或包含多个技能的文件夹</p>
         <div className="section-actions"><button className="button primary" disabled={busy || !limits} onClick={() => fileInput.current?.click()}>选择文件</button><button className="button" disabled={busy || !limits} onClick={() => folderInput.current?.click()}><FolderOpen size={16}/>选择文件夹</button></div>
-        {limits && <small>单文件 ≤ {formatBytes(limits.max_file_bytes)} · 批次 ≤ {formatBytes(limits.max_batch_bytes)} · 最多 {limits.max_skills} 个技能</small>}
+        {limits && <small>单文件 ≤ {formatBytes(limits.max_file_bytes)} · 每个技能最多 {limits.max_skill_files - 1} 个附件 · 批次 ≤ {formatBytes(limits.max_batch_bytes)} · 最多 {limits.max_skills} 个技能</small>}
       </div>
       {rows.length > 0 && <div className="skill-import-candidates"><div className="skill-import-queue-heading"><h3>校验结果 · {rows.filter(row=>row.validated).length} 项通过 · {rows.filter(row=>row.validated===false).length} 项未通过</h3><button className="button small" disabled={busy} onClick={clear}>全部清空</button></div>
         {rows.map(row => <article key={row.id}><div><strong>{row.rootPath === '.' ? row.sourceName : row.rootPath}</strong><p>{row.sourceName} · {row.fileCount} 个文件 · {row.validated ? row.skillId ? '校验通过，修改原技能' : '校验通过，已临时暂存' : row.validated===false ? '未通过校验，已拦截' : '等待上传校验'}</p>{row.errors.length>0&&<p role="alert" className="skill-import-name-error">{row.errors.join('；')}</p>}</div><button className="icon-button" aria-label={`移除${row.name}`} title="移出待导入列表" disabled={busy} onClick={() => remove(row.id)}><X size={17}/></button></article>)}
@@ -149,7 +150,9 @@ export default function SkillImportDialog({ onClose, onImported, onOpen }: { onC
         return <tr key={row.id}><td><strong title={row.sourceName}>{row.sourceName.split('/').pop()}</strong><small className="skill-import-file-size">{(row.sourceSize/1024).toFixed(1)} KB · {row.fileCount} 个文件</small>{row.skillId && <small className="skill-import-file-size">编辑原技能</small>}{row.errors.length > 0 && <p role="alert" className="skill-import-name-error">{row.errors.join('；')}</p>}</td>
           <td><input aria-label={`${row.rootPath}的技能名称`} aria-invalid={!!nameErrors[row.id]?.length} value={row.name} maxLength={128} disabled={locked} onChange={event => change(row.id,{name:event.target.value})}/>{nameErrors[row.id]?.length>0&&<p role="alert" className="skill-import-name-error">{nameErrors[row.id].join('；')}</p>}</td>
           <td><select aria-label={`${row.rootPath}的所属大类`} value={row.classId} disabled={locked} onChange={event => change(row.id,{classId:event.target.value})}><option value="">请选择所属大类</option>{metadata?.skill_classes.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></td>
-          <td><select aria-label={`${row.rootPath}的所属应用`} value={row.application} disabled={locked} onChange={event => change(row.id,{application:event.target.value})}><option value="">请选择所属应用</option>{metadata?.applications.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></td></tr>
+          <td><SearchSelect label={`${row.rootPath}的所属应用`} value={row.application} disabled={locked}
+            options={metadata?.applications ?? []} placeholder="请选择所属应用" required
+            onChange={application => change(row.id, { application })} /></td></tr>
       })}</tbody></table></div>
     </section>}
     {step === 3 && <section className="skill-import-results"><div className={`skill-import-completion ${complete ? 'success' : 'partial'}`} role="status"><span className="skill-import-completion-icon">{complete ? <CheckCircle2 size={31}/> : <AlertCircle size={31}/>}</span><h3>{complete ? '导入完成' : '导入结果'}</h3><p>已成功处理 {successful.length} 个技能，状态为草稿。{failed.length > 0 && `另有 ${failed.length} 项未完成，请查看失败原因。`}</p></div>

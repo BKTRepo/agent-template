@@ -6,7 +6,7 @@ import DebugResult from './DebugResult'
 import { validateInput } from '@/api/developer'
 import { debugDocumentLimit, downloadRealtimeDocuments, realtimeDebugEnabled, restoreRealtimeDebug, resumeRealtimeDebug, runRealtimeDebug } from '@/api/realtimeDebug'
 import type { DebugMonitorOptions } from '@/api/realtimeDebug'
-import { debugDocumentLimits, documentExtensions, validateResourceFiles } from '@/lib/skillForm'
+import { debugDocumentLimits, documentExtensions, mountedResourceLimit, validateResourceFiles } from '@/lib/skillForm'
 import { renderSkillMarkdown } from '@/api/skillArchive'
 import { skillDefinition } from '@/lib/skillDefinition'
 import type { DebugInput, Implementation } from '@/types/developer'
@@ -132,7 +132,7 @@ export default function DebugDialog({ item, onClose, onEdit, onPublish, onSaveDe
     <ResourceUpload label="文档输入（上传文件）" hint="拖拽或点击上传需求文档" extensions={documentExtensions} limits={debugDocumentLimits} items={input.documents} activeIds={files.map(row => row.id)} disabled={locked} onAdd={addDocuments} onRemove={id => { setFiles(previous => previous.filter(row => row.id !== id)); change({ ...input, documents: input.documents.filter(row => row.id !== id) }) }} />
     <div className="form-field"><span>挂载资源（本次调试关联，只读确认）</span>{mountedResources.map(row => <div className="resource-row" key={row.id}><span>{row.name}{row.version && <small> · {row.version}</small>}</span><span className="status-tag blue">已挂载</span></div>)}{!mountedResources.length && <p className="helper-text">未挂载资源</p>}</div>
     <div ref={resultRef}><DebugResult result={result} running={running} downloading={busy === 'document'} onRetry={result?.runId ? retryDocument : undefined} onResume={!busy && result?.runId ? resume : undefined} /></div>
-    <p className="helper-text">关闭窗口或页面后，已提交的调试任务继续执行；重新打开时显示最新任务及结果。最多10份需求文档、20份挂载资源。</p>
+    <p className="helper-text">关闭窗口或页面后，已提交的调试任务继续执行；重新打开时显示最新任务及结果。最多 {debugDocumentLimit} 份需求文档、{mountedResourceLimit} 个挂载资源文件。</p>
     {error && editor === null && <p className="error-banner" role="alert">{error}{result?.runId && !busy && <button className="button small" onClick={resume}>继续查询</button>}</p>}
   </Dialog>{editor !== null && <Dialog wide title="编辑 Skill 定义（Markdown）" busy={!!busy} onClose={closeEditor} footer={discard ? <><span role="alert">存在未保存修改，确认放弃？</span><button className="button" onClick={() => setDiscard(false)}>继续编辑</button><button className="button danger" onClick={() => { setEditor(null); setDiscard(false) }}>放弃修改</button></> : <><button className="button" disabled={!!busy} onClick={closeEditor}>取消</button><button className="button primary" disabled={!!busy} onClick={saveDefinition}>{busy ? '保存中…' : '保存'}</button></>}><p className="helper-text">保存后同步至我创建的技能，旧调试结果失效；重新上线时系统生成新版本。</p><textarea className="markdown-editor" aria-label="Markdown Skill 定义" maxLength={200000} value={editor} disabled={!!busy} onChange={event => setEditor(event.target.value)} spellCheck={false} />{error && <p className="error-banner" role="alert">{error}</p>}</Dialog>}</>
 }

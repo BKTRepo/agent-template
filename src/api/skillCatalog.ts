@@ -2,6 +2,7 @@ import { authFetch } from './authFetch'
 import { request, toImplementation, type ServerSkill, type DeveloperCatalogOption } from './developerCenter'
 import { useAuthStore } from '@/stores/authStore'
 import { downloadBlob } from '@/lib/resourceStorage'
+import { mountedResourceLimit } from '@/lib/skillForm'
 import type { Implementation, SkillBuild } from '@/types/developer'
 
 export interface CatalogClass extends DeveloperCatalogOption { is_enabled: boolean; description: string }
@@ -55,7 +56,7 @@ export async function catalogResourceFiles(item: Implementation): Promise<File[]
   if (!item.buildId || !item.build) throw new Error('尚未取得发布构建。')
   const files = []
   const entries = item.build.files.filter(row => row.path !== 'SKILL.md' && row.path !== 'manifest.json')
-  if (entries.length > 20) throw new Error('调试接口最多支持 20 个挂载资源文件。')
+  if (entries.length > mountedResourceLimit) throw new Error(`调试接口最多支持 ${mountedResourceLimit} 个挂载资源文件。`)
   for (const entry of entries) {
     const response = await binary(`/skills/catalog/download-resource?${new URLSearchParams({ skill_id: item.id, build_id: item.buildId, path: entry.path })}`)
     files.push(new File([await response.blob()], entry.path.split('/').pop()!, { type: 'application/octet-stream' }))

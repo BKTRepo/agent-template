@@ -1,7 +1,7 @@
 import { authFetch } from './authFetch'
 import { useAuthStore } from '@/stores/authStore'
 import { readBlob, saveBlobs } from '@/lib/resourceStorage'
-import { debugDocumentLimits, documentExtensions, skillResourceExtensions, validateResourceFiles } from '@/lib/skillForm'
+import { debugDocumentLimits, documentExtensions, mountedResourceLimit, skillResourceExtensions, validateResourceFiles } from '@/lib/skillForm'
 import { sha256Hex } from '@/lib/sha256'
 import { DeveloperCenterError, getDeveloperDebugLink, recordDeveloperDebugResult } from './developerCenter'
 import { skillResourceDownloadUrl } from './skillResourceDownload'
@@ -11,7 +11,6 @@ import type { DebugArtifact, DebugInput, Implementation, RealtimeDocument, Realt
 const base = '/realtime-test-case-gen'
 export const realtimeDebugEnabled = import.meta.env?.VITE_REALTIME_DEBUG_ENABLED === 'true'
 export const debugDocumentLimit = 10
-export const mountedResourceLimit = 20
 export const debugPollInterval = 5000
 type DocumentUpload = { id: string; file: File }
 type DebugRun = NonNullable<Implementation['debug']>

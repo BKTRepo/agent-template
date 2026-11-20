@@ -8,7 +8,8 @@ export const skillResourceExtensions = ['.py', '.js', '.md', '.xlsx', '.docx', '
 // 在线调试仅接收当前 Office 格式，避免旧版 .doc/.xls 文档解析不稳定。
 export const documentExtensions = ['.pdf', '.docx', '.md', '.txt', '.xlsx', '.json']
 export interface ResourceFileLimits { maxFileBytes?: number; maxFiles?: number; maxTotalBytes?: number }
-export const skillResourceLimits: ResourceFileLimits = { maxFileBytes: 50 * 1024 * 1024, maxTotalBytes: 50 * 1024 * 1024 }
+export const mountedResourceLimit = 50
+export const skillResourceLimits: ResourceFileLimits = { maxFiles: mountedResourceLimit, maxFileBytes: 50 * 1024 * 1024, maxTotalBytes: 50 * 1024 * 1024 }
 // 调试文档的格式独立于资源上传，但沿用 50MB 单文件、总量限制；最多 10 份。
 export const debugDocumentLimits: ResourceFileLimits = { ...skillResourceLimits, maxFiles: 10 }
 // 知识库所有文件合计最多 200 MB，不限制文件数量。
@@ -29,6 +30,7 @@ export function validateSkillForm(form: ImplementationForm, existing: { id: stri
   if (hasDuplicateKnowledge(form.resourceIds) || hasDuplicateKnowledge((form.knowledgeBases ?? []).map(row => row.id))) errors.resourceIds = '同一个技能不能重复挂载同一个知识库'
   if (form.uploadedResources?.some(file => !file.category?.trim() || (categories && !categories.some(option => option.name === file.category)))) errors.uploadedResources = '请为每份上传资源选择已启用的用途分类'
   if (form.uploadedResources?.some(file => file.size > skillResourceLimits.maxFileBytes!) || (form.uploadedResources ?? []).reduce((sum, file) => sum + file.size, 0) > skillResourceLimits.maxTotalBytes!) errors.uploadedResources = '单个资源文件及资源总大小均不能超过 50 MB'
+  if ((form.uploadedResources?.length ?? 0) > mountedResourceLimit) errors.uploadedResources = `每个技能最多挂载 ${mountedResourceLimit} 个资源文件`
   if (!id && !(form.applicationIds?.[0] || '').trim()) errors.applicationIds = '请选择所属应用'
   if ((form.applicationIds?.length ?? 0) > 1) errors.applicationIds = '请选择一个所属应用'
   if ((form.resourceUsage?.length ?? 0) > 10000) errors.resourceUsage = '资源使用说明最长 10000 个字符'
