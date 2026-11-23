@@ -18,6 +18,9 @@ class AuthControl:
                 key=PROJECT_CONFIG.AUTH_SECRET_KEY,
                 algorithms=PROJECT_CONFIG.AUTH_JWT_ALGORITHM
             )
+            from services.token_revocation import is_revoked
+            if await is_revoked(token):
+                raise HTTPException(status_code=401, detail="登录已退出，请重新登录")
             user_id = decode_data.get("user_id")
             user = await User.filter(id=user_id, state__not=1, is_active=True).first()
             if not user:

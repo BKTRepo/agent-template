@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 from datetime import timedelta, datetime, timezone
 
-from fastapi import APIRouter, Depends, Body, HTTPException
+from fastapi import APIRouter, Depends, Body, HTTPException, Header
+import jwt
 from pydantic import BaseModel, Field
 from tortoise.exceptions import IntegrityError
 
@@ -16,6 +17,14 @@ from services import CTX_USER_ID, create_access_token, get_password_hash
 
 auth_public = APIRouter()
 auth_secure = APIRouter()
+
+
+@auth_secure.post('/logout', summary='注销当前登录令牌')
+async def logout(token: str = Header(...)):
+    from services.token_revocation import revoke
+    payload = jwt.decode(token, PROJECT_CONFIG.AUTH_SECRET_KEY, algorithms=[PROJECT_CONFIG.AUTH_JWT_ALGORITHM])
+    await revoke(token, float(payload['exp']))
+    return SuccessResponse(data=None)
 
 
 class TechnicalTestLogin(BaseModel):
