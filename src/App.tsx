@@ -31,8 +31,61 @@ const navigation = [
   { group: '平台管理', items: [{ id: 'mcp', label: 'MCP 接入配置', icon: Settings }] },
 ]
 
+const IDLE_LIMIT_MS = 60 * 60 * 1000
+const IAM_LOGIN_URL = 'http://iam.bosc/iamgate/login.jsp'
+
+function useIdleLogout(token: string | undefined) {
+  useEffect(() => {
+    if (!token) return
+    const session = useAuthStore.getState().session
+    const key = `platform-idle:${session?.userId || session?.username || 'user'}`
+    let finished = false
+    let lastWrite = 0
+    const readLast = () => Number(localStorage.getItem(key)) || Date.now()
+    const initial = localStorage.getItem(key)
+    if (!initial) localStorage.setItem(key, String(Date.now()))
+    const logout = async () => {
+      if (finished) return
+      finished = true
+      const controller = new AbortController()
+      const timeout = window.setTimeout(() => controller.abort(), 5000)
+      try {
+        await fetch('/base/auth/logout', { method: 'POST', headers: { token }, signal: controller.signal, keepalive: true })
+      } catch { /* 本地会话仍需退出；服务端令牌按原有效期失效。 */ }
+      finally {
+        window.clearTimeout(timeout)
+        if (useAuthStore.getState().session?.token === token) useAuthStore.getState().clearSession()
+        localStorage.removeItem(key)
+        window.location.replace(IAM_LOGIN_URL)
+      }
+    }
+    const check = () => { if (Date.now() - readLast() >= IDLE_LIMIT_MS) void logout() }
+    const activity = (event: Event) => {
+      if (!event.isTrusted || finished) return
+      const now = Date.now()
+      if (now - readLast() >= IDLE_LIMIT_MS) { void logout(); return }
+      if (now - lastWrite >= 1000) { localStorage.setItem(key, String(now)); lastWrite = now }
+    }
+    const events = ['pointerdown', 'pointermove', 'keydown', 'scroll', 'touchstart'] as const
+    events.forEach(name => window.addEventListener(name, activity, { passive: true }))
+    const onStorage = (event: StorageEvent) => { if (event.key === key && event.oldValue && event.newValue === null) void logout() }
+    window.addEventListener('storage', onStorage)
+    const onVisible = () => { if (document.visibilityState === 'visible') check() }
+    document.addEventListener('visibilitychange', onVisible)
+    const timer = window.setInterval(check, 1000)
+    check()
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('storage', onStorage)
+      document.removeEventListener('visibilitychange', onVisible)
+      events.forEach(name => window.removeEventListener(name, activity))
+    }
+  }, [token])
+}
+
 export default function App() {
   const token = useAuthStore(state => state.session?.token)
+  useIdleLogout(token)
   const [verifiedToken, setVerifiedToken] = useState('')
   const [error, setError] = useState('')
   const [retry, setRetry] = useState(0)
