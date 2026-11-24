@@ -10,7 +10,7 @@ from applications.chat.services.page_context import resolve_page_context, reques
 from datetime import datetime
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
-from starlette.responses import StreamingResponse
+from starlette.responses import JSONResponse, StreamingResponse
 from tortoise import connections
 from tortoise.transactions import in_transaction
 
@@ -20,7 +20,7 @@ from applications.chat.schemas.chat_schema import (ConversationCreate, Conversat
                                                    ArtifactInput, ConversationRename, ConversationResources, FeedbackInput, SendInput, TaskInput)
 from applications.chat.services.chat_service import (clear_conversation, conversation_data,
                                                      require_conversation, validate_resources)
-from applications.chat.services.attachments import save_uploads, task_upload_dir, remove_task_uploads
+from applications.chat.services.attachments import save_uploads, task_upload_dir, retain_task_uploads, copy_retry_uploads
 from applications.chat.services.history_files import history_store, schedule_history, sync_history, write_history_events
 from applications.chat.services.execution import start_task
 from applications.chat.services.model_health import health, select_model
@@ -420,7 +420,7 @@ async def stop(body: TaskInput, user: User = DependAuth):
     cancelled = await ChatTask.filter(id=task.id, status='pending').update(status='cancelled', finished_at=datetime.now())
     if cancelled and task.worker_host == socket.gethostname():
         try:
-            await asyncio.to_thread(remove_task_uploads, task.id)
+            await asyncio.to_thread(retain_task_uploads, task.id)
         except OSError:
             pass  # 后台清理会重试
     await ChatTask.filter(id=task.id, status='running').update(status='cancelling', error=STOP_REQUESTED)
@@ -431,7 +431,12 @@ async def stop(body: TaskInput, user: User = DependAuth):
 @chat_router.post('/retry', summary='悬浮窗-重试最新回复')
 async def retry(body: TaskInput, user: User = DependAuth):
     old = await require_task(body.task_id, user)
-    return await retry_task(old, user)
+    try:
+        return await retry_task(old, user)
+    except HTTPException as exc:
+        if exc.status_code == 410:
+            return JSONResponse(status_code=410, content={'detail': exc.detail})
+        raise
 
 
 @chat_router.post('/retry-with-files', summary='悬浮窗-重新上传附件并重试')
@@ -451,8 +456,15 @@ async def retry_task(old, user, directory=None):
                 raise HTTPException(409, '请等待当前会话任务结束后再重试')
             original_message = await ChatMessage.filter(id=old.user_message_id).using_db(conn).first()
             contents = await asyncio.to_thread(history_store().message_contents, user.id, conversation.id, conversation.generation)
+            events = await asyncio.to_thread(history_store().read, user.id, conversation.id)
+            snapshot = request_snapshots(events, conversation.generation).get(old.id,
+                {'context': None, 'skills': list(conversation.skills or []), 'knowledge_bases': list(conversation.knowledge_bases or [])})
+            if not directory and snapshot.get('attachments'):
+                if old.worker_host != socket.gethostname():
+                    raise HTTPException(410, '附件已失效，请重新上传')
+                directory = await asyncio.to_thread(copy_retry_uploads, old.id, snapshot['attachments'])
             if not directory and (not original_message or not contents.get(original_message.id, '').strip()):
-                raise HTTPException(400, '原消息没有文本，请重新上传附件重试')
+                raise HTTPException(400, '附件已失效，请重新上传')
             # Preserve the original request and response for history/traceability.
             assistant = await ChatMessage.create(conversation_id=conversation.id, generation=conversation.generation,
                                                  role='assistant', using_db=conn)
@@ -462,9 +474,6 @@ async def retry_task(old, user, directory=None):
                 user_message_id=old.user_message_id, assistant_message_id=assistant.id,
                 retry_of_task_id=old.id, model=old.model,
                 worker_host=socket.gethostname() if directory else None, using_db=conn)
-            events = await asyncio.to_thread(history_store().read, user.id, conversation.id)
-            snapshot = request_snapshots(events, conversation.generation).get(old.id,
-                {'context': None, 'skills': list(conversation.skills or []), 'knowledge_bases': list(conversation.knowledge_bases or [])})
             snapshot = {**snapshot, 'attachments': [file.name for file in directory.glob('*/*')] if directory else []}
             from applications.wrq.models.overview_event_model import OverviewEvent
             await OverviewEvent.get_or_create(event_key=f'chat:{task.id}', using_db=conn, defaults={'kind': 'chat_request', 'occurred_at': datetime.now(), 'operator_login_name': user.username, 'data': {'task_id': task.id, 'user_id': user.id, 'username': user.alias or user.username}})

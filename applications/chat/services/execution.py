@@ -1,5 +1,6 @@
 """悬浮窗容器任务：异步启动、流式保存、取消以及代次校验。"""
 import asyncio
+from collections import Counter
 import io
 import json
 import os
@@ -19,7 +20,7 @@ from tortoise.expressions import Q
 
 from applications.chat.models.chat_model import ChatArtifact, ChatConversation, ChatMessage, ChatSkillCall, ChatTask
 from applications.chat.services.artifacts import artifact_root
-from applications.chat.services.attachments import stage_attachments, task_upload_dir, remove_task_uploads
+from applications.chat.services.attachments import stage_attachments, task_upload_dir, retain_task_uploads
 from applications.chat.services.history_files import history_store, schedule_history, sync_history, write_history_events
 from applications.conversation.exceptions import ConversationBusinessError
 from applications.conversation.services.artifact_workbook import STANDARD_CASE_HEADER, read_workbook
@@ -224,6 +225,10 @@ async def recover_stale_tasks():
             if not claimed:
                 continue
         if await _remove_container(f'floating-chat-{row.id}'):
+            try:
+                await asyncio.to_thread(retain_task_uploads, row.id)
+            except OSError:
+                LOGGER.warning('恢复任务时无法更新附件保留时间: task_id={}', row.id)
             work_root = (Path(PROJECT_CONFIG.OUTPUT_DATAGRAM_DIR).resolve() / 'chat_work').resolve()
             if work_root.is_dir():
                 for path in work_root.glob(f'task-{row.id}-*'):
@@ -277,7 +282,7 @@ async def execute_task(task_id):
         if conversation.state or conversation.generation != task.generation:
             raise RuntimeError('会话已清空')
         if expects_uploads and not task_upload_dir(task.id).is_dir():
-            raise RuntimeError('临时附件已丢失，请重新上传')
+            raise RuntimeError('附件已失效，请重新上传')
         request, packages = await build_request(task, conversation)
         environment = sandbox_model_environment(task.model)
         request['model'] = environment['ANTHROPIC_MODEL']
@@ -288,6 +293,11 @@ async def execute_task(task_id):
         input_dir.mkdir(); output_dir.mkdir()
         await asyncio.to_thread(stage_skill_packages, packages, input_dir)
         request['attachments'] = await stage_attachments(task, input_dir)
+        from applications.chat.services.page_context import request_snapshots
+        snapshot_events = await asyncio.to_thread(history_store().read, conversation.user_id, conversation.id)
+        expected = request_snapshots(snapshot_events, task.generation).get(task.id, {}).get('attachments', [])
+        if Counter(entry['file_name'] for entry in request['attachments']) != Counter(expected):
+            raise RuntimeError('附件已失效，请重新上传')
         (input_dir / 'request.json').write_text(json.dumps(request, ensure_ascii=False), encoding='utf-8')
         sandbox = Path(__file__).resolve().parents[1] / 'sandbox'
         if os.environ.get('DOCKER_SHARED_HOST_DIR'):
@@ -372,9 +382,9 @@ async def execute_task(task_id):
         await ChatTask.filter(id=task_id, status='running').update(status='failed', error=str(exc)[:300], finished_at=datetime.now())
     finally:
         try:
-            await asyncio.to_thread(remove_task_uploads, task_id)
+            await asyncio.to_thread(retain_task_uploads, task_id)
         except OSError:
-            LOGGER.warning('临时附件清理失败，等待后台重试: task_id={}', task_id)
+            LOGGER.warning('临时附件保留时间更新失败: task_id={}', task_id)
         if watcher:
             watcher.cancel()
             await asyncio.gather(watcher, return_exceptions=True)

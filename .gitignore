@@ -34,6 +34,7 @@ output/knowledge-queue-integration/
 output/knowledge-queue-migration/
 applications/chat/chat_results/
 applications/chat/chat_history/
+applications/chat/chat_uploads/
 output/skill-engine-verification.json
 
 docling_offline/

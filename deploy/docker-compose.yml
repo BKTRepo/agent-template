@@ -218,6 +218,7 @@ services:
         source: ${PLATFORM_DATA_DIR}
         target: /data
       - "${PLATFORM_DATA_DIR:?Set PLATFORM_DATA_DIR to an absolute Docker host directory}/chat-results:/app/applications/chat/chat_results"
+      - "${PLATFORM_DATA_DIR:?Set PLATFORM_DATA_DIR to an absolute Docker host directory}/chat-uploads:/app/applications/chat/chat_uploads"
       - type: bind
         source: ${PLATFORM_DOCKER_SOCKET:-/var/run/docker.sock}
         target: /var/run/docker.sock

@@ -1,5 +1,7 @@
-"""仅供单次任务使用的临时上传文件。"""
+"""供会话重试的短期临时上传文件。"""
 import asyncio
+from collections import Counter
+import os
 import re
 import shutil
 import socket
@@ -9,15 +11,15 @@ from pathlib import Path
 
 from fastapi import HTTPException
 from applications.chat.models.chat_model import ChatTask
-from configure import PROJECT_CONFIG
 
 ALLOWED_SUFFIXES = {'.pdf', '.docx', '.xlsx', '.txt', '.md', '.json', '.csv', '.py', '.js', '.sql', '.sh', '.png', '.jpg', '.jpeg'}
 MAX_FILE_SIZE = 20 * 1024 * 1024
 MAX_TOTAL_SIZE = 100 * 1024 * 1024
+UPLOAD_RETENTION_SECONDS = 24 * 60 * 60
 
 
 def upload_root():
-    return Path(PROJECT_CONFIG.OUTPUT_DATAGRAM_DIR).resolve() / 'chat_uploads'
+    return Path(__file__).resolve().parents[1] / 'chat_uploads'
 
 
 def task_upload_dir(task_id):
@@ -63,6 +65,39 @@ def remove_task_uploads(task_id):
         shutil.rmtree(path)
 
 
+def retain_task_uploads(task_id):
+    """从任务结束开始计算保留时间。"""
+    path = task_upload_dir(task_id)
+    if path.is_dir() and not path.is_symlink():
+        os.utime(path, None)
+
+
+def copy_retry_uploads(task_id, expected_names):
+    """只复制当前任务的附件，缺失、过期或不完整时明确失败。"""
+    source = task_upload_dir(task_id)
+    staging = None
+    try:
+        if source.is_symlink() or not source.is_dir() or time.time() - source.stat().st_mtime >= UPLOAD_RETENTION_SECONDS:
+            raise ValueError('expired')
+        files = []
+        for folder in source.iterdir():
+            if folder.is_symlink() or not folder.is_dir() or not folder.name.isdecimal():
+                raise ValueError('invalid')
+            for file in folder.iterdir():
+                if file.is_symlink() or not file.is_file():
+                    raise ValueError('invalid')
+                files.append(file.name)
+        if Counter(files) != Counter(expected_names):
+            raise ValueError('missing')
+        staging = Path(tempfile.mkdtemp(prefix='staging-', dir=upload_root()))
+        shutil.copytree(source, staging, dirs_exist_ok=True)
+        return staging
+    except (OSError, ValueError, shutil.Error):
+        if staging:
+            shutil.rmtree(staging, ignore_errors=True)
+        raise HTTPException(410, '附件已失效，请重新上传') from None
+
+
 async def stage_attachments(task, input_dir):
     source_root = task_upload_dir(task.id)
     if not source_root.exists():
@@ -96,5 +131,6 @@ async def cleanup_uploads():
             task = await ChatTask.get_or_none(id=int(path.name[5:]))
             # 目录属于当前主机；只有任务结束或数据库记录已消失才清理。
             if (not task and time.time() - path.stat().st_mtime > 3600) or (
-                    task and task.worker_host == socket.gethostname() and task.status in ('success', 'failed', 'cancelled')):
+                    task and task.worker_host == socket.gethostname() and task.status in ('success', 'failed', 'cancelled')
+                    and time.time() - path.stat().st_mtime >= UPLOAD_RETENTION_SECONDS):
                 await asyncio.to_thread(shutil.rmtree, path)

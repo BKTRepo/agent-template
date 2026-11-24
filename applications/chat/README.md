@@ -58,7 +58,7 @@ CHAT_DEFAULT_MODEL=deepseek
 | GET `/chat/task` | `task_id` | 查询任务状态、当前回复和完成耗时。 |
 | GET `/chat/events` | `task_id` | SSE 返回任务状态及目前完整回复；前端按返回内容替换，不要拼接。 |
 | POST `/chat/stop` | `task_id` | 停止生成。 |
-| POST `/chat/retry` | `task_id` | 重试当前会话最新的已结束任务，替换旧回复。 |
+| POST `/chat/retry` | `task_id` | 重试已结束任务，保留旧回复并复用有效期内的原附件。 |
 | POST `/chat/retry-with-files` | multipart：`task_id`、`files`（多文件） | 重新上传附件并重试最新的已结束任务。 |
 | POST `/chat/feedback` | `message_id`、`rating`、可选 `reason` | 点赞或点踩。 |
 | POST `/chat/artifact/count-retry` | `artifact_id` | 对仍保留的文件重新发起统计。 |
@@ -67,7 +67,9 @@ CHAT_DEFAULT_MODEL=deepseek
 
 流式接口需要能设置 `token` 请求头的客户端，例如使用 `fetch` 读取流；浏览器原生 `EventSource` 无法自定义这个请求头。
 
-附件支持 PDF、DOCX、XLSX、TXT、Markdown、JSON、CSV、Python、JavaScript、SQL、Shell、PNG 和 JPEG。单文件最多 20 MB，每次消息最多 10 个附件、合计最多 100 MB。附件随消息一次性上传，仅供本次任务使用，不记录附件信息到数据库，也不提供历史查看、下载或下次对话复用；临时文件在任务结束后清理。重试需要附件时，必须使用 `/chat/retry-with-files` 重新上传；`/chat/retry` 仅重试文本，响应的 `attachments_supplied` 为 `false`。模型通过容器中的只读文件路径按需读取，实际图片理解能力取决于模型及网关。临时附件保存在接收请求的机器上，对应任务也由该机器执行。
+附件支持 PDF、DOCX、XLSX、TXT、Markdown、JSON、CSV、Python、JavaScript、SQL、Shell、PNG 和 JPEG。单文件最多 20 MB，每次消息最多 10 个附件、合计最多 100 MB。临时附件在任务结束后最多保留 24 小时，供同一任务的重新生成使用；清空或删除会话时随旧会话数据清理。附件不新增数据库表，也不提供历史下载或其他对话复用。重试时若附件过期、缺失或不在当前服务节点，返回“附件已失效，请重新上传”；也可通过 `/chat/retry-with-files` 重新上传。每次重新生成产生独立附件副本，并在该次任务结束后重新计算保留时间。模型通过容器中的只读文件路径按需读取，实际图片理解能力取决于模型及网关。临时附件保存在接收请求的机器上，对应任务也由该机器执行。
+
+临时附件目录为 `applications/chat/chat_uploads/`，部署容器将其映射到宿主机 `${PLATFORM_DATA_DIR}/chat-uploads/`。旧目录的临时附件不会自动迁移。
 
 ## 统计和清理
 
