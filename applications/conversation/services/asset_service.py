@@ -13,6 +13,8 @@ from tortoise.transactions import in_transaction
 from applications.conversation.models.asset_model import Asset, AssetFile
 from applications.user.models.user_model import User
 from applications.wrq.agent.models.agent_model import DeveloperSkillClass
+from applications.wrq.agent.services.skill_class_service import class_options, published_content, require_available_class
+from applications.wrq.agent.services.developer_skill_crud import DeveloperError
 from applications.wrq.platform_catalog import validate_application_async
 from configure import PROJECT_CONFIG
 
@@ -34,12 +36,12 @@ def visible_assets(user, *, recycle=False):
 async def overview(user):
     counts = await visible_assets(user).group_by("skill_classes_id").annotate(count=Count("id")).values("skill_classes_id", "count")
     by_class = {row["skill_classes_id"]: row["count"] for row in counts}
-    classes = await DeveloperSkillClass.all().order_by("id")
+    classes = await class_options(available_only=False)
     return {
         "total": sum(by_class.values()), "recycle_count": await visible_assets(user, recycle=True).count(),
         "recycle_days": PROJECT_CONFIG.ASSET_RECYCLE_RETENTION_DAYS,
-        "classes": [{"id": row.id, "name": row.name, "count": by_class.get(row.id, 0), "enabled": row.is_enabled}
-                    for row in classes if row.is_enabled or row.id in by_class],
+        "classes": [{"id": row['id'], "name": row['name'], "count": by_class.get(row['id'], 0), "enabled": row['is_enabled']}
+                    for row in classes if row['is_enabled'] or row['id'] in by_class],
     }
 
 
@@ -57,7 +59,7 @@ async def serialize(rows, user):
             quantities[row.id] = '统计失败'
     return [{
         "content_quantity": quantities[row.id], "id": row.id, "name": row.name, "skill_classes_id": row.skill_classes_id,
-        "class_name": classes[row.skill_classes_id].name if row.skill_classes_id in classes else "历史技能类",
+        "class_name": published_content(classes[row.skill_classes_id])['name'] if row.skill_classes_id in classes else "历史技能类",
         "application_identify": row.application_identify,
         "creator_name": owners[row.created_by].alias if row.created_by in owners else "历史用户",
         "visibility": row.visibility, "can_manage": row.created_by == user.id,
@@ -123,8 +125,10 @@ async def archive(user, data):
         return existing
     if existing["recycled"]:
         raise ConversationBusinessError("产出物已在回收站，请先恢复资产")
-    if not await DeveloperSkillClass.filter(id=data.skill_classes_id, is_enabled=True).exists():
-        raise ConversationBusinessError("请选择已启用的技能大类")
+    try:
+        await require_available_class(data.skill_classes_id)
+    except DeveloperError as exc:
+        raise ConversationBusinessError(str(exc)) from exc
     try:
         await validate_application_async(data.application_identify)
     except ValueError as exc:

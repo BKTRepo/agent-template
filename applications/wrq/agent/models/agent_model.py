@@ -4,14 +4,41 @@ from enum import Enum
 from tortoise import fields, models
 from applications.base.services.scaffold import ScaffoldModel, StateModel, TimestampMixin, unique_identify
 
+class TestStage(models.Model):
+    id = fields.IntField(pk=True)
+    code = fields.CharField(max_length=32, unique=True)
+    name = fields.CharField(max_length=20)
+    description = fields.CharField(max_length=200, default="")
+    sort_order = fields.IntField(default=0)
+    is_enabled = fields.BooleanField(default=True)
+
+    class Meta:
+        table = "keenrobot_test_stages"
+
+
 class DeveloperSkillClass(models.Model):
     id = fields.IntField(pk=True, description="技能大类自增主键")
-    name = fields.CharField(max_length=128, unique=True, description="技能大类名称")
+    name = fields.CharField(max_length=128, description="技能大类名称；保留历史名称长度")
     is_enabled = fields.BooleanField(default=True, description="是否启用")
     description = fields.TextField(default="", null=True, description="大类能力描述")
     input_schema = fields.JSONField(null=True, description="统一输入JSON Schema")
     output_schema = fields.JSONField(null=True, description="统一输出JSON Schema")
     template = fields.TextField(null=True, description="可下载的Skill模板原文")
+    test_stage_id = fields.IntField(null=True, index=True)
+    input_description = fields.CharField(max_length=200, null=True)
+    output_description = fields.CharField(max_length=200, null=True)
+    create_user_login_name = fields.CharField(max_length=10, null=True)
+    update_user_login_name = fields.CharField(max_length=10, null=True)
+    revision = fields.IntField(default=1)
+    state = fields.SmallIntField(default=0)
+    active_name_key = fields.CharField(max_length=64, null=True, unique=True)
+    publication_status = fields.CharField(max_length=16, default="DRAFT")
+    published_revision = fields.IntField(null=True)
+    published_content = fields.JSONField(null=True)
+    published_at = fields.DatetimeField(null=True)
+    created_time = fields.DatetimeField(auto_now_add=True, null=True)
+    updated_time = fields.DatetimeField(auto_now=True, null=True)
+    deleted_time = fields.DatetimeField(null=True)
     class Meta:
         table = "keenrobot_skill_classes"
 

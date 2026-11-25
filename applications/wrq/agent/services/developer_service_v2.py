@@ -97,9 +97,10 @@ class DeveloperSkillCrud:
         return skill
 
     async def metadata(self):
+        from .skill_class_service import class_options, stage_options
         categories = await ResourceCategory.filter(is_enabled=True).order_by('id').values('id','code','name')
-        return {'skill_classes':await DeveloperSkillClass.filter(is_enabled=True).order_by('id').values('id','name'),
-                'filter_skill_classes':await DeveloperSkillClass.all().order_by('id').values('id','name','is_enabled'),
+        return {'skill_classes':await class_options(), 'test_stages':await stage_options(),
+                'filter_skill_classes':await class_options(available_only=False),
                 'statuses':[{'id':key,'name':name} for key,name in STATUS_TEXT.items()],
                 'applications':await application_options(), 'resource_categories':categories,
                 'source_types':categories}  # 旧前端响应键兼容；值仍只是用途，不是来源。
@@ -127,10 +128,8 @@ class DeveloperSkillCrud:
         for key,message in [('name','技能名称不能为空'),('description','请填写描述'),('instructions','请填写执行指令')]:
             if not getattr(data,key).strip(): raise DeveloperError(message,field=key)
         normalized_skill_name(data.name)
-        classes = DeveloperSkillClass.filter(id=data.class_id, is_enabled=True)
-        if db: classes = classes.using_db(db).select_for_update()
-        if not await classes.first():
-            raise DeveloperError('请选择有效的技能大类',field='class_id')
+        from .skill_class_service import require_available_class
+        await require_available_class(data.class_id, db)
         apps={r['id'] for r in await application_options()}
         application_paso = data.effective_application_paso
         if application_paso and application_paso not in apps and application_paso != existing_application:

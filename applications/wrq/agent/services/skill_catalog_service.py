@@ -34,8 +34,8 @@ class SkillCatalogService:
         form = await SkillForm.get_or_none(skill_version_id=skill.published_version_id)
         if not version or not form:
             raise DeveloperError('发布版本或表单缺失，请联系维护人', 409)
-        if online and not await DeveloperSkillClass.filter(id=form.skill_class_id, is_enabled=True).exists():
-            raise DeveloperError('技能大类已停用，不能在线测试', 409)
+        from .skill_class_service import require_available_class
+        await require_available_class(form.skill_class_id)
         return skill, version, form
 
     @staticmethod
@@ -62,29 +62,35 @@ class SkillCatalogService:
         return {row['skill_id']: row['count'] for row in rows}
 
     async def metadata(self):
-        classes = []
-        for row in await DeveloperSkillClass.all().order_by('id'):
-            classes.append({'id': row.id, 'name': row.name, 'is_enabled': row.is_enabled,
-                            'description': row.description or ''})
-        return {'skill_classes': classes, 'applications': await application_options(),
+        from .skill_class_service import class_options, stage_options
+        return {'skill_classes': await class_options(available_only=False), 'test_stages': await stage_options(), 'applications': await application_options(),
                 'maintainers': [{'id': name, 'name': name} for name in sorted({
                     row.update_user_login_name or row.create_user_login_name
                     for row in await self.visible().filter(display_status='ONLINE')})]}
 
     async def class_detail(self, class_id):
-        row = await DeveloperSkillClass.get_or_none(id=class_id)
-        if not row:
-            raise DeveloperError('技能大类不存在', 404)
-        return {'id': row.id, 'name': row.name, 'is_enabled': row.is_enabled,
-                'description': row.description or '', 'input_schema': row.input_schema,
-                'output_schema': row.output_schema, 'template': row.template}
+        from .skill_class_service import class_option, require_available_class, published_content
+        from applications.wrq.agent.models.agent_model import TestStage
+        row = await require_available_class(class_id)
+        stages = {stage.id: stage for stage in await TestStage.all()}
+        data = published_content(row)
+        return {**class_option(row, stages, published=True), **{key: data.get(key) or '' for key in ('input_description', 'output_description', 'template')},
+                'input_schema': data.get('input_schema'), 'output_schema': data.get('output_schema')}
 
-    async def list(self, *, name='', class_id=None, application='', maintainer='', page=1, page_size=10, online_only=True):
+    async def list(self, *, name='', class_id=None, test_stage_id=None, application='', maintainer='', page=1, page_size=10, online_only=True):
         page_size = max(1, min(page_size, 10))
         # 分类和应用取发布表单，避免当前草稿更换分类后污染目录。
         form_query = SkillForm.all()
+        from .skill_class_service import class_options
+        classes = await class_options(available_only=False)
+        if class_id is not None:
+            from .skill_class_service import require_available_class
+            await require_available_class(class_id)
+        if test_stage_id is not None:
+            classes = [row for row in classes if row['test_stage_id'] == test_stage_id]
+        form_query = form_query.filter(skill_class_id__in=[row['id'] for row in classes])
         if name.strip():
-            kinds = await DeveloperSkillClass.filter(name__icontains=name.strip()).values_list('id', flat=True)
+            kinds = [row['id'] for row in classes if name.strip().casefold() in row['name'].casefold()]
             form_query = form_query.filter(Q(name__icontains=name.strip()) | Q(description__icontains=name.strip()) | Q(skill_class_id__in=kinds))
         if class_id is not None:
             form_query = form_query.filter(skill_class_id=class_id)

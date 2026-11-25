@@ -171,15 +171,19 @@ class SkillPackageService(LegacySkillPackageService):
     async def build_form(self, form, user, uploads):
         from applications.wrq.agent.models.agent_model import SkillVersion, SkillForm, SkillResourceBinding, Source, ResourceCategory
         from applications.wrq.agent.services.version_service import version_and_form
-        from applications.wrq.agent.services.developer_skill_crud import DeveloperError
+        from applications.wrq.agent.services.developer_skill_crud import DeveloperError, DeveloperSkillCrud
         built = None
         definition_path = ''
         try:
             async with in_transaction() as db:
+                await DeveloperSkillCrud.lock_name_catalog(db)
                 skill = await Skill.filter(id=form.skill_id, create_user_login_name=user_login_name(user), state=0).using_db(db).select_for_update().first()
                 if not skill:
                     raise SkillBuildNotFound("技能不存在")
                 saved, content = await version_and_form(skill.current_version_id, db)
+                from .skill_class_service import require_available_class
+                if content:
+                    await require_available_class(content.skill_class_id, db)
                 if not saved or not content or (form.expected_version or None) != (saved.version or None):
                     raise DeveloperError("技能已被修改，请刷新后重试", 409)
                 # multipart 表单中的 skill_class_id 可能被 Pydantic 保留为字符串，

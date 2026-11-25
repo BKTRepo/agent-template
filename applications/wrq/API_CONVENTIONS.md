@@ -50,6 +50,45 @@
 
 ## 开发者中心
 
+### 技能大类与测试阶段（二期）
+
+大类保存后为草稿，管理列表和详情全平台可见；只有创建人能编辑、删除和发布，不设置审批流。草稿不允许新建实现，仅发布后才能被各业务入口引用。维护人取认证用户，客户端不得提交或修改归属；管理员也不能代替其他创建人修改。开发者中心详情用于管理，返回阶段、维护人、实现数、更新时间、描述及本人操作权限，编辑入口在本人详情中；技能中心 `/skills/catalog/get-class` 保持独立的只读契约展示，包含输入输出规定、功能说明、阶段和 Skill 模板。
+
+以下路径以 `/skills/classes` 开头，均要求平台 token，响应禁止缓存：
+
+| 方法 | 路径后缀 | 参数与行为 |
+|---|---|---|
+| GET | /get-metadata | 启用的测试阶段字典和可用大类；大类选项附阶段编号、名称和代码 |
+| GET | /list | `test_stage_id` 可选，`page`、`page_size`；筛选后分页，并返回全量阶段计数和覆盖阶段数 |
+| GET | /get | `class_id`；返回管理详情、`revision`、`can_edit`、`can_delete`、`publication_status`、`published_revision`、`published_at`、`has_unpublished_changes`、`can_publish`、`can_create_implementation` |
+| POST | /create | JSON：`name`、`test_stage_id`、`description`、`input_description`、可选 `output_description`、`template` |
+| POST | /update | 同创建字段，另加数字 `class_id`、`expected_revision`；同一编号覆盖修改，修订冲突返回 409 |
+| POST | /publish | JSON：数字 `class_id`、`expected_revision`；仅创建人，复核必填项及重名，输出描述不能为空；无需审批，发布后可用 |
+| POST | /remove | JSON：数字 `class_id`、`expected_revision`；仅本人且无有效实现时逻辑删除 |
+
+名称去首尾空白，最多20字；功能说明必填、最多500字；输入描述必填、最多200字；输出描述保存草稿时选填，发布前必填、最多200字；模板必填并保留原文。名称按 NFKC、首尾空白和大小写标准化后检查全局重名，仍在使用的发布名称也保留。原有 JSON Schema 独立保留。模板仅供填写、展示和复制，选择大类或新建实现不会自动替换执行指令。
+
+发布递增修订号并保存独立的对外快照；后续编辑仍保存同一编号的待发布内容，已发布契约继续可用，重新发布后更新各入口。重复发布无修改或修订冲突返回409。未发布大类不出现在新建技能、技能中心、对话台和知识库挂载的选项中；直接通过编号引用时，后端返回409及「该技能大类尚未发布」。
+
+编辑保存前后端均比较名称、阶段、功能说明、输入描述、输出描述和模板。普通文本忽略首尾空白，文本换行统一比较为LF；模板的缩进及空格仍视为内容。无实际变更时前端禁用保存；绕过前端调用 `/update`，后端仍先验证创建人和预期修订号，然后返回原详情及 `changed:false`，不写库、不更新修订号、最近修改人或时间、不生成发布快照或待发布修改。实际修改返回 `changed:true` 并按原规则保存。
+
+后端始终校验创建人和有效实现引用，不能依赖前端隐藏按钮。草稿、调试、上线、下线等未删除实现均阻止删除；当前版本和仍引用该大类的发布版本均计入，同一技能去重。创建、保存、导入、构建与大类删除共用有序大类锁，防止检查后又新增引用。历史已删除技能不计入实现数。
+
+`/skills/catalog/list-skills` 新增可选 `test_stage_id`，与大类、应用、名称、维护人共同筛选后再统计和分页。开发者字典、技能中心字典、新建技能、一键导入、对话台加载及知识库挂载同步大类选项；测试阶段来自 `keenrobot_test_stages`。知识库挂载继续调用完整技能保存流程，不直接修改关联表。新建大类默认带入当前所选阶段，“全部”时不预选，编辑时保留原阶段。
+
+部署须先执行显式迁移，再启动新后端；不会在应用启动时改表：
+
+```powershell
+python -m applications.wrq.migrations.skill_class_phase2
+python -m applications.wrq.migrations.skill_class_phase2 --apply
+python -m applications.wrq.migrations.skill_class_publish
+python -m applications.wrq.migrations.skill_class_publish --apply
+```
+
+第一条仅连接数据库读取并打印计划，不写入。第二条在暂停技能写入的维护窗口执行，先备份大类表至工作区 `.tmp/skill-class-backups`，再新增阶段表、字段和名称唯一索引。MySQL DDL 会自动提交，执行前保留完整数据库备份。七阶段按稳定代码初始化；历史大类的新增业务字段（阶段、输入输出描述、创建人、时间等）保持 NULL，由产品后续直接在数据库补填。迁移不按名称推断阶段、不分配历史归属，也不清空已有字段。内部修订号、逻辑删除状态和名称唯一键仍初始化以支持校验。创建人为空时，所有用户只读，均不显示编辑和删除入口。
+
+发布迁移同样先预览、再显式执行，并在 `.tmp/skill-class-publish-backups` 保存迁移前表结构和数据。新增 `publication_status`（默认DRAFT）、`published_revision`、`published_content`、`published_at`。原系统大类（创建人为空）及已有有效实现引用的大类保留为已发布，防止已有技能失效；未使用的用户创建大类保持草稿。旧大类不伪造发布人、时间或业务描述，未生成快照前读取数据库中补填的字段；首次编辑时固定原对外内容，再发布才更新。
+
 下列路径均以 `/skills/developer` 开头。
 
 列表条件同时成立：`name` 为实现名称模糊搜索，`class_id` 为技能类编号，`application` 为应用代码（具体应用包含全应用适用 `*`），`status` 为 `DRAFT`、`DEBUGGING`、`DEBUG_SUCCESS`、`DEBUG_FAILED`、`ONLINE` 或 `OFFLINE`。省略或清空条件表示不限；仅返回当前用户的有效技能，筛选后统计总数再分页，超出末页时保留全部条件回退到末页。状态筛选前同步当前构建的调试结果，避免已结束任务仍被归为调试中。前端状态选项在字典加载前也提供这六种状态。

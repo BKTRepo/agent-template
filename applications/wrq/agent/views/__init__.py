@@ -6,6 +6,7 @@ from .developer_skill_view import developer_skills
 from .skill_import_view import skill_import
 from .skill_package_view import skill_packages
 from .skill_catalog_view import skill_catalog
+from .skill_class_view import skill_classes
 from .knowledge_view import router as knowledge_router
 
 skills_router = APIRouter()
@@ -17,5 +18,6 @@ skills_router.include_router(skill_import)
 skills_router.include_router(knowledge_router)
 skills_router.include_router(skill_packages)
 skills_router.include_router(skill_catalog)
+skills_router.include_router(skill_classes)
 skills_router.include_router(skills)
 mcp_servers_router.include_router(mcp_servers)

@@ -80,11 +80,13 @@ async def create_catalog_test(data, documents, user):
         raise DeveloperError('发布定义超过沙箱长度限制', 422)
     try:
         async with in_transaction() as db:
+            from .developer_skill_crud import DeveloperSkillCrud
+            await DeveloperSkillCrud.lock_name_catalog(db)
             skill = await Skill.filter(id=data.skill_id, state=0).using_db(db).select_for_update().first()
             if not skill or skill.display_status != 'ONLINE' or skill.published_version_id != version.id:
                 raise DeveloperError('技能已下线或发布版本已变更，请刷新后重试', 409)
-            if not await DeveloperSkillClass.filter(id=form.skill_class_id, is_enabled=True).using_db(db).select_for_update().first():
-                raise DeveloperError('技能大类已停用', 409)
+            from .skill_class_service import require_available_class
+            await require_available_class(form.skill_class_id, db)
             current = await SkillVersion.filter(id=version.id, build_id=data.build_id).using_db(db).first()
             if not current:
                 raise DeveloperError('发布构建已变更，请刷新后重试', 409)
