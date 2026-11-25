@@ -6,8 +6,8 @@ import { mountedResourceLimit } from '@/lib/skillForm'
 import type { Implementation, SkillBuild } from '@/types/developer'
 
 export interface CatalogClass extends DeveloperCatalogOption { is_enabled: boolean; description: string }
-export interface ClassDefinition extends CatalogClass { input_schema: Record<string, unknown> | null; output_schema: Record<string, unknown> | null; template: string | null }
-export interface CatalogFilters { name: string; classId: string; system: string; maintainer: string }
+export interface ClassDefinition extends CatalogClass { input_description?: string; output_description?: string; input_schema: Record<string, unknown> | null; output_schema: Record<string, unknown> | null; template: string | null }
+export interface CatalogFilters { name: string; classId: string; system: string; maintainer: string; testStageId?: string }
 export interface CatalogMetadata { skill_classes: CatalogClass[]; applications: DeveloperCatalogOption[]; maintainers: DeveloperCatalogOption[] }
 interface CatalogRow extends ServerSkill { maintainer_id: string; maintainer_name: string; call_count: number | null; download_count: number | null }
 const map = (row: CatalogRow): Implementation => ({ ...toImplementation({ ...row, resource_ids: row.resource_ids ?? [], instructions: row.instructions ?? '', technical_name: row.technical_name ?? '' }), catalog: true,
@@ -22,6 +22,7 @@ export function getCatalogClass(classId: string, signal?: AbortSignal) {
 export async function listCatalogSkills(filters: CatalogFilters, page = 1, signal?: AbortSignal, onlineOnly = true) {
   const params = new URLSearchParams({ name: filters.name, application: filters.system, maintainer: filters.maintainer, page: String(page), page_size: '10', online_only: String(onlineOnly) })
   if (filters.classId) params.set('class_id', filters.classId)
+  if (filters.testStageId) params.set('test_stage_id', filters.testStageId)
   const result = await request<{ items: CatalogRow[]; total: number; pages: number; page: number }>(`/skills/catalog/list-skills?${params}`, { signal })
   return { ...result, items: result.items.map(map) }
 }

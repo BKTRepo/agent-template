@@ -7,12 +7,15 @@ import ListPagination from '@/components/common/ListPagination'
 import { useAccessStore } from '@/stores/accessStore'
 import { knowledgeIdentity } from '@/lib/knowledgeSelection'
 import { loadOwnedMountTargets, mountKnowledge, type KnowledgeMountResult } from '@/api/knowledgeMount'
-import { getDeveloperMetadata, type DeveloperMetadata } from '@/api/developerCenter'
+import { getDeveloperMetadata, type DeveloperMetadata, type DeveloperCatalogOption } from '@/api/developerCenter'
 import type { Implementation, KnowledgeBase } from '@/types/developer'
+import { useSkillClassCatalog } from '@/stores/skillClassStore'
+import { classesForStage, classAfterStageChange } from '@/lib/skillClass'
 
-const empty = { name: '', classId: '', app: '' }
+const empty = { name: '', classId: '', testStageId: '', app: '' }
 export default function KnowledgeMountDialog({ kb, onClose }: { kb: KnowledgeBase; onClose: () => void }) {
   const actor = useAccessStore(state => state.actor)
+  const classCatalog = useSkillClassCatalog()
   const [targets, setTargets] = useState<Implementation[]>([])
   const [metadata, setMetadata] = useState<DeveloperMetadata>({ skill_classes: [], applications: [] })
   const [filters, setFilters] = useState(empty), [applied, setApplied] = useState(empty)
@@ -28,10 +31,11 @@ export default function KnowledgeMountDialog({ kb, onClose }: { kb: KnowledgeBas
       if (active) { setTargets(items); setMetadata(options) }
     }).catch(reason => { if (active) setError(reason.message) }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [actor.id, kb.id])
-  const classes = [...metadata.skill_classes, ...[...new Set(targets.map(item => item.classId))]
-    .filter(id => !metadata.skill_classes.some(kind => kind.id === id)).map(id => ({ id, name: `技能类 ${id}` }))]
-  const shown = targets.filter(item => (!applied.classId || item.classId === applied.classId)
+  }, [actor.id, kb.id, classCatalog.version])
+  const classes: DeveloperCatalogOption[] = metadata.filter_skill_classes ?? metadata.skill_classes
+  const shown = targets.filter(item => classes.some(kind => kind.id === item.classId)
+    && (!applied.classId || item.classId === applied.classId)
+    && (!applied.testStageId || classes.some(kind=>kind.id===item.classId && String(kind.test_stage_id)===applied.testStageId))
     && (!applied.name.trim() || `${item.name} ${item.description}`.toLocaleLowerCase().includes(applied.name.trim().toLocaleLowerCase()))
     && (!applied.app || item.applicationIds?.some(id => id === '*' || id === applied.app)))
   const pages = Math.max(1, Math.ceil(shown.length / 10)), currentPage = Math.min(page, pages)
@@ -78,7 +82,8 @@ export default function KnowledgeMountDialog({ kb, onClose }: { kb: KnowledgeBas
     <p className="helper-text">展示本人创建的所有状态技能，仅挂载勾选的实现。保存后转为草稿，需重新构建、调试并发布。</p>
     <form className="catalog-filters mount-filters" onSubmit={event => { event.preventDefault(); setApplied(filters); setPage(1) }}>
       <input aria-label="挂载目标名称模糊搜索" placeholder="名称或描述模糊搜索" value={filters.name} disabled={busy} onChange={event => setFilters(old => ({ ...old, name: event.target.value }))} />
-      <select aria-label="挂载目标技能类" value={filters.classId} disabled={busy} onChange={event => setFilters(old => ({ ...old, classId: event.target.value }))}><option value="">全部技能类</option>{classes.map(kind => <option key={kind.id} value={kind.id}>{kind.name}</option>)}</select>
+      <SearchSelect label="挂载目标测试阶段" value={filters.testStageId} options={classCatalog.stages} disabled={busy} placeholder="全部测试阶段" onChange={testStageId=>setFilters(previous=>({...previous,testStageId,classId:classAfterStageChange(classes,testStageId,previous.classId)}))}/>
+      <select aria-label="挂载目标技能类" value={filters.classId} disabled={busy} onChange={event => setFilters(old => ({ ...old, classId: event.target.value }))}><option value="">全部技能类</option>{classesForStage(classes,filters.testStageId).map(kind => <option key={kind.id} value={kind.id}>{kind.name}</option>)}</select>
       <SearchSelect label="挂载目标应用" value={filters.app} options={metadata.applications} disabled={busy} onChange={app => setFilters(old => ({ ...old, app }))} placeholder="全部应用" />
       <label className="mount-maintainer"><span>维护人 <em>*</em></span><input aria-label="挂载目标维护人" value={actor.name || actor.id} disabled readOnly /></label>
       <button className="button primary" disabled={busy || loading}>搜索</button><button type="button" className="button" disabled={busy} onClick={() => { setFilters(empty); setApplied(empty); setPage(1) }}>重置</button>

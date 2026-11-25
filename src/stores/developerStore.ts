@@ -19,12 +19,14 @@ interface DeveloperState {
   pages: number
   load: (page?: number, filters?: DeveloperFilters) => Promise<void>
   refresh: (page?: number) => Promise<void>
+  refreshMetadata: () => Promise<void>
   replace: (item: Implementation) => void
   patch: (id: string, changes: Partial<Implementation>) => void
   remove: (id: string) => void
 }
 
 let requestSequence = 0
+let metadataSequence = 0
 async function readPage(requestedPage: number, silent: boolean, filters: DeveloperFilters = useDeveloperStore.getState().filters): Promise<void> {
   const state = useDeveloperStore.getState()
   if (silent && state.loading) return
@@ -62,6 +64,15 @@ export const useDeveloperStore = create<DeveloperState>((set) => ({
   pages: 1,
   load: (requestedPage = 1, filters: DeveloperFilters = useDeveloperStore.getState().filters): Promise<void> => readPage(requestedPage, false, filters),
   refresh: (requestedPage?: number): Promise<void> => readPage(requestedPage ?? useDeveloperStore.getState().page, true),
+  refreshMetadata: async () => {
+    const account = useAuthStore.getState().session?.token, sequence = ++metadataSequence
+    const metadata = await getDeveloperMetadata()
+    if (sequence !== metadataSequence || account !== useAuthStore.getState().session?.token) return
+    setApplicationCatalog(metadata.applications)
+    useDeveloperStore.setState({ skillClasses: metadata.skill_classes, applications: metadata.applications,
+      resourceCategories: metadata.resource_categories ?? [], filterSkillClasses: metadata.filter_skill_classes ?? metadata.skill_classes,
+      statuses: metadata.statuses ?? [] })
+  },
   replace: item => set(state => ({ implementations: state.implementations.some(row => row.id === item.id) ? state.implementations.map(row => row.id === item.id ? item : row) : [item, ...state.implementations].slice(0, state.pageSize) })),
   patch: (id, changes) => set(state => ({ implementations: state.implementations.map(row => row.id === id ? { ...row, ...changes } : row) })),
   remove: id => set(state => ({ implementations: state.implementations.filter(row => row.id !== id) })),

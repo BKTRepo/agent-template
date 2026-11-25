@@ -5,6 +5,7 @@ import SearchSelect from './SearchSelect'
 import { getDeveloperMetadata, type DeveloperMetadata } from '@/api/developerCenter'
 import { getImportLimits, readDroppedSkills, discardSkillImport, type ImportLimits, type ImportUpload } from '@/api/skillImport'
 import { skillAccount } from '@/api/skillSession'
+import { useSkillClassStore } from '@/stores/skillClassStore'
 import { cacheSkillFiles, mergeCachedSkills, removeCachedSkill, type CachedSkill } from '@/lib/skillImportLocal'
 import { executeCachedSkill, validateCachedSkill, checkCachedSkillNames } from '@/lib/skillImportExecution'
 
@@ -24,6 +25,7 @@ export function SkillImportNavigation({ step, rows, busy, initializing, onStep, 
 }
 
 export default function SkillImportDialog({ onClose, onImported, onOpen }: { onClose: () => void; onImported: () => Promise<void>; onOpen: (id: number) => Promise<void> }) {
+  const classCatalogVersion = useSkillClassStore(state => state.version)
   const [step, setStep] = useState(1)
   const [rows, setRows] = useState<CachedSkill[]>([])
   const [limits, setLimits] = useState<ImportLimits>()
@@ -50,6 +52,12 @@ export default function SkillImportDialog({ onClose, onImported, onOpen }: { onC
     finally { if (isCurrent()) setInitializing(false) }
   }
   useEffect(() => { void initialize() }, [])
+  useEffect(() => {
+    let current = true
+    const refresh = () => { void getDeveloperMetadata().then(data=>{if(current&&isCurrent())setMetadata(data)}).catch(error=>{if(current&&isCurrent())setMessage((error as Error).message)}) }
+    refresh();window.addEventListener('focus',refresh)
+    return ()=>{current=false;window.removeEventListener('focus',refresh)}
+  },[classCatalogVersion])
   function remember(values: CachedSkill[]) {
     const identities = new Map(previousRows.current.map(row => [row.id,row]))
     // Keep only identity metadata for removed items, never retain their File objects.

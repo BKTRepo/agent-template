@@ -4,17 +4,19 @@ import SkillCatalogGroup from '@/components/skills/SkillCatalogGroup'
 import Dialog from '@/components/developer/Dialog'
 import DebugDialog from '@/components/developer/DebugDialog'
 import SearchSelect from '@/components/developer/SearchSelect'
-import { downloadBlob } from '@/lib/resourceStorage'
-import { formatSkillClassDescription } from '@/lib/descriptionPreview'
+import CatalogClassDetailDialog from '@/components/skills/CatalogClassDetailDialog'
+import { useSkillClassCatalog } from '@/stores/skillClassStore'
+import { classesForStage, classAfterStageChange } from '@/lib/skillClass'
 import { getCatalogClass, getCatalogMetadata, getCatalogSkill, downloadCatalogSkill, prepareCatalogTest } from '@/api/skillCatalog'
 import type { CatalogMetadata, ClassDefinition } from '@/api/skillCatalog'
 import { useAuthStore } from '@/stores/authStore'
 import { useAccessStore } from '@/stores/accessStore'
 import type { Implementation } from '@/types/developer'
 
-const emptyFilters = { name: '', classId: '', system: '', maintainer: '' }
+const emptyFilters = { name: '', classId: '', testStageId: '', system: '', maintainer: '' }
 const emptyMetadata: CatalogMetadata = { skill_classes: [], applications: [], maintainers: [] }
 export default function SkillsPage() {
+  const classCatalog = useSkillClassCatalog()
   const token = useAuthStore(state => state.session?.token)
   const actor = useAccessStore(state => state.actor.id)
   const [filters, setFilters] = useState(emptyFilters)
@@ -47,7 +49,7 @@ export default function SkillsPage() {
     }).catch(reason => { if (!controller.signal.aborted) { setMetadata(emptyMetadata); setError((reason as Error).message) } })
       .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => controller.abort()
-  }, [reload, token, actor])
+  }, [reload, token, actor, classCatalog.version])
   async function action(key: string, work: () => Promise<void>) {
     const current = generation.current
     setBusy(key); setError('')
@@ -75,16 +77,17 @@ export default function SkillsPage() {
       }
     })
   }
-  const classes = metadata.skill_classes.filter(row => !applied.classId || row.id === applied.classId)
+  const classes = classesForStage(metadata.skill_classes, applied.testStageId).filter(row => !applied.classId || row.id === applied.classId)
   const noResults = classes.length === 0 || classes.every(row => classTotals[row.id] === 0)
   function applyFilters(next: typeof emptyFilters) { setClassTotals({}); setApplied({ ...next }) }
   const applicationName = (item: Implementation) => (item.applicationIds ?? []).map(id => id === '*' ? '全应用适用' : metadata.applications.find(row => row.id === id)?.name || id).join('、') || '未关联应用'
   return <>
-    <form className="surface catalog-filters" onSubmit={event => { event.preventDefault(); applyFilters(filters) }}>
+    <form className="surface catalog-filters skill-catalog-filters" onSubmit={event => { event.preventDefault(); applyFilters(filters) }}>
       <input aria-label="技能名称模糊搜索" placeholder="名称模糊搜索" value={filters.name} onChange={event => setFilters(previous => ({ ...previous, name: event.target.value }))} />
-      <select aria-label="技能类" value={filters.classId} onChange={event => setFilters(previous => ({ ...previous, classId: event.target.value }))}><option value="">全部技能大类</option>{metadata.skill_classes.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select>
-      <SearchSelect label="筛选所属应用" value={filters.system} options={metadata.applications.filter(row => row.id !== '*')} placeholder="全部应用" onChange={value => setFilters(previous => ({ ...previous, system: value }))} />
-      <SearchSelect label="维护人" value={filters.maintainer} options={metadata.maintainers} placeholder="全部维护人" onChange={value => setFilters(previous => ({ ...previous, maintainer: value }))} />
+      <SearchSelect label="测试阶段" value={filters.testStageId} options={classCatalog.stages} placeholder="测试阶段" onChange={testStageId => setFilters(previous=>({...previous,testStageId,classId:classAfterStageChange(metadata.skill_classes,testStageId,previous.classId)}))}/>
+      <select aria-label="技能类" className={!filters.classId ? 'select-placeholder' : undefined} value={filters.classId} onChange={event => setFilters(previous => ({ ...previous, classId: event.target.value }))}><option value="">技能大类</option>{classesForStage(metadata.skill_classes,filters.testStageId).map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select>
+      <SearchSelect label="筛选所属应用" value={filters.system} options={metadata.applications.filter(row => row.id !== '*')} placeholder="应用" onChange={value => setFilters(previous => ({ ...previous, system: value }))} />
+      <SearchSelect label="维护人" value={filters.maintainer} options={metadata.maintainers} placeholder="维护人" onChange={value => setFilters(previous => ({ ...previous, maintainer: value }))} />
       <button className="button primary" disabled={loading}>搜索</button><button type="button" className="button" disabled={loading} onClick={() => { setFilters(emptyFilters); applyFilters(emptyFilters) }}>重置</button>
     </form>
     {error && <p className="error-banner" role="alert">{error}<button className="button small" onClick={() => setReload(value => value + 1)}>重新加载</button></p>}
@@ -98,7 +101,7 @@ export default function SkillsPage() {
     {detail && <Dialog wide title={`实现类详情 · ${detail.name}`} onClose={() => setDetail(null)} footer={<><button className="button" onClick={() => setDetail(null)}>关闭</button><button className="button primary" disabled={!!busy || !detail.buildId} onClick={() => download(detail)}>下载技能 ZIP</button></>}><dl className="constraint-details">{[
       ['所属技能大类', metadata.skill_classes.find(row => row.id === detail.classId)?.name || detail.classId], ['所属应用', applicationName(detail)], ['维护人', detail.maintainerName || '未记录'], ['发布版本', detail.version || '—'], ['调用次数', String(detail.callCount ?? '—')], ['下载次数', String(detail.downloadCount ?? '—')], ['状态', detail.status], ['描述', detail.description], ['执行指令', detail.instructions], ['挂载知识库', detail.knowledgeBases?.map(row => `${row.name}${row.version ? ` · ${row.version}` : ''}`).join('、') || '无'], ['资源使用说明', detail.resourceUsage || '未设置'], ['运行环境要求', detail.compatibility || '未设置'],
     ].map(([label, value]) => <div key={label}><dt>{label}</dt><dd style={{ whiteSpace: 'pre-wrap' }}>{value}</dd></div>)}</dl><h3>Skill 定义</h3><pre className="markdown-preview">{detail.skillMarkdown || '发布定义缺失，请联系维护人'}</pre>{error && <p role="alert" className="error-banner">{error}</p>}</Dialog>}
-    {classDetail && <Dialog title="技能大类详情" onClose={() => setClassDetail(null)} footer={<><button className="button" onClick={() => setClassDetail(null)}>关闭</button><button className="button primary" disabled={!classDetail.template} onClick={() => downloadBlob(new Blob([classDetail.template!], { type: 'text/plain;charset=utf-8' }), `${classDetail.name.replace(/[\\/<>:"|?*]/g, '_')}-Skill模板.md`)}>下载模板</button></>}><h3>{classDetail.name} · {classDetail.id}</h3><p className="skill-class-description">{formatSkillClassDescription(classDetail.description) || '暂无大类描述'}</p><dl className="constraint-details">{[['输入 Schema', classDetail.input_schema], ['输出 Schema', classDetail.output_schema]].map(([label, value]) => <div key={String(label)}><dt>{String(label)}</dt><dd><pre className="markdown-preview">{value ? JSON.stringify(value, null, 2) : '未配置'}</pre></dd></div>)}</dl><h3>Skill 模板</h3><pre className="markdown-preview">{classDetail.template || '未配置'}</pre></Dialog>}
+    {classDetail && <CatalogClassDetailDialog row={classDetail} onClose={() => setClassDetail(null)}/> }
     {debugItem && <DebugDialog key={`${debugItem.id}-${debugItem.buildId}`} item={debugItem} onClose={() => { setDebugItem(null); setReload(value => value + 1) }} onResult={debug => setDebugItem(previous => previous ? { ...previous, debug } : previous)} />}
   </>
 }

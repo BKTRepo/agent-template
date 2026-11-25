@@ -7,6 +7,10 @@ import DebugDialog from '@/components/developer/DebugDialog'
 import SkillFields from '@/components/developer/SkillFields'
 import SkillPolishDialog from '@/components/developer/SkillPolishDialog'
 import SkillImportDialog from '@/components/developer/SkillImportDialog'
+import SkillClassPanel from '@/components/developer/classes/SkillClassPanel'
+import { getSkillClass } from '@/api/skillClasses'
+import { useSkillClassStore } from '@/stores/skillClassStore'
+import type { SkillClassDetail } from '@/types/skillClass'
 import ImplementationSummaryCells, { implementationSummaryHeaders } from '@/components/developer/ImplementationSummaryCells'
 import SearchSelect from '@/components/developer/SearchSelect'
 import { restoreSkillUploads } from '@/api/skillArchive'
@@ -30,6 +34,8 @@ const dateText = (value: string) => new Date(value).toLocaleString('sv-SE', { ti
 export default function DeveloperPage() {
   const { implementations, skillClasses, applications, resourceCategories, filterSkillClasses, statuses, filters: appliedFilters, load, refresh, replace, patch, remove, loading, page, pages, total } = useDeveloperStore()
   const [filters, setFilters] = useState<DeveloperFilters>({ ...appliedFilters })
+  const [tab, setTab] = useState<'classes' | 'skills'>('classes')
+  const classCatalogVersion = useSkillClassStore(state => state.version)
   const actor = useAccessStore(state => state.actor)
   const team = ''
   const [preview, setPreview] = useState<Partial<Implementation>>({})
@@ -81,6 +87,12 @@ export default function DeveloperPage() {
   useEffect(() => { if (!notice) return; const timer = window.setTimeout(() => setNotice(''), 4000); return () => window.clearTimeout(timer) }, [notice])
   useEffect(() => { void load().catch(error => setMessage((error as Error).message)) }, [load])
   useEffect(() => {
+    const refreshMetadata = () => { void useDeveloperStore.getState().refreshMetadata().catch(error => setMessage((error as Error).message)) }
+    refreshMetadata()
+    window.addEventListener('focus', refreshMetadata)
+    return () => window.removeEventListener('focus', refreshMetadata)
+  }, [classCatalogVersion, actor.id])
+  useEffect(() => {
     if (panel || busy) return
     const revalidate = () => {
       if (document.visibilityState === 'visible') void refresh().catch(() => {})
@@ -121,6 +133,15 @@ export default function DeveloperPage() {
     }).catch(error => { if (sequence === nameCheckSequence.current) setMessage((error as Error).message) })
     const knowledgeBases = editable?.knowledgeBases ?? []
     setSelectedId(item?.id); setForm(editable ? { ...editable, applicationIds: editable.applicationIds ?? [editable.system], technicalName: editable.technicalName || `skill-${crypto.randomUUID()}`, version: editable.version ?? '', resourceIds: knowledgeBases.map(row => row.id), knowledgeBases, resourceUsage: editable.resourceUsage ?? '', uploadedResources: editable.uploadedResources ?? [] } : blankForm(team)); setErrors({}); setMessage(''); setOfflinePrompt(false); setDraftDeletePrompt(false); setPanel('form')
+  }
+  async function newClassImplementation(row: SkillClassDetail) {
+    const account = skillAccount()
+    const current = await getSkillClass(row.id)
+    await useDeveloperStore.getState().refreshMetadata()
+    if (account !== skillAccount()) return
+    setTab('skills')
+    await openForm()
+    setForm(previous => ({ ...previous, classId: current.id }))
   }
   function addFiles(files: File[]) {
     // 已存草稿中的同名文件重新选择时恢复实际文件，不重复添加记录。
@@ -307,6 +328,9 @@ export default function DeveloperPage() {
   const primaryBusy = <><LoaderCircle className="spin" size={16} />处理中…</>
 
   return <>
+    <div className="developer-center-tabs" role="tablist" aria-label="开发者中心功能"><button role="tab" aria-selected={tab==='classes'} onClick={()=>setTab('classes')}>技能大类</button><button role="tab" aria-selected={tab==='skills'} onClick={()=>setTab('skills')}>我的技能 <small>{total}</small></button></div>
+    {tab==='classes' && <SkillClassPanel onNewImplementation={newClassImplementation}/>}
+    <div hidden={tab!=='skills'}>
     <div className="developer-flow surface" aria-label="技能开发流程">{steps.map((step, index) => <div className="flow-step" key={step}><span className={`flow-node ${index === 0 ? 'done' : index === 1 ? 'current' : ''}`}><span>{['①', '②', '③'][index]}</span> {step}</span>{index < steps.length - 1 && <ArrowRight size={20} aria-hidden="true" />}</div>)}</div>
     <section className="surface implementation-section" aria-labelledby="implementation-title">
       <div className="section-heading"><h2 id="implementation-title">我创建的技能</h2><div className="section-actions"><button className="button" disabled={loading || !!busy} onClick={() => void refreshList()}><RefreshCw size={14} className={loading ? 'spin' : undefined} />刷新</button><button className="button" disabled={loading || !!busy} onClick={() => setImportOpen(true)}>一键导入</button><button className="button primary" disabled={loading || !!busy} onClick={() => openForm()}><Plus size={16} />新建技能</button></div></div>
@@ -327,6 +351,7 @@ export default function DeveloperPage() {
       <ListPagination total={total} page={page} pages={pages} label="技能列表分页" busy={loading} onPageChange={goToPage} />
     </section>
 
+    </div>
     {importOpen && <SkillImportDialog onClose={() => setImportOpen(false)} onImported={async () => { await refresh(1) }} onOpen={async id => {
       const item = await getDeveloperSkill(String(id))
       replace(item)

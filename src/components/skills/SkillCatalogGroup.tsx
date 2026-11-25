@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { ChevronDown, ChevronUp, Download, Sparkles } from 'lucide-react'
 import NameDescription from '@/components/common/NameDescription'
 import SkillClassDescription from './SkillClassDescription'
+import TestStageBadge from './TestStageBadge'
 import ListPagination from '@/components/common/ListPagination'
 import { listCatalogSkills, type CatalogClass, type CatalogFilters } from '@/api/skillCatalog'
 import type { Implementation } from '@/types/developer'
@@ -27,10 +28,11 @@ export default function SkillCatalogGroup({ skillClass, filters, expanded, onTog
       .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => controller.abort()
   }, [filters, skillClass.id, page, reload, retry, onTotal])
-  const filtering = !!(filters.name || filters.system || filters.maintainer)
-  if (filtering && !loading && !error && result.total === 0) return null
+  // 阶段和大类已由父组件筛选，匹配阶段的零实现大类仍应显示。
+  const filteringImplementations = !!(filters.name || filters.system || filters.maintainer)
+  if (filteringImplementations && !loading && !error && result.total === 0) return null
   return <section className="surface skill-group" aria-label={skillClass.name}>
-    <div className="skill-group-heading"><Sparkles size={22} /><div><h2><button className="skill-class-title" aria-expanded={expanded} onClick={onToggle}>{skillClass.name}</button></h2><SkillClassDescription description={skillClass.description} /></div>
+    <div className="skill-group-heading"><div className="skill-group-identity"><span className="skill-group-name-icon" aria-hidden="true"><Sparkles size={22} /></span><h2><button className="skill-class-title" aria-expanded={expanded} onClick={onToggle}>{skillClass.name}</button></h2></div><TestStageBadge name={skillClass.test_stage_name} code={skillClass.test_stage_code}/><div className="skill-group-summary"><SkillClassDescription description={skillClass.description} /></div>
       <span className="status-tag neutral">{result.total} 个实现</span><span className={`status-tag ${skillClass.is_enabled ? 'green' : 'neutral'}`}>{skillClass.is_enabled ? '已启用' : '已停用'}</span>
       <button className="button small" disabled={!!busy} onClick={() => onInspectClass(skillClass.id)}>类详情</button>
       <button className="icon-button" aria-expanded={expanded} aria-label={`${expanded ? '收起' : '展开'} ${skillClass.name}`} onClick={onToggle}>{expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}</button>

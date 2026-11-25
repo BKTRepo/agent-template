@@ -5,12 +5,16 @@ import ListPagination from '@/components/common/ListPagination'
 import { getCatalogMetadata, listCatalogSkills, type CatalogMetadata } from '@/api/skillCatalog'
 import { listKnowledgeBasesPage } from '@/api/knowledge'
 import type { Implementation, KnowledgeBase } from '@/types/developer'
+import { useSkillClassCatalog } from '@/stores/skillClassStore'
+import { classesForStage, classAfterStageChange } from '@/lib/skillClass'
+import TestStageBadge from '@/components/skills/TestStageBadge'
 
 export default function AssistantResourcePicker({ kind, selected, busy, onSkill, onKnowledge, onClose }: {
   kind: 'skills' | 'knowledge'; selected: string[]; busy: boolean
   onSkill: (item: Implementation) => Promise<void>; onKnowledge: (item: KnowledgeBase) => Promise<void>; onClose: () => void
 }) {
-  const initial = { name: '', classId: '', application: '', maintainer: '' }
+  const initial = { name: '', classId: '', testStageId: '', application: '', maintainer: '' }
+  const classCatalog = useSkillClassCatalog()
   const [filters, setFilters] = useState(initial), [applied, setApplied] = useState(initial)
   const [metadata, setMetadata] = useState<CatalogMetadata>()
   const [page, setPage] = useState(1), [total, setTotal] = useState(0), [pages, setPages] = useState(1)
@@ -20,7 +24,7 @@ export default function AssistantResourcePicker({ kind, selected, busy, onSkill,
     const controller = new AbortController()
     void getCatalogMetadata(controller.signal).then(setMetadata).catch(reason => { if (!controller.signal.aborted) setError((reason as Error).message) })
     return () => controller.abort()
-  }, [reload])
+  }, [reload, classCatalog.version])
   useEffect(() => {
     const controller = new AbortController()
     setLoading(true); setError(''); setSkills([]); setKnowledge([])
@@ -37,7 +41,7 @@ export default function AssistantResourcePicker({ kind, selected, busy, onSkill,
     })().catch(reason => { if (!controller.signal.aborted) setError((reason as Error).message) })
       .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => controller.abort()
-  }, [kind, applied, page, reload])
+  }, [kind, applied, page, reload, classCatalog.version])
   const blocked = busy || loading || adding
   function search(reset = false) { setPage(1); setApplied(reset ? initial : { ...filters }); if (reset) setFilters(initial) }
   async function choose(item: Implementation | KnowledgeBase) {
@@ -50,7 +54,8 @@ export default function AssistantResourcePicker({ kind, selected, busy, onSkill,
     footer={<button className="button" disabled={adding} onClick={onClose}>完成</button>}>
     <form className="catalog-filters" onSubmit={event => { event.preventDefault(); search() }}>
       <input aria-label={kind === 'skills' ? '助手技能名称搜索' : '助手知识库名称搜索'} placeholder="名称模糊搜索" value={filters.name} onChange={event => setFilters({ ...filters, name: event.target.value })} />
-      {kind === 'skills' && <SearchSelect label="助手技能类" value={filters.classId} options={metadata?.skill_classes.filter(row => row.is_enabled) ?? []} placeholder="全部技能类" onChange={classId => setFilters({ ...filters, classId })} />}
+      {kind === 'skills' && <SearchSelect label="助手测试阶段" value={filters.testStageId} options={classCatalog.stages} placeholder="全部测试阶段" onChange={testStageId => setFilters(previous=>({...previous,testStageId,classId:classAfterStageChange(metadata?.skill_classes??[],testStageId,previous.classId)}))}/>}
+      {kind === 'skills' && <SearchSelect label="助手技能类" value={filters.classId} options={classesForStage(metadata?.skill_classes.filter(row => row.is_enabled) ?? [],filters.testStageId)} placeholder="全部技能类" onChange={classId => setFilters({ ...filters, classId })} />}
       <SearchSelect label="助手所属应用" value={filters.application} options={metadata?.applications ?? []} placeholder="全部应用" onChange={application => setFilters({ ...filters, application })} />
       {kind === 'skills' && <SearchSelect label="助手维护人" value={filters.maintainer} options={metadata?.maintainers ?? []} placeholder="全部维护人" onChange={maintainer => setFilters({ ...filters, maintainer })} />}
       {kind === 'knowledge' && <input aria-label="知识库维护人搜索" placeholder="维护人" value={filters.maintainer} onChange={event => setFilters({ ...filters, maintainer: event.target.value })} />}
@@ -59,7 +64,7 @@ export default function AssistantResourcePicker({ kind, selected, busy, onSkill,
     {error && <p className="error-banner" role="alert">{error}<button className="button small" disabled={blocked} onClick={() => setReload(value => value + 1)}>重试</button></p>}
     {loading && <p role="status">正在加载…</p>}
     <div className="assistant-skill-results">{kind === 'skills' ? skills.map(item => <article key={item.id}><div><h3>{item.name}</h3><p>{item.description}</p>
-      <div className="knowledge-selected"><span className="status-tag blue">{metadata?.skill_classes.find(row => row.id === item.classId)?.name}</span><span>{applicationName(item.applicationIds)}</span></div></div>
+      <div className="knowledge-selected"><span className="status-tag blue">{metadata?.skill_classes.find(row => row.id === item.classId)?.name}</span><TestStageBadge name={metadata?.skill_classes.find(row=>row.id===item.classId)?.test_stage_name} code={metadata?.skill_classes.find(row=>row.id===item.classId)?.test_stage_code}/><span>{applicationName(item.applicationIds)}</span></div></div>
       <button className="button small" disabled={blocked || selected.includes(item.id)} onClick={() => void choose(item)}>{selected.includes(item.id) ? '已加载' : '加载'}</button></article>)
       : <table className="knowledge-picker-table"><thead><tr>{['知识库', '标签', '应用系统', '维护人', '可见范围', '文档数', '操作'].map(label => <th key={label}>{label}</th>)}</tr></thead>
         <tbody>{knowledge.map(item => <tr key={item.id}><td>{item.name}</td><td>{item.tagName || item.tag}</td><td>{applicationName(item.applicationIds)}</td><td>{item.maintainer || item.creatorName || '未记录'}</td><td>{item.scope === 'public' ? '全体可见' : '仅本人可见'}</td><td>{item.files.length}</td>

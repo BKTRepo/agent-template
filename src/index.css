@@ -1,5 +1,6 @@
 @import "@heroui/styles";
 @import "./components/developer/SkillImportDialog.css";
+@import "./components/developer/classes/skillClasses.css";
 .login-page { min-height:100vh; height:100dvh; display:grid; grid-template-columns:minmax(0,1.05fr) minmax(420px,1fr); overflow:auto; background:#f5f8fc; }
 .login-intro { display:flex; flex-direction:column; justify-content:space-between; gap:50px; padding:48px clamp(32px,5vw,84px); background:linear-gradient(145deg,#061a36,#123e72); color:#fff; }
 .login-brand { display:flex; align-items:center; gap:12px; font-size:20px; font-weight:700; }
@@ -333,14 +334,28 @@ h1,h2,h3,p { margin:0; }
 .form-field .inline-choice input { width:16px; height:16px; margin:0; accent-color:var(--platform-blue); }
 .catalog-filters { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:16px; margin-bottom:18px; }
 .catalog-filters input,.catalog-filters select { border:1px solid #dbe5f0; border-radius:7px; padding:10px 12px; color:var(--platform-text); background:#fff; min-width:120px; }
+.catalog-filters.skill-catalog-filters { display:grid; grid-template-columns:minmax(150px,2.1fr) minmax(110px,1.15fr) minmax(120px,1.45fr) minmax(110px,1.3fr) minmax(105px,1fr) 70px 70px; gap:12px; padding:24px; }
+.skill-catalog-filters>input,.skill-catalog-filters>select,.skill-catalog-filters>.search-select { width:100%; min-width:0; max-width:none; }
+.catalog-filters.skill-catalog-filters>input,.catalog-filters.skill-catalog-filters>select,.catalog-filters.skill-catalog-filters>button,.catalog-filters.skill-catalog-filters .search-select-control input[role=combobox] { height:46px; font-family:inherit; font-size:14px; font-weight:400; line-height:1.55; }
+.skill-catalog-filters>button { justify-content:center; white-space:nowrap; }
+.catalog-filters.skill-catalog-filters>select.select-placeholder { color:var(--platform-placeholder); }
+.catalog-filters.skill-catalog-filters>select option { color:var(--platform-text); }
+.skill-catalog-filters .search-select-icon { display:none; }
+.catalog-filters.skill-catalog-filters .search-select-control input[role=combobox] { padding-left:12px; padding-right:34px; }
+.catalog-filters.skill-catalog-filters .search-select.is-open input[role=combobox],.catalog-filters.skill-catalog-filters .search-select-control input[role=combobox]:not(:placeholder-shown) { padding-right:54px; }
 .assistant-owned-dialog .catalog-filters { flex-wrap:nowrap; overflow-x:auto; }
 .assistant-owned-dialog .catalog-filters>input,.assistant-owned-dialog .catalog-filters>.search-select { flex:1 1 0; min-width:150px; }
 .assistant-owned-dialog .catalog-filters>button { flex:0 0 auto; white-space:nowrap; }
 .skill-group { margin-top:16px; overflow:hidden; }
 .skill-group>.developer-pagination { padding:16px 18px; }
-.skill-group-heading { display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:18px; }
-.skill-group-heading>svg { color:var(--platform-blue); flex-shrink:0; }
-.skill-group-heading>div { flex:1; min-width:180px; }
+.skill-group-heading { display:grid; grid-template-columns:minmax(170px,240px) max-content minmax(0,1fr) max-content max-content max-content 28px; align-items:center; gap:12px; min-height:90px; padding:18px 24px; }
+.skill-group-identity { display:flex; align-items:center; gap:12px; min-width:0; }
+.skill-group-name-icon { display:flex; align-items:center; justify-content:center; flex:0 0 42px; width:42px; height:42px; border-radius:11px; background:#eaf3ff; color:var(--platform-blue); }
+.skill-group-heading>.skill-group-summary { min-width:0; }
+.skill-group-heading>.skill-group-summary p { margin:0; }
+.skill-group-heading>.test-stage-badge,.skill-group-heading>.status-tag,.skill-group-heading>.button { white-space:nowrap; }
+.skill-group-heading>.status-tag { justify-self:center; }
+.skill-group-heading>.icon-button { width:28px; height:32px; }
 .skill-group-heading h2 { font-size:16px; font-weight:600; }
 .skill-group-heading h2 small { font-size:11px; font-weight:400; color:var(--platform-muted); }
 .skill-group-heading p { margin-top:5px; font-size:12px; color:var(--platform-muted); line-height:1.6; }
@@ -373,6 +388,8 @@ h1,h2,h3,p { margin:0; }
 .search-select-option.is-selected { color:#1677ff; font-weight:500; }
 .search-select-empty { padding:22px 12px; text-align:center; color:var(--platform-muted); }
 .skill-class-title { cursor:pointer; border:0; padding:0; background:transparent; color:inherit; font:inherit; font-weight:600; text-align:left; }
+@media(max-width:1100px) { .catalog-filters.skill-catalog-filters { grid-template-columns:minmax(130px,1.5fr) minmax(100px,1fr) minmax(110px,1fr) minmax(100px,1fr) minmax(90px,.8fr) 60px 60px; gap:8px; padding:16px; } .skill-group-heading { gap:10px; padding:18px; } }
+@media(max-width:1000px) { .catalog-filters.skill-catalog-filters { grid-template-columns:repeat(3,minmax(0,1fr)); } .skill-group-heading { grid-template-columns:minmax(0,1fr) max-content max-content 28px; gap:10px; } .skill-group-heading>.skill-group-identity { grid-column:1/3; grid-row:1; } .skill-group-heading>.test-stage-badge { grid-column:3/5; grid-row:1; justify-self:end; } .skill-group-heading>.skill-group-summary { grid-column:1/-1; grid-row:2; } .skill-group-heading>.status-tag { grid-row:3; } .skill-group-heading>.status-tag:nth-child(4) { grid-column:1; justify-self:start; } .skill-group-heading>.status-tag:nth-child(5) { grid-column:2; } .skill-group-heading>.button { grid-column:3; grid-row:3; } .skill-group-heading>.icon-button { grid-column:4; grid-row:3; } }
 .markdown-preview { max-height:260px; overflow:auto; padding:15px; white-space:pre-wrap; overflow-wrap:anywhere; background:#0b1730; color:#cce2ff; border-radius:8px; font:12px/1.7 Consolas,monospace; }
 .markdown-editor { width:100%; min-height:350px; height:45vh; padding:15px; white-space:pre; overflow:auto; resize:vertical; border:1px solid #dbe5f0; border-radius:8px; background:#0b1730; color:#cce2ff; font:13px/1.7 Consolas,monospace; }
 .debug-download { margin-top:15px; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:15px; background:#f8fbff; border:1px dashed #cfe0f7; border-radius:8px; font-size:13px; }

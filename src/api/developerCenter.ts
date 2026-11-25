@@ -15,7 +15,7 @@ export interface ServerSkill {
   backend_skill_id?: string | number; build_id?: string; build_origin?: 'backend'
   debug?: { id: string; runId: string; buildId?: string; skillVersionId?: number; status: 'queued' | 'running' | 'passed' | 'failed' | 'timeout'; output: string; origin: 'backend' }
 }
-export interface DeveloperCatalogOption { id: string; name: string }
+export interface DeveloperCatalogOption { id: string; name: string; test_stage_id?: number | null; test_stage_name?: string | null; test_stage_code?: string | null }
 export const developerSkillStatuses: DeveloperCatalogOption[] = [
   { id: 'DRAFT', name: '草稿' }, { id: 'DEBUGGING', name: '调试中' },
   { id: 'DEBUG_SUCCESS', name: '调试成功' }, { id: 'DEBUG_FAILED', name: '调试失败' },
