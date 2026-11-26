@@ -9,7 +9,7 @@ from tortoise.transactions import in_transaction
 
 from applications.user.models.user_model import User
 from applications.wrq.auth import user_login_name
-from applications.wrq.agent.models.agent_model import DeveloperSkillClass, TestStage, Skill, SkillForm
+from applications.wrq.agent.models.agent_model import DeveloperSkillClass, TestStage, Skill, SkillForm, SkillVersion
 from .developer_skill_crud import DeveloperError, DeveloperSkillCrud
 
 
@@ -92,12 +92,27 @@ async def implementation_counts(class_ids=None, db=None):
     return {key: len(ids) for key, ids in grouped.items()}
 
 
+async def online_implementation_counts(class_ids):
+    """Only online published definitions contribute to the displayed count."""
+    skills = await Skill.filter(state=0, display_status='ONLINE').exclude(published_version_id=None).values('id', 'published_version_id')
+    versions = {row.id: row for row in await SkillVersion.filter(id__in=[skill['published_version_id'] for skill in skills])}
+    forms = {row.skill_version_id: row for row in await SkillForm.filter(skill_version_id__in=list(versions), skill_class_id__in=class_ids)}
+    counts = defaultdict(int)
+    for skill in skills:
+        version = versions.get(skill['published_version_id'])
+        form = forms.get(skill['published_version_id'])
+        if version and version.skill_id == skill['id'] and form:
+            counts[form.skill_class_id] += 1
+    return counts
+
+
 class SkillClassService:
     async def metadata(self):
         return {'test_stages': await stage_options(), 'skill_classes': await class_options()}
 
     async def _present(self, rows, user):
         counts = await implementation_counts([row.id for row in rows])
+        online_counts = await online_implementation_counts([row.id for row in rows])
         stages = {row.id: row for row in await TestStage.all()}
         logins = {row.create_user_login_name for row in rows if row.create_user_login_name}
         users = await User.filter(username__in=logins)
@@ -117,7 +132,7 @@ class SkillClassService:
                 'has_unpublished_changes': row.publication_status == 'PUBLISHED' and row.published_revision != row.revision,
                 'can_publish': mine and row.is_enabled and row.published_revision != row.revision,
                 'can_create_implementation': row.publication_status == 'PUBLISHED' and row.is_enabled,
-                'implementation_count': count, 'is_mine': mine, 'can_edit': mine, 'can_delete': mine and count == 0,
+                'implementation_count': online_counts.get(row.id, 0), 'is_mine': mine, 'can_edit': mine, 'can_delete': mine and count == 0,
                 'delete_disabled_reason': f'该大类下还有 {count} 个实现，需先清理后才能删除' if count else None})
         return result
 

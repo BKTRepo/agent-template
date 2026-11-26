@@ -63,10 +63,24 @@ class SkillCatalogService:
 
     async def metadata(self):
         from .skill_class_service import class_options, stage_options
-        return {'skill_classes': await class_options(available_only=False), 'test_stages': await stage_options(), 'applications': await application_options(),
-                'maintainers': [{'id': name, 'name': name} for name in sorted({
-                    row.update_user_login_name or row.create_user_login_name
-                    for row in await self.visible().filter(display_status='ONLINE')})]}
+        classes = await class_options(available_only=False)
+        class_ids = {row['id'] for row in classes}
+        skills = await self.visible().filter(display_status='ONLINE').values(
+            'id', 'published_version_id', 'update_user_login_name', 'create_user_login_name')
+        versions = {row.id: row for row in await SkillVersion.filter(id__in=[row['published_version_id'] for row in skills])}
+        forms = {row.skill_version_id: row for row in await SkillForm.filter(skill_version_id__in=list(versions))}
+        relations = set()
+        for skill in skills:
+            version = versions.get(skill['published_version_id'])
+            form = forms.get(skill['published_version_id'])
+            if version and version.skill_id == skill['id'] and form and form.skill_class_id in class_ids:
+                relations.add((form.skill_class_id, skill['update_user_login_name'] or skill['create_user_login_name'] or ''))
+        # 零实现大类仍参与阶段/大类联动，但不虚构维护人；关系取发布表单，不取编辑中的分类。
+        represented = {class_id for class_id, _ in relations}
+        relations.update((class_id, '') for class_id in class_ids - represented)
+        return {'skill_classes': classes, 'test_stages': await stage_options(), 'applications': await application_options(),
+                'maintainers': [{'id': name, 'name': name} for name in sorted({name for _, name in relations if name})],
+                'filter_relations': [{'class_id': class_id, 'maintainer': maintainer} for class_id, maintainer in sorted(relations)]}
 
     async def class_detail(self, class_id):
         from .skill_class_service import class_option, require_available_class, published_content
