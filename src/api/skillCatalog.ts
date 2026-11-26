@@ -8,13 +8,15 @@ import type { Implementation, SkillBuild } from '@/types/developer'
 export interface CatalogClass extends DeveloperCatalogOption { is_enabled: boolean; description: string }
 export interface ClassDefinition extends CatalogClass { input_description?: string; output_description?: string; input_schema: Record<string, unknown> | null; output_schema: Record<string, unknown> | null; template: string | null }
 export interface CatalogFilters { name: string; classId: string; system: string; maintainer: string; testStageId?: string }
-export interface CatalogMetadata { skill_classes: CatalogClass[]; applications: DeveloperCatalogOption[]; maintainers: DeveloperCatalogOption[] }
+export interface CatalogMetadata { skill_classes: CatalogClass[]; applications: DeveloperCatalogOption[]; maintainers: DeveloperCatalogOption[]; test_stages?: DeveloperCatalogOption[]; filter_relations?: { class_id: string; maintainer: string }[] }
 interface CatalogRow extends ServerSkill { maintainer_id: string; maintainer_name: string; call_count: number | null; download_count: number | null }
 const map = (row: CatalogRow): Implementation => ({ ...toImplementation({ ...row, resource_ids: row.resource_ids ?? [], instructions: row.instructions ?? '', technical_name: row.technical_name ?? '' }), catalog: true,
   maintainerId: row.maintainer_id, maintainerName: row.maintainer_name, callCount: row.call_count, downloadCount: row.download_count })
 export async function getCatalogMetadata(signal?: AbortSignal): Promise<CatalogMetadata> {
   const result = await request<CatalogMetadata>('/skills/catalog/get-metadata', { signal })
-  return { ...result, skill_classes: result.skill_classes.map(row => ({ ...row, id: String(row.id) })) }
+  return { ...result, skill_classes: result.skill_classes.map(row => ({ ...row, id: String(row.id) })),
+    test_stages: result.test_stages?.map(row => ({ ...row, id: String(row.id) })),
+    filter_relations: result.filter_relations?.map(row => ({ ...row, class_id: String(row.class_id) })) }
 }
 export function getCatalogClass(classId: string, signal?: AbortSignal) {
   return request<ClassDefinition>(`/skills/catalog/get-class?${new URLSearchParams({ class_id: classId })}`, { signal })

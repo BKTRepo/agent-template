@@ -343,9 +343,13 @@ h1,h2,h3,p { margin:0; }
 .skill-catalog-filters .search-select-icon { display:none; }
 .catalog-filters.skill-catalog-filters .search-select-control input[role=combobox] { padding-left:12px; padding-right:34px; }
 .catalog-filters.skill-catalog-filters .search-select.is-open input[role=combobox],.catalog-filters.skill-catalog-filters .search-select-control input[role=combobox]:not(:placeholder-shown) { padding-right:54px; }
-.assistant-owned-dialog .catalog-filters { flex-wrap:nowrap; overflow-x:auto; }
-.assistant-owned-dialog .catalog-filters>input,.assistant-owned-dialog .catalog-filters>.search-select { flex:1 1 0; min-width:150px; }
-.assistant-owned-dialog .catalog-filters>button { flex:0 0 auto; white-space:nowrap; }
+.catalog-filters.assistant-picker-filters,.catalog-filters.mount-filters { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:10px; overflow:visible; }
+.catalog-filters.assistant-picker-filters>input,.catalog-filters.assistant-picker-filters>select,.assistant-picker-filters>.search-select,.catalog-filters.mount-filters>input,.catalog-filters.mount-filters>select,.mount-filters>.search-select,.mount-filters>.mount-maintainer { grid-column:span 2; width:100%; min-width:0; max-width:none; }
+.assistant-picker-filters>button,.mount-filters>button { min-width:0; white-space:nowrap; justify-content:center; }
+.mount-filters .mount-maintainer input { width:100%; min-width:0; }
+.catalog-filters select.select-placeholder { color:var(--platform-placeholder); }
+.catalog-filters select option { color:var(--platform-text); }
+@media(max-width:540px) { .catalog-filters.assistant-picker-filters,.catalog-filters.mount-filters { grid-template-columns:repeat(2,minmax(0,1fr)); } .catalog-filters.assistant-picker-filters>input,.catalog-filters.assistant-picker-filters>select,.assistant-picker-filters>.search-select,.catalog-filters.mount-filters>input,.catalog-filters.mount-filters>select,.mount-filters>.search-select,.mount-filters>.mount-maintainer { grid-column:span 1; min-width:0; } }
 .skill-group { margin-top:16px; overflow:hidden; }
 .skill-group>.developer-pagination { padding:16px 18px; }
 .skill-group-heading { display:grid; grid-template-columns:minmax(170px,240px) max-content minmax(0,1fr) max-content max-content max-content 28px; align-items:center; gap:12px; min-height:90px; padding:18px 24px; }

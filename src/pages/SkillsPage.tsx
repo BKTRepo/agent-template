@@ -6,7 +6,8 @@ import DebugDialog from '@/components/developer/DebugDialog'
 import SearchSelect from '@/components/developer/SearchSelect'
 import CatalogClassDetailDialog from '@/components/skills/CatalogClassDetailDialog'
 import { useSkillClassCatalog } from '@/stores/skillClassStore'
-import { classesForStage, classAfterStageChange } from '@/lib/skillClass'
+import { classesForStage } from '@/lib/skillClass'
+import { linkedCatalogOptions } from '@/lib/catalogFilters'
 import { getCatalogClass, getCatalogMetadata, getCatalogSkill, downloadCatalogSkill, prepareCatalogTest } from '@/api/skillCatalog'
 import type { CatalogMetadata, ClassDefinition } from '@/api/skillCatalog'
 import { useAuthStore } from '@/stores/authStore'
@@ -81,13 +82,14 @@ export default function SkillsPage() {
   const noResults = classes.length === 0 || classes.every(row => classTotals[row.id] === 0)
   function applyFilters(next: typeof emptyFilters) { setClassTotals({}); setApplied({ ...next }) }
   const applicationName = (item: Implementation) => (item.applicationIds ?? []).map(id => id === '*' ? '全应用适用' : metadata.applications.find(row => row.id === id)?.name || id).join('、') || '未关联应用'
+  const options = linkedCatalogOptions(metadata, metadata.test_stages ?? classCatalog.stages, filters)
   return <>
     <form className="surface catalog-filters skill-catalog-filters" onSubmit={event => { event.preventDefault(); applyFilters(filters) }}>
       <input aria-label="技能名称模糊搜索" placeholder="名称模糊搜索" value={filters.name} onChange={event => setFilters(previous => ({ ...previous, name: event.target.value }))} />
-      <SearchSelect label="测试阶段" value={filters.testStageId} options={classCatalog.stages} placeholder="测试阶段" onChange={testStageId => setFilters(previous=>({...previous,testStageId,classId:classAfterStageChange(metadata.skill_classes,testStageId,previous.classId)}))}/>
-      <select aria-label="技能类" className={!filters.classId ? 'select-placeholder' : undefined} value={filters.classId} onChange={event => setFilters(previous => ({ ...previous, classId: event.target.value }))}><option value="">技能大类</option>{classesForStage(metadata.skill_classes,filters.testStageId).map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select>
+      <select aria-label="测试阶段" className={!filters.testStageId ? 'select-placeholder' : undefined} value={filters.testStageId} onChange={event => setFilters(previous => ({ ...previous, testStageId: event.target.value }))}><option value="">测试阶段</option>{options.stages.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select>
+      <select aria-label="技能类" className={!filters.classId ? 'select-placeholder' : undefined} value={filters.classId} onChange={event => setFilters(previous => ({ ...previous, classId: event.target.value }))}><option value="">技能大类</option>{options.classes.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select>
       <SearchSelect label="筛选所属应用" value={filters.system} options={metadata.applications.filter(row => row.id !== '*')} placeholder="应用" onChange={value => setFilters(previous => ({ ...previous, system: value }))} />
-      <SearchSelect label="维护人" value={filters.maintainer} options={metadata.maintainers} placeholder="维护人" onChange={value => setFilters(previous => ({ ...previous, maintainer: value }))} />
+      <SearchSelect label="维护人" value={filters.maintainer} options={options.maintainers} placeholder="维护人" onChange={value => setFilters(previous => ({ ...previous, maintainer: value }))} />
       <button className="button primary" disabled={loading}>搜索</button><button type="button" className="button" disabled={loading} onClick={() => { setFilters(emptyFilters); applyFilters(emptyFilters) }}>重置</button>
     </form>
     {error && <p className="error-banner" role="alert">{error}<button className="button small" onClick={() => setReload(value => value + 1)}>重新加载</button></p>}

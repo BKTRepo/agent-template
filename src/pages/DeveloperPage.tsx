@@ -139,7 +139,7 @@ export default function DeveloperPage() {
     const current = await getSkillClass(row.id)
     await useDeveloperStore.getState().refreshMetadata()
     if (account !== skillAccount()) return
-    setTab('skills')
+    if (!current.can_create_implementation) throw new Error('该技能大类尚未发布或已停用，请重新选择')
     await openForm()
     setForm(previous => ({ ...previous, classId: current.id }))
   }
@@ -231,6 +231,7 @@ export default function DeveloperPage() {
     try {
       const saved = await offlineDeveloperSkill(selected.id, offlineReasonCode, offlineReasonCode === 'OTHER' ? offlineReasonText : undefined)
       replace(saved); setPanel(null); setOfflinePrompt(false)
+      useSkillClassStore.getState().invalidate()
       setNotice('技能已下线。')
     } catch (error) { setMessage((error as Error).message) } finally { setBusy(null) }
   }
@@ -282,6 +283,7 @@ export default function DeveloperPage() {
     if (!item) throw new Error('该技能不存在，请刷新后重试。')
     const saved = await publishDeveloperSkill(item.id)
     replace(saved)
+    useSkillClassStore.getState().invalidate()
     setPanel(null); setNotice('技能已上线。')
   }
   function saveDebugResult(id: string, debug: Implementation['debug']) {

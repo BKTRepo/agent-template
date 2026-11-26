@@ -10,7 +10,7 @@ import { loadOwnedMountTargets, mountKnowledge, type KnowledgeMountResult } from
 import { getDeveloperMetadata, type DeveloperMetadata, type DeveloperCatalogOption } from '@/api/developerCenter'
 import type { Implementation, KnowledgeBase } from '@/types/developer'
 import { useSkillClassCatalog } from '@/stores/skillClassStore'
-import { classesForStage, classAfterStageChange } from '@/lib/skillClass'
+import { linkedMountOptions } from '@/lib/catalogFilters'
 
 const empty = { name: '', classId: '', testStageId: '', app: '' }
 export default function KnowledgeMountDialog({ kb, onClose }: { kb: KnowledgeBase; onClose: () => void }) {
@@ -33,6 +33,7 @@ export default function KnowledgeMountDialog({ kb, onClose }: { kb: KnowledgeBas
     return () => { active = false }
   }, [actor.id, kb.id, classCatalog.version])
   const classes: DeveloperCatalogOption[] = metadata.filter_skill_classes ?? metadata.skill_classes
+  const options = linkedMountOptions(classes, classCatalog.stages, filters)
   const shown = targets.filter(item => classes.some(kind => kind.id === item.classId)
     && (!applied.classId || item.classId === applied.classId)
     && (!applied.testStageId || classes.some(kind=>kind.id===item.classId && String(kind.test_stage_id)===applied.testStageId))
@@ -82,9 +83,9 @@ export default function KnowledgeMountDialog({ kb, onClose }: { kb: KnowledgeBas
     <p className="helper-text">展示本人创建的所有状态技能，仅挂载勾选的实现。保存后转为草稿，需重新构建、调试并发布。</p>
     <form className="catalog-filters mount-filters" onSubmit={event => { event.preventDefault(); setApplied(filters); setPage(1) }}>
       <input aria-label="挂载目标名称模糊搜索" placeholder="名称或描述模糊搜索" value={filters.name} disabled={busy} onChange={event => setFilters(old => ({ ...old, name: event.target.value }))} />
-      <SearchSelect label="挂载目标测试阶段" value={filters.testStageId} options={classCatalog.stages} disabled={busy} placeholder="全部测试阶段" onChange={testStageId=>setFilters(previous=>({...previous,testStageId,classId:classAfterStageChange(classes,testStageId,previous.classId)}))}/>
-      <select aria-label="挂载目标技能类" value={filters.classId} disabled={busy} onChange={event => setFilters(old => ({ ...old, classId: event.target.value }))}><option value="">全部技能类</option>{classesForStage(classes,filters.testStageId).map(kind => <option key={kind.id} value={kind.id}>{kind.name}</option>)}</select>
-      <SearchSelect label="挂载目标应用" value={filters.app} options={metadata.applications} disabled={busy} onChange={app => setFilters(old => ({ ...old, app }))} placeholder="全部应用" />
+      <select aria-label="挂载目标测试阶段" className={!filters.testStageId ? 'select-placeholder' : undefined} value={filters.testStageId} disabled={busy} onChange={event => setFilters(old => ({ ...old, testStageId: event.target.value }))}><option value="">测试阶段</option>{options.stages.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select>
+      <select aria-label="挂载目标技能大类" className={!filters.classId ? 'select-placeholder' : undefined} value={filters.classId} disabled={busy} onChange={event => setFilters(old => ({ ...old, classId: event.target.value }))}><option value="">技能大类</option>{options.classes.map(kind => <option key={kind.id} value={kind.id}>{kind.name}</option>)}</select>
+      <SearchSelect label="挂载目标应用" value={filters.app} options={metadata.applications} disabled={busy} onChange={app => setFilters(old => ({ ...old, app }))} placeholder="应用" />
       <label className="mount-maintainer"><span>维护人 <em>*</em></span><input aria-label="挂载目标维护人" value={actor.name || actor.id} disabled readOnly /></label>
       <button className="button primary" disabled={busy || loading}>搜索</button><button type="button" className="button" disabled={busy} onClick={() => { setFilters(empty); setApplied(empty); setPage(1) }}>重置</button>
     </form>

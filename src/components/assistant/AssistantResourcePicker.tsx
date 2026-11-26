@@ -6,7 +6,7 @@ import { getCatalogMetadata, listCatalogSkills, type CatalogMetadata } from '@/a
 import { listKnowledgeBasesPage } from '@/api/knowledge'
 import type { Implementation, KnowledgeBase } from '@/types/developer'
 import { useSkillClassCatalog } from '@/stores/skillClassStore'
-import { classesForStage, classAfterStageChange } from '@/lib/skillClass'
+import { linkedCatalogOptions } from '@/lib/catalogFilters'
 import TestStageBadge from '@/components/skills/TestStageBadge'
 
 export default function AssistantResourcePicker({ kind, selected, busy, onSkill, onKnowledge, onClose }: {
@@ -50,14 +50,15 @@ export default function AssistantResourcePicker({ kind, selected, busy, onSkill,
     catch (reason) { setError((reason as Error).message) } finally { setAdding(false) }
   }
   const applicationName = (ids: string[] = []) => ids.map(id => metadata?.applications.find(row => row.id === id)?.name || id).join('、') || '未关联应用'
+  const options = linkedCatalogOptions(metadata, metadata?.test_stages ?? classCatalog.stages, filters, true)
   return <Dialog className="assistant-owned-dialog" wide title={kind === 'skills' ? '加载 Skill 到对话台' : '加载知识库到对话台'} busy={adding} onClose={onClose}
     footer={<button className="button" disabled={adding} onClick={onClose}>完成</button>}>
-    <form className="catalog-filters" onSubmit={event => { event.preventDefault(); search() }}>
+    <form className="catalog-filters assistant-picker-filters" onSubmit={event => { event.preventDefault(); search() }}>
       <input aria-label={kind === 'skills' ? '助手技能名称搜索' : '助手知识库名称搜索'} placeholder="名称模糊搜索" value={filters.name} onChange={event => setFilters({ ...filters, name: event.target.value })} />
-      {kind === 'skills' && <SearchSelect label="助手测试阶段" value={filters.testStageId} options={classCatalog.stages} placeholder="全部测试阶段" onChange={testStageId => setFilters(previous=>({...previous,testStageId,classId:classAfterStageChange(metadata?.skill_classes??[],testStageId,previous.classId)}))}/>}
-      {kind === 'skills' && <SearchSelect label="助手技能类" value={filters.classId} options={classesForStage(metadata?.skill_classes.filter(row => row.is_enabled) ?? [],filters.testStageId)} placeholder="全部技能类" onChange={classId => setFilters({ ...filters, classId })} />}
-      <SearchSelect label="助手所属应用" value={filters.application} options={metadata?.applications ?? []} placeholder="全部应用" onChange={application => setFilters({ ...filters, application })} />
-      {kind === 'skills' && <SearchSelect label="助手维护人" value={filters.maintainer} options={metadata?.maintainers ?? []} placeholder="全部维护人" onChange={maintainer => setFilters({ ...filters, maintainer })} />}
+      {kind === 'skills' && <select aria-label="助手测试阶段" className={!filters.testStageId ? 'select-placeholder' : undefined} value={filters.testStageId} onChange={event => setFilters(previous => ({ ...previous, testStageId: event.target.value }))}><option value="">测试阶段</option>{options.stages.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select>}
+      {kind === 'skills' && <select aria-label="助手技能大类" className={!filters.classId ? 'select-placeholder' : undefined} value={filters.classId} onChange={event => setFilters(previous => ({ ...previous, classId: event.target.value }))}><option value="">技能大类</option>{options.classes.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select>}
+      <SearchSelect label="助手所属应用" value={filters.application} options={metadata?.applications ?? []} placeholder="应用" onChange={application => setFilters({ ...filters, application })} />
+      {kind === 'skills' && <SearchSelect label="助手维护人" value={filters.maintainer} options={options.maintainers} placeholder="维护人" onChange={maintainer => setFilters({ ...filters, maintainer })} />}
       {kind === 'knowledge' && <input aria-label="知识库维护人搜索" placeholder="维护人" value={filters.maintainer} onChange={event => setFilters({ ...filters, maintainer: event.target.value })} />}
       <button className="button primary" disabled={blocked}>搜索</button><button type="button" className="button" disabled={blocked} onClick={() => search(true)}>重置</button>
     </form>
