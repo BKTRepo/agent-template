@@ -193,7 +193,7 @@ export default function FloatingAssistant({ contextLabel = '当前页面', conte
     observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['open'] })
     return () => observer.disconnect()
   }, [])
-  useEffect(() => { if (geometry.degrade && portalTarget) setOpen(false) }, [geometry.degrade, portalTarget])
+  useEffect(() => { if (geometry.degrade && portalTarget) { setOpen(false); setMaximized(false) } }, [geometry.degrade, portalTarget])
   useEffect(() => {
     let disposed = false, polling = false
     const refresh = async () => {
@@ -245,7 +245,7 @@ export default function FloatingAssistant({ contextLabel = '当前页面', conte
       if (conversation) await loadConversation(conversation.id)
     } catch (reason) { setError((reason as Error).message) } finally { setLoading(false) }
   }
-  function close() { setOpen(false); setDrawer(false); setArtifactList(undefined); trigger.current?.focus() }
+  function close() { setOpen(false); setMaximized(false); setDrawer(false); setArtifactList(undefined); trigger.current?.focus() }
   async function newSession() {
     setLoading(true); setError('')
     try { const conversation = await createChatConversation(); patchSession(conversation); setActiveId(conversation.id); setMessages(current => ({ ...current, [conversation.id]: [] })); setSkillIds([]); setManualKnowledgeIds([]); setModel(null); setFiles([]); setText(''); setDrawer(false); setResendSource(undefined) }

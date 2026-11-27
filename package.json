@@ -42,8 +42,8 @@
     "@csstools/postcss-cascade-layers": "^6.0.0",
     "@csstools/postcss-color-mix-function": "^4.0.7",
     "@csstools/postcss-oklab-function": "^5.0.7",
-    "@tailwindcss/postcss": "^4.3.3",
-    "@tailwindcss/vite": "^4.1.4",
+    "@tailwindcss/postcss": "4.3.5",
+    "@tailwindcss/vite": "4.3.5",
     "@types/node": "^22.14.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
@@ -52,7 +52,7 @@
     "autoprefixer": "^10.5.4",
     "postcss": "^8.5.25",
     "postcss-nesting": "^14.0.1",
-    "tailwindcss": "^4.1.4",
+    "tailwindcss": "4.3.5",
     "typescript": "~5.8.0",
     "vite": "^6.3.0"
   }
