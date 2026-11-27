@@ -8,6 +8,7 @@ from tortoise.transactions import in_transaction
 
 from applications.wrq.agent.models.agent_model import DeveloperSkillClass, Skill, SkillDisplayStatus, SkillForm, SkillVersion
 from applications.wrq.agent.services.developer_skill_crud import DeveloperError
+from applications.wrq.agent.services.skill_class_service import published_content
 from applications.wrq.catalog import application_options
 from configure import LOGGER
 
@@ -44,7 +45,7 @@ async def skill_details(query, *, by_creation: bool, page: int, page_size: int):
         versions = {row.id: row for row in await SkillVersion.filter(id__in=version_ids)}
         forms = {row.skill_version_id: row for row in await SkillForm.filter(skill_version_id__in=version_ids)}
         class_ids = {skill.skill_classes_id for skill in skills} | {form.skill_class_id for form in forms.values()}
-        classes = {row.id: row.name for row in await DeveloperSkillClass.filter(id__in=class_ids)}
+        classes = {row.id: published_content(row)['name'] for row in await DeveloperSkillClass.filter(id__in=class_ids)}
         try:
             applications = {row['id']: row['name'] for row in await application_options()}
         except (httpx.HTTPError, ValueError, OSError) as exc:

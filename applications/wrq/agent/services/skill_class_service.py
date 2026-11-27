@@ -4,7 +4,7 @@ import unicodedata
 from collections import defaultdict
 
 from tortoise.exceptions import IntegrityError
-from tortoise.expressions import F, Q
+from tortoise.expressions import Q
 from tortoise.timezone import now
 from tortoise.transactions import in_transaction
 
@@ -32,15 +32,16 @@ def comparable_class_content(values):
 
 
 def available_classes():
-    return DeveloperSkillClass.filter(state=0, is_enabled=True, publication_status="PUBLISHED").filter(
-        Q(published_revision__isnull=True) | Q(published_revision=F('revision')))
+    # 已发布过的大类在编辑草稿期间仍可使用，业务选项始终投影已发布快照。
+    return DeveloperSkillClass.filter(state=0, is_enabled=True).filter(
+        Q(publication_status='PUBLISHED') | Q(published_revision__isnull=False))
 
 
 def current_class_published(row):
     return row.publication_status == 'PUBLISHED' and (row.published_revision is None or row.published_revision == row.revision)
 
 
-async def require_available_class(class_id, db=None, *, published_snapshot=False):
+async def require_available_class(class_id, db=None, *, published_snapshot=True):
     query = DeveloperSkillClass.filter(state=0, id=class_id)
     if db is not None:
         query = query.using_db(db).select_for_update()
@@ -153,7 +154,7 @@ class SkillClassService:
                 'publication_status': 'PUBLISHED' if current_class_published(row) else 'DRAFT', 'published_revision': row.published_revision, 'published_at': row.published_at,
                 'has_unpublished_changes': row.published_revision is not None and row.published_revision != row.revision,
                 'can_publish': mine and row.is_enabled and row.published_revision != row.revision,
-                'can_create_implementation': current_class_published(row) and row.is_enabled,
+                'can_create_implementation': (current_class_published(row) or row.published_revision is not None) and row.is_enabled,
                 'implementation_count': online_counts.get(row.id, 0), 'dependent_skill_count': count,
                 'is_mine': mine, 'can_edit': mine, 'can_delete': mine and count == 0,
                 'delete_disabled_reason': implementation_delete_reason(states)})

@@ -129,7 +129,7 @@ class DeveloperSkillCrud:
             if not getattr(data,key).strip(): raise DeveloperError(message,field=key)
         normalized_skill_name(data.name)
         from .skill_class_service import require_available_class
-        await require_available_class(data.class_id, db, published_snapshot=data.class_id == existing_class_id)
+        await require_available_class(data.class_id, db, published_snapshot=True)
         apps={r['id'] for r in await application_options()}
         application_paso = data.effective_application_paso
         if application_paso and application_paso not in apps and application_paso != existing_application:
