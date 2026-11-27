@@ -61,6 +61,8 @@ export default function DeveloperPage() {
   useAssistantPageObject('developer', 'skill', panel ? selectedId : undefined)
   const record = implementations.find(item => item.id === selectedId)
   const selected = record ? { ...record, ...preview } : undefined
+  const formSkillClasses = selected && !skillClasses.some(row => row.id === selected.classId)
+    ? [...skillClasses, ...filterSkillClasses.filter(row => row.id === selected.classId)] : skillClasses
   // 列表接口已按当前登录人过滤，服务端负责最终的本人编辑权限校验。
   const readonly = false
   const online = selected?.status === '已上线'
@@ -380,7 +382,7 @@ export default function DeveloperPage() {
       {readonly && <p className="form-hint">创建者：{selected?.creatorName || '历史创建者'}。仅创建者本人可编辑此实现类。</p>}
       {online && !readonly && <p className="helper-text">保存修改后回到草稿状态，重新调试通过并上线时生成新版本。{selected?.pendingChangedAt && `编辑稿保存于 ${dateText(selected.pendingChangedAt)}。`}</p>}
       {selected?.status === '已下线' && <p className="helper-text">该技能已下线。可继续编辑，重新调试通过后重新上线。</p>}
-      <div ref={formRoot}><SkillFields form={form} update={update} skillClasses={skillClasses} applications={applications} resourceCategories={resourceCategories} errors={errors} disabled={!!busy || readonly} editing={!!selected} activeIds={activeUploads.map(row => row.id)} onAdd={addFiles} onRemove={removeFile} /></div>
+      <div ref={formRoot}><SkillFields form={form} update={update} skillClasses={formSkillClasses} applications={applications} resourceCategories={resourceCategories} errors={errors} disabled={!!busy || readonly} editing={!!selected} activeIds={activeUploads.map(row => row.id)} onAdd={addFiles} onRemove={removeFile} /></div>
     </Dialog>}
 
     {panel === 'form' && !selectedId && polishOriginal && <SkillPolishDialog original={polishOriginal}

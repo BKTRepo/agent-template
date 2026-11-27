@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { Plus } from 'lucide-react'
 import SkillClassDeleteDialog from './SkillClassDeleteDialog'
+import Dialog from '../Dialog'
 import ListPagination from '@/components/common/ListPagination'
 import TestStageBadge from '@/components/skills/TestStageBadge'
 import SkillClassFormDialog from './SkillClassFormDialog'
@@ -32,10 +33,12 @@ export default function SkillClassPanel({ onNewImplementation }: { onNewImplemen
   const [form,setForm] = useState<{ existing?: SkillClassDetail; stageId: string }>()
   const [detail,setDetail] = useState<SkillClassDetail>(), [deleting,setDeleting] = useState<SkillClassDetail>()
   const [deleteError,setDeleteError] = useState('')
+  const [publishError,setPublishError] = useState<string>()
+  const [publishTarget,setPublishTarget] = useState<SkillClassDetail>()
   const active = useRef(true)
   const listRequest = useRef<AbortController | null>(null)
   useEffect(() => { active.current = true; return () => { active.current = false } }, [])
-  useEffect(() => { setForm(undefined); setDetail(undefined); setDeleting(undefined); setStageId(''); setPage(1); setResult(undefined) },[actor])
+  useEffect(() => { setForm(undefined); setDetail(undefined); setDeleting(undefined); setPublishError(undefined); setPublishTarget(undefined); setStageId(''); setPage(1); setResult(undefined) },[actor])
   useEffect(() => {
     const controller = new AbortController()
     listRequest.current = controller
@@ -65,10 +68,19 @@ export default function SkillClassPanel({ onNewImplementation }: { onNewImplemen
     const outside = stageId && String(row.test_stage_id)!==stageId
     toast.success(`大类「${row.name}」草稿已保存${outside ? `至${row.test_stage_name}` : ''}，发布后生效`)
   }
+  function requestPublish(row: SkillClassDetail) {
+    if (!row.output_description?.trim()) { setForm({ existing: row, stageId: '' }); return }
+    setPublishTarget(row)
+  }
   async function publish(row: SkillClassDetail) {
-    const account = skillAccount(); setBusy(true); setError('')
-    try { const saved = await publishSkillClass(row); if (active.current && account === skillAccount()) { acceptMutation(saved); setDetail(current => current?.id === saved.id ? saved : current); useSkillClassStore.getState().invalidate(); toast.success(`大类「${saved.name}」已发布`) } }
-    catch (reason) { if (active.current && account === skillAccount()) setError((reason as Error).message) }
+    if (busy) return
+    const account = skillAccount(); setBusy(true); setError(''); setPublishError(undefined)
+    try { const saved = await publishSkillClass(row); if (active.current && account === skillAccount()) { setPublishTarget(undefined); acceptMutation(saved); setDetail(current => current?.id === saved.id ? saved : current); useSkillClassStore.getState().invalidate(); toast.success(`大类「${saved.name}」已发布`) } }
+    catch (reason) { if (active.current && account === skillAccount()) {
+      setPublishTarget(undefined)
+      if ((reason as Error).message.includes('输出描述')) setForm({ existing: row, stageId: '' })
+      else setPublishError((reason as Error).message)
+    } }
     finally { if (active.current && account === skillAccount()) setBusy(false) }
   }
   async function requestDelete(row: SkillClassDetail) {
@@ -94,12 +106,14 @@ export default function SkillClassPanel({ onNewImplementation }: { onNewImplemen
     <SkillClassStageBar stages={stages} selectedId={stageId} total={result?.summary.total} onSelect={id=>{setStageId(id);setPage(1)}}/>
     {error&&<p className="error-banner" role="alert">{error}</p>}
     <div className="implementation-table-wrap"><table className="implementation-table skill-class-table"><thead><tr>{['大类名称','测试阶段','功能说明','实现','维护人','更新','操作'].map(label=><th key={label}>{label}</th>)}</tr></thead><tbody>{result?.items.map(row=><tr key={row.id}>
-      <td><strong>{row.name}</strong>{row.is_mine&&<span className="skill-class-mine">我创建</span>}{(row.publication_status==='DRAFT'||row.has_unpublished_changes)&&<span className="status-tag neutral">{row.publication_status==='DRAFT'?'草稿':'有待发布修改'}</span>}</td><td><TestStageBadge name={row.test_stage_name} code={row.test_stage_code}/></td><td><p className="skill-class-summary" title={row.description}>{row.description||'未填写'}</p></td><td>{row.implementation_count}</td><td>{row.maintainer_name}</td><td>{row.updated_time?new Date(row.updated_time).toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit'}).replace(/\//g,'-'):'—'}</td><td><div className="table-actions"><button className="button small" disabled={busy} onClick={()=>void inspect(row)}>详情</button>{row.can_create_implementation&&<button className="button small" disabled={busy} onClick={()=>{setBusy(true);void onNewImplementation(row).catch(reason=>setError((reason as Error).message)).finally(()=>{if(active.current)setBusy(false)})}}>新建实现</button>}{row.publication_status==='DRAFT'&&row.can_publish&&<button className="button small primary" disabled={busy} onClick={()=>void publish(row)}>发布</button>}{row.is_mine&&<button className="button small skill-class-delete" title={row.delete_disabled_reason||'删除大类'} disabled={busy} onClick={()=>void requestDelete(row)}>删除</button>}</div></td>
+      <td><strong>{row.name}</strong>{row.is_mine&&<span className="skill-class-mine">我创建</span>}</td><td><TestStageBadge name={row.test_stage_name} code={row.test_stage_code}/></td><td><p className="skill-class-summary" title={row.description}>{row.description||'未填写'}</p></td><td>{row.implementation_count}</td><td>{row.maintainer_name}</td><td>{row.updated_time?new Date(row.updated_time).toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit'}).replace(/\//g,'-'):'—'}</td><td><div className="table-actions"><button className="button small" disabled={busy} onClick={()=>void inspect(row)}>详情</button>{row.publication_status==='PUBLISHED'&&!row.has_unpublished_changes&&row.can_create_implementation&&<button className="button small" disabled={busy} onClick={()=>{setBusy(true);void onNewImplementation(row).catch(reason=>setError((reason as Error).message)).finally(()=>{if(active.current)setBusy(false)})}}>新建实现</button>}{row.can_publish&&<button className="button small primary" disabled={busy} onClick={()=>requestPublish(row)}>发布</button>}{row.is_mine&&<button className="button small skill-class-delete" title={row.delete_disabled_reason||'删除大类'} disabled={busy} onClick={()=>void requestDelete(row)}>删除</button>}</div></td>
     </tr>)}{(!result?.items.length||loading)&&<tr><td colSpan={7} className="empty-table">{loading?'正在查询技能大类…':'该阶段暂无技能大类，可点击右上角新建'}</td></tr>}</tbody></table></div>
     <div className="skill-class-statistics"><span>共 {result?.summary.total ?? 0} 个大类 · 覆盖 {result?.summary.covered_stages ?? 0}/{stages.length} 个测试阶段{stageId&&` · 当前筛选「${stages.find(row=>row.id===stageId)?.name||''}」`}</span>{!!result?.summary.unassigned&&<span>{result.summary.unassigned} 个历史大类尚未配置阶段</span>}</div>
     <ListPagination total={result?.total??0} page={result?.page??1} pages={result?.pages??1} label="技能大类分页" busy={loading||busy} onPageChange={setPage}/>
     {form&&<SkillClassFormDialog existing={form.existing} defaultStageId={form.stageId} onClose={()=>setForm(undefined)} onSaved={saved}/>}
-    {detail&&<SkillClassDetailDialog row={detail} busy={busy} error={error} onPublish={()=>void publish(detail)} onClose={()=>{setDetail(undefined);setError('')}} onEdit={()=>{setError('');setDetail(undefined);setForm({existing:detail,stageId:''})}}/>}
+    {detail&&<SkillClassDetailDialog row={detail} busy={busy} error={error} onClose={()=>{setDetail(undefined);setError('')}} onEdit={()=>{setError('');setDetail(undefined);setForm({existing:detail,stageId:''})}}/>}
     {deleting&&<SkillClassDeleteDialog row={deleting} busy={busy} error={deleteError} onClose={()=>setDeleting(undefined)} onConfirm={()=>void confirmDelete()}/>}
+    {publishTarget&&<Dialog title="确认发布技能大类" busy={busy} onClose={()=>{if(!busy)setPublishTarget(undefined)}} footer={<><button className="button" disabled={busy} onClick={()=>setPublishTarget(undefined)}>取消</button><button className="button primary" disabled={busy} onClick={()=>void publish(publishTarget)}>{busy?'正在发布…':'确认发布'}</button></>}><p>是否确认发布技能大类“{publishTarget.name}”？</p><p className="helper-text">发布后所有人可见，并可基于此契约创建具体技能。</p></Dialog>}
+    {publishError&&<Dialog title="发布未完成" onClose={()=>setPublishError(undefined)} footer={<button className="button primary" onClick={()=>setPublishError(undefined)}>我知道了</button>}><p role="alert">{publishError}</p></Dialog>}
   </section>
 }

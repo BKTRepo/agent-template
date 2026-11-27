@@ -14,6 +14,7 @@ export interface SkillClassDetail extends Omit<SkillClassOption, 'description'>,
   publication_status: 'DRAFT' | 'PUBLISHED'; published_revision: number | null; published_at: string | null
   has_unpublished_changes: boolean; can_publish: boolean; can_create_implementation: boolean
   creator_login_name: string | null; maintainer_name: string; implementation_count: number
+  dependent_skill_count?: number
   created_time: string | null; updated_time: string | null
   is_mine: boolean; can_edit: boolean; can_delete: boolean; delete_disabled_reason: string | null
 }

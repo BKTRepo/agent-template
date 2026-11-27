@@ -19,12 +19,11 @@ export function classAfterStageChange(classes: SkillClassOption[], stageId: stri
 }
 export function validateSkillClass(form: SkillClassForm): Record<string, string> {
   const errors: Record<string, string> = {}
-  for (const [field, limit, label] of [['name',20,'大类名称'],['description',500,'功能说明'],['input_description',200,'输入描述'],['template',100000,'Skill 模板']] as const) {
+  for (const [field, limit, label] of [['name',20,'大类名称'],['description',500,'功能说明'],['input_description',200,'输入描述'],['output_description',200,'输出描述'],['template',100000,'Skill 模板']] as const) {
     const value = form[field].trim()
     if (!value) errors[field] = `请填写${label}`
     else if (Array.from(value).length > limit) errors[field] = `${label}最多 ${limit} 字`
   }
   if (!form.test_stage_id) errors.test_stage_id = '请选择测试所属阶段'
-  if (Array.from(form.output_description.trim()).length > 200) errors.output_description = '输出描述最多 200 字'
   return errors
 }
