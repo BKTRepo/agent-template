@@ -12,7 +12,7 @@ from tortoise.transactions import in_transaction
 
 from applications.conversation.models.asset_model import Asset, AssetFile
 from applications.user.models.user_model import User
-from applications.wrq.agent.models.agent_model import DeveloperSkillClass
+from applications.wrq.agent.models.agent_model import DeveloperSkillClass, TestStage
 from applications.wrq.agent.services.skill_class_service import class_options, published_content, require_available_class
 from applications.wrq.agent.services.developer_skill_crud import DeveloperError
 from applications.wrq.platform_catalog import validate_application_async
@@ -37,12 +37,34 @@ async def overview(user):
     counts = await visible_assets(user).group_by("skill_classes_id").annotate(count=Count("id")).values("skill_classes_id", "count")
     by_class = {row["skill_classes_id"]: row["count"] for row in counts}
     classes = await class_options(available_only=False)
+    stages = await TestStage.all().order_by('sort_order', 'id')
+    stage_counts = {stage.id: 0 for stage in stages}
+    referenced = await DeveloperSkillClass.in_bulk(by_class)
+    for class_id, count in by_class.items():
+        stage_id = published_stage_id(referenced[class_id]) if class_id in referenced else None
+        if stage_id in stage_counts:
+            stage_counts[stage_id] += count
     return {
         "total": sum(by_class.values()), "recycle_count": await visible_assets(user, recycle=True).count(),
         "recycle_days": PROJECT_CONFIG.ASSET_RECYCLE_RETENTION_DAYS,
-        "classes": [{"id": row['id'], "name": row['name'], "count": by_class.get(row['id'], 0), "enabled": row['is_enabled']}
+        "test_stages": [{"id": stage.id, "code": stage.code, "name": stage.name, "count": stage_counts[stage.id]}
+                        for stage in stages],
+        "unassigned_count": sum(by_class.values()) - sum(stage_counts.values()),
+        "classes": [{"id": row['id'], "name": row['name'], "count": by_class.get(row['id'], 0), "enabled": row['is_enabled'],
+                     "test_stage_id": row['test_stage_id'], "test_stage_name": row['test_stage_name'], "test_stage_code": row['test_stage_code']}
                     for row in classes if row['is_enabled'] or row['id'] in by_class],
     }
+
+
+def published_stage_id(skill_class):
+    value = published_content(skill_class).get('test_stage_id')
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        return None
+    try:
+        identifier = int(value)
+    except ValueError:
+        return None
+    return identifier if identifier > 0 else None
 
 
 async def serialize(rows, user):
@@ -69,10 +91,13 @@ async def serialize(rows, user):
     } for row in rows]
 
 
-async def list_page(user, page, search, class_id, sort, recycle):
+async def list_page(user, page, search, class_id, sort, recycle, *, test_stage_id=None):
     query = visible_assets(user, recycle=recycle)
     if class_id is not None:
         query = query.filter(skill_classes_id=class_id)
+    if test_stage_id is not None:
+        classes = await DeveloperSkillClass.all()
+        query = query.filter(skill_classes_id__in=[row.id for row in classes if published_stage_id(row) == test_stage_id])
     if keyword := search.strip():
         owners = User.filter(Q(alias__icontains=keyword) | Q(username__icontains=keyword)).values_list("id", flat=True)
         query = query.filter(Q(name__icontains=keyword) | Q(created_by__in=Subquery(owners)))

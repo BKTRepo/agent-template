@@ -8,7 +8,8 @@ import jwt
 from fastapi import HTTPException, Request
 
 from configure import LOGGER, PROJECT_CONFIG
-from core.responses import UnauthorizedResponse
+from core.responses import BaseResponse, UnauthorizedResponse
+from enums import Code, Status
 from services import AuthControl
 
 
@@ -100,7 +101,15 @@ async def auth_middleware(request: Request, call_next):
     try:
         await AuthControl.is_authed(token)
     except HTTPException as exc:
+        if exc.status_code >= 500:
+            LOGGER.error("登录验证服务异常，HTTP {}", exc.status_code)
+            return BaseResponse(http_status_code=503, code=Code.CODE500, status=Status.FAILURE,
+                                message="登录验证服务暂不可用，请稍后重试。")
         message = str(exc.detail) if exc.detail else "请求服务鉴权失败"
+        if exc.status_code != 401:
+            return BaseResponse(http_status_code=exc.status_code,
+                                code=Code.CODE403 if exc.status_code == 403 else Code.CODE400,
+                                status=Status.FAILURE, message=message)
         return UnauthorizedResponse(message=message)
     except jwt.ExpiredSignatureError:
         return UnauthorizedResponse(
@@ -114,5 +123,6 @@ async def auth_middleware(request: Request, call_next):
         LOGGER.error(
             f"鉴权中间件异常: {exc}\n{traceback.format_exc()}"
         )
-        return UnauthorizedResponse(message="请求服务鉴权失败, 服务暂时不可用, 请稍后重试")
+        return BaseResponse(http_status_code=503, code=Code.CODE500, status=Status.FAILURE,
+                            message="登录验证服务暂不可用，请稍后重试。")
     return await call_next(request)

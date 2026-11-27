@@ -1,10 +1,14 @@
 ---
 title: 资产管理接入与验收
 status: implemented
-last_updated: 2026-11-12
+last_updated: 2026-11-27
 ---
 
-资产管理复用 `keenrobot_skill_classes`，概览按可见资产统计总数及各大类数量。列表按创建时间和编号稳定分页，每页 10 项，支持资产名称及创建人姓名或账号搜索。创建人才能移入回收站、恢复和彻底删除。移入回收站只支持逐条操作：仅显示每行操作按钮，确认时展示资产名称；多选工具栏保留批量导出，不提供批量移入。回收站现有恢复、彻底删除能力保持不变。
+资产管理复用 `keenrobot_skill_classes`，概览展示“全部资产”和七个测试阶段，按可见且未回收的资产统计数量。同阶段下多个技能大类的资产合并计数，零资产阶段也展示；卡片点击后按阶段筛选，列表中的原“资产类型”列更名为“技能大类”，继续展示所选大类名称。列表按创建时间和编号稳定分页，每页 10 项，支持资产名称及创建人姓名或账号搜索。创建人才能移入回收站、恢复和彻底删除。移入回收站只支持逐条操作：仅显示每行操作按钮，确认时展示资产名称；多选工具栏保留批量导出，不提供批量移入。回收站现有恢复、彻底删除能力保持不变。
+
+从悬浮窗纳入产出物时，用户选择已发布的技能大类，测试阶段自动由该大类的发布快照关联，只读展示，不由客户端填写或提交。资产继续只保存 `skill_classes_id`，无需新增阶段列或刷历史数据；归档后列表与阶段统计自动刷新。大类未重新发布时仍按原发布名称及阶段展示、筛选和计数，重新发布后一起切换。历史阶段为空或阶段字典已缺失的资产仍计入“全部资产”，不强行归入任一阶段，通过 `unassigned_count` 提示；已删除大类的历史资产也按保留的发布快照归类。
+
+专项回归执行 `python scripts/test-asset-stages.py`，使用临时 SQLite 和模拟鉴权依赖，不连接业务数据库或 Redis。前端对应执行 `node scripts/test-assets.mjs`。
 
 ## 部署
 
@@ -20,8 +24,8 @@ last_updated: 2026-11-12
 
 | 方法 | 路径 | 参数与行为 |
 | --- | --- | --- |
-| GET | `/overview` | 资产总数、大类计数、本人回收站数量和当前回收期限 |
-| GET | `/list` | `page`、`search`、`skill_classes_id`、`sort`，服务端每页最多 10 条 |
+| GET | `/overview` | `total`、七阶段 `test_stages:[{id,code,name,count}]`、`unassigned_count`、本人回收站数量和当前回收期限；保留 `classes` 兼容旧调用方 |
+| GET | `/list` | `page`、`search`、`test_stage_id`（正整数阶段 ID）、`skill_classes_id`、`sort`；阶段与大类条件取交集，服务端每页最多 10 条 |
 | GET | `/detail` | `asset_id`，返回资产与附件 |
 | GET | `/source-status` | `artifact_id`，返回本人来源纳入或回收状态 |
 | POST | `/create` | `artifact_id`、`base_hash`、`name`、`skill_classes_id`、`application_identify`、`visibility`，归档原文件快照，同来源幂等 |

@@ -94,16 +94,17 @@ def _test_cases(file, path):
         return None
 
 
-@asset_router.get("/overview", summary="资产管理-查询可见资产数量和技能大类")
+@asset_router.get("/overview", summary="资产管理-查询全部资产和测试阶段数量")
 async def overview(current_user=DependAuth):
     return _result(await service.overview(current_user))
 
 
-@asset_router.get("/list", summary="资产管理-按技能大类分页查询")
+@asset_router.get("/list", summary="资产管理-按测试阶段和技能大类分页查询")
 async def list_assets(page: int = Query(1, ge=1), search: str = Query("", max_length=128),
                       skill_classes_id: int | None = Query(None, gt=0), sort: Literal["asc", "desc"] = "desc",
+                      test_stage_id: int | None = Query(None, gt=0),
                       current_user=DependAuth):
-    return _result(await service.list_page(current_user, page, search, skill_classes_id, sort, False))
+    return _result(await service.list_page(current_user, page, search, skill_classes_id, sort, False, test_stage_id=test_stage_id))
 
 
 @asset_router.get("/recycle-bin", summary="资产管理-查询本人可恢复的资产")
