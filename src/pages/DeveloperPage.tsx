@@ -350,7 +350,7 @@ export default function DeveloperPage() {
       {!panel && message && <p className="error-banner" role="alert">{message}</p>}
       {openingSkillId && <p className="helper-text" role="status">正在加载技能详情…</p>}
       <div className="implementation-table-wrap"><table className="implementation-table"><thead><tr>{[...implementationSummaryHeaders, '更新时间', '操作'].map(label => <th key={label} scope="col">{label}</th>)}</tr></thead><tbody>
-        {mine.map(item => <tr key={item.id}><ImplementationSummaryCells item={item} skillClasses={skillClasses} knowledgeUpdates /><td>{dateText(item.updatedAt)}</td><td><button className="button small" disabled={!!busy || loading} onClick={() => { if (['调试中', '调试成功', '调试失败'].includes(item.status)) openDebug(item); else openForm(item) }}>{openingSkillId === item.id ? '加载中…' : ['调试中', '调试成功', '调试失败'].includes(item.status) ? '调试' : '详情'}</button></td></tr>)}
+        {mine.map(item => <tr key={item.id}><ImplementationSummaryCells item={item} skillClasses={filterSkillClasses} knowledgeUpdates /><td>{dateText(item.updatedAt)}</td><td><button className="button small" disabled={!!busy || loading} onClick={() => { if (['调试中', '调试成功', '调试失败'].includes(item.status)) openDebug(item); else openForm(item) }}>{openingSkillId === item.id ? '加载中…' : ['调试中', '调试成功', '调试失败'].includes(item.status) ? '调试' : '详情'}</button></td></tr>)}
           {!mine.length && <tr><td colSpan={7} className="empty-table">{loading ? '正在加载技能…' : Object.values(appliedFilters).some(Boolean) ? '暂无符合筛选条件的实现类，请调整条件或重置。' : '暂无实现类，点击“新建技能”开始创建。'}</td></tr>}
       </tbody></table></div>
       <ListPagination total={total} page={page} pages={pages} label="技能列表分页" busy={loading} onPageChange={goToPage} />
