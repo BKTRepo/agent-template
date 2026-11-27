@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { exportArtifact, exportOriginalArtifact, getArtifact, saveArtifact } from '@/api/assistantArtifacts'
-import { assetSourceStatus, createAsset, downloadAsset, getAssetOverview, type AssetStatus, type AssetOverview } from '@/api/assets'
+import { assetSourceStatus, createAsset, downloadAsset, type AssetStatus } from '@/api/assets'
 import { getDeveloperMetadata, type DeveloperCatalogOption } from '@/api/developerCenter'
 import ApplicationPicker from '@/components/developer/ApplicationPicker'
 import Dialog from '@/components/developer/Dialog'
@@ -17,12 +17,17 @@ interface ArchiveForm {
   classId: string
 }
 
+export function ArchiveStageField({ skillClass }: { skillClass?: DeveloperCatalogOption }) {
+  return <label>测试阶段<input aria-label="自动关联的测试阶段" readOnly value={skillClass ? skillClass.test_stage_name || '阶段未配置' : ''}
+    placeholder="选择技能大类后自动关联" /><small className="helper-text">根据所选技能大类自动关联</small></label>
+}
+
 export default function ArtifactWorkbench({ artifactId, fileName, onClose }: { artifactId: string; fileName: string; onClose: () => void }) {
   const [artifact, setArtifact] = useState<AssistantArtifact>()
   const [exportChoice, setExportChoice] = useState<ArtifactFile>()
   const [form, setForm] = useState<ArchiveForm>()
   const [applications, setApplications] = useState<DeveloperCatalogOption[]>([])
-  const [classes, setClasses] = useState<AssetOverview['classes']>([])
+  const [classes, setClasses] = useState<DeveloperCatalogOption[]>([])
   const [assetStatus, setAssetStatus] = useState<AssetStatus>()
   const [previewLoading, setPreviewLoading] = useState(true)
   const [previewError, setPreviewError] = useState('')
@@ -61,9 +66,9 @@ export default function ArtifactWorkbench({ artifactId, fileName, onClose }: { a
 
   function beginArchive(current: ArtifactFile, exportAfter: boolean) {
     return run(async () => {
-      const [metadata, overview] = await Promise.all([getDeveloperMetadata(), getAssetOverview()])
+      const metadata = await getDeveloperMetadata()
       setApplications(metadata.applications.filter(application => application.id !== '*'))
-      setClasses(overview.classes.filter(row => row.enabled))
+      setClasses(metadata.skill_classes)
       setForm({ artifact: current, exportAfter, name: current.name, application: '', classId: '' })
       setExportChoice(undefined)
     })
@@ -129,6 +134,7 @@ export default function ArtifactWorkbench({ artifactId, fileName, onClose }: { a
         <label>资产名称<input value={form.name} maxLength={128} disabled={busy} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
         <label>技能大类<select value={form.classId} disabled={busy} onChange={event => setForm({ ...form, classId: event.target.value })}>
           <option value="">请选择技能大类</option>{classes.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
+        <ArchiveStageField skillClass={classes.find(row => row.id === form.classId)} />
         <ApplicationPicker required value={form.application ? [form.application] : []} options={applications}
           disabled={busy} onChange={ids => setForm({ ...form, application: ids[0] ?? '' })} />
       </div>

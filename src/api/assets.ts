@@ -12,7 +12,8 @@ export interface AssetRow {
 }
 export interface AssetFile { id: number; file_name: string; size_bytes: number }
 export interface AssetDetail extends AssetRow { files: AssetFile[] }
-export interface AssetOverview { total: number; recycle_count: number; recycle_days: number; classes: { id: number; name: string; count: number; enabled: boolean }[] }
+export interface AssetStage { id: number; code: string; name: string; count: number }
+export interface AssetOverview { total: number; recycle_count: number; recycle_days: number; test_stages: AssetStage[]; unassigned_count: number; classes: { id: number; name: string; count: number; enabled: boolean }[] }
 export interface AssetPageResult { items: AssetRow[]; total: number; page: number; pages: number }
 export interface AssetStatus { included: boolean; recycled: boolean; asset_id: number | null; files: AssetFile[] }
 export interface AssetPreview {
@@ -48,14 +49,18 @@ async function binary(path: string, options?: RequestInit) {
   return response.blob()
 }
 
-export function getAssetOverview(signal?: AbortSignal) {
-  return request<AssetOverview>('/overview', { signal })
+export async function getAssetOverview(signal?: AbortSignal) {
+  const overview = await request<AssetOverview>('/overview', { signal })
+  if (!Array.isArray(overview?.test_stages) || !overview.test_stages.length) {
+    throw new Error('测试阶段暂不可用，请稍后重试。')
+  }
+  return overview
 }
 
-export function listAssets(filters: { page: number; search: string; classId?: number; sort: 'asc' | 'desc'; recycle: boolean }, signal?: AbortSignal) {
-  const { page, search, classId, sort, recycle } = filters
+export function listAssets(filters: { page: number; search: string; classId?: number; testStageId?: number; sort: 'asc' | 'desc'; recycle: boolean }, signal?: AbortSignal) {
+  const { page, search, classId, testStageId, sort, recycle } = filters
   return request<AssetPageResult>(recycle ? '/recycle-bin' + query({ page }) : '/list' + query({ page, search, sort,
-    ...(classId && { skill_classes_id: classId }) }), { signal })
+    ...(classId && { skill_classes_id: classId }), ...(testStageId && { test_stage_id: testStageId }) }), { signal })
 }
 
 export function getAsset(assetId: number, signal?: AbortSignal) {

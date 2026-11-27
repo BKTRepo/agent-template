@@ -7,20 +7,34 @@ import AssetPreviewDialog from '@/components/assets/AssetPreviewDialog'
 import ListPagination from '@/components/common/ListPagination'
 import Dialog from '@/components/developer/Dialog'
 import '@/components/assets/assets.css'
+import { useSkillClassStore } from '@/stores/skillClassStore'
 
-const categoryIcons = [LayoutGrid, List, Code2, Database, FileText, Target, CheckCircle2]
+const categoryIcons = [LayoutGrid, Target, List, Database, Code2, FileText, Layers3, CheckCircle2]
 
 const emptyPage: AssetPageResult = { items: [], total: 0, page: 1, pages: 1 }
 const formatTime = (value: string) => new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })
 const actionLabels = { move: '移入回收站', restore: '恢复', delete: '彻底删除' } as const
 
+export function AssetStageOverview({ overview, value, disabled, onChange }: {
+  overview: AssetOverview; value?: number; disabled: boolean; onChange: (stageId?: number) => void
+}) {
+  return <section className="asset-overview" aria-label="按测试阶段查看资产">
+    {[{ id: undefined, name: '全部资产', count: overview.total }, ...overview.test_stages].map((row, index) => <button type="button"
+      key={row.id ?? 'all'} aria-pressed={value === row.id} disabled={disabled} onClick={() => onChange(row.id)}>
+      <span className="asset-overview-icon">{(() => { const Icon = categoryIcons[index] ?? Layers3; return <Icon size={16} /> })()}</span>
+      <span className="asset-overview-label">{row.name}</span><strong>{row.count.toLocaleString('zh-CN')}</strong>
+    </button>)}
+  </section>
+}
+
 export default function AssetsPage() {
+  const classCatalogVersion = useSkillClassStore(state => state.version)
   const [overview, setOverview] = useState<AssetOverview>()
   const [result, setResult] = useState(emptyPage)
   const [applications, setApplications] = useState<Record<string, string>>({})
   const [recycle, setRecycle] = useState(false)
   const [keyword, setKeyword] = useState('')
-  const [filters, setFilters] = useState<{ page: number; search: string; classId?: number; sort: 'asc' | 'desc' }>({ page: 1, search: '', sort: 'desc' })
+  const [filters, setFilters] = useState<{ page: number; search: string; testStageId?: number; sort: 'asc' | 'desc' }>({ page: 1, search: '', sort: 'desc' })
   const [selected, setSelected] = useState<number[]>([])
   const [preview, setPreview] = useState<number>()
   const [pending, setPending] = useState<{ ids: number[]; action: AssetAction }>()
@@ -35,7 +49,8 @@ export default function AssetsPage() {
   useEffect(() => {
     const update = () => setRefresh(value => value + 1)
     window.addEventListener('asset-collection-changed', update)
-    return () => window.removeEventListener('asset-collection-changed', update)
+    window.addEventListener('focus', update)
+    return () => { window.removeEventListener('asset-collection-changed', update); window.removeEventListener('focus', update) }
   }, [])
 
   useEffect(() => {
@@ -52,7 +67,7 @@ export default function AssetsPage() {
       if (!controller.signal.aborted) { setOverview(value); setOverviewError('') }
     }).catch(reason => { if (!controller.signal.aborted) setOverviewError(reason.message) })
     return () => controller.abort()
-  }, [refresh])
+  }, [refresh, classCatalogVersion])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -63,7 +78,7 @@ export default function AssetsPage() {
       if (!controller.signal.aborted) { setError(reason.message); setResult(emptyPage) }
     }).finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => controller.abort()
-  }, [filters, recycle, refresh])
+  }, [filters, recycle, refresh, classCatalogVersion])
 
   async function run(action: () => Promise<void>) {
     if (busy) return
@@ -82,19 +97,15 @@ export default function AssetsPage() {
   }
 
   const locked = busy || loading
-  const label = recycle ? '回收站' : overview?.classes.find(row => row.id === filters.classId)?.name ?? '全部资产'
+  const label = recycle ? '回收站' : overview?.test_stages?.find(row => row.id === filters.testStageId)?.name ?? '全部资产'
 
   return <div className="assets-page">
     <div className="asset-page-actions"><button className="button" disabled={busy} onClick={toggleRecycle}>
       {recycle ? '返回资产列表' : <><Trash2 size={15} />回收站 {overview?.recycle_count ?? ''}</>}
     </button></div>
-    {!recycle && overview && <section className="asset-overview" aria-label="资产概览">
-      {[{ id: undefined, name: '全部资产', count: overview.total }, ...overview.classes].map((row, index) => <button type="button"
-        key={row.id ?? 'all'} aria-pressed={filters.classId === row.id} disabled={busy}
-        onClick={() => setFilters({ ...filters, classId: row.id, page: 1 })}>
-        <span className="asset-overview-icon">{(() => { const Icon = categoryIcons[index] ?? Layers3; return <Icon size={16} /> })()}</span><span className="asset-overview-label">{row.name}</span><strong>{row.count.toLocaleString('zh-CN')}</strong>
-      </button>)}
-    </section>}
+    {!recycle && overview && <AssetStageOverview overview={overview} value={filters.testStageId} disabled={busy}
+      onChange={testStageId => setFilters({ ...filters, testStageId, page: 1 })} />}
+    {!recycle && !!overview?.unassigned_count && <p className="helper-text">{overview.unassigned_count} 项资产所属技能大类尚未配置测试阶段，仍可在“全部资产”查看。</p>}
     {overviewError && <p role="alert" className="error-banner">{overviewError} <button className="button small" onClick={() => setRefresh(value => value + 1)}>重试</button></p>}
     <section className="surface asset-list" aria-label={label}>
       <h2>{label}</h2>
@@ -115,7 +126,7 @@ export default function AssetsPage() {
         <th><input type="checkbox" aria-label="选择本页资产" disabled={locked || !result.items.length}
           checked={result.items.length > 0 && selected.length === result.items.length}
           onChange={event => setSelected(event.target.checked ? result.items.map(row => row.id) : [])} /></th>
-        <th scope="col">资产名称</th><th scope="col">资产类型</th><th scope="col">内容数量</th><th scope="col">所属应用</th><th scope="col">创建人</th>
+        <th scope="col">资产名称</th><th scope="col">技能大类</th><th scope="col">内容数量</th><th scope="col">所属应用</th><th scope="col">创建人</th>
         {recycle ? <><th scope="col">回收时间</th><th scope="col">可恢复至</th></> : <th scope="col" aria-sort={filters.sort === 'asc' ? 'ascending' : 'descending'}>
           <button type="button" className="asset-text-button" disabled={busy} onClick={() => setFilters({ ...filters, page: 1, sort: filters.sort === 'asc' ? 'desc' : 'asc' })}>创建时间 {filters.sort === 'asc' ? '↑' : '↓'}</button></th>}
         <th scope="col">操作</th></tr></thead><tbody>
