@@ -147,10 +147,10 @@ async def download(file_id:int=Query(...,ge=1,description='文件编号'),curren
 async def save(data:DeveloperSkillSaveRequest,current_user=DependAuth):
     return SuccessResponse(data=await crud.output(await crud.save(data.skill_id,current_user,business_payload(data,DeveloperSkillForm)),current_user))
 
-@developer_skills.post('/developer/delete-skill-draft',summary='开发者中心-软删除技能草稿并释放名称')
+@developer_skills.post('/developer/delete-skill-draft',summary='开发者中心-软删除本人草稿或已下线技能并释放名称')
 async def delete(data:SkillIdRequest,current_user=DependAuth):
     await crud.delete_draft(data.skill_id,current_user)
-    return SuccessResponse(message='草稿已删除')
+    return SuccessResponse(message='技能已删除')
 
 @developer_skills.post('/developer/offline-skill',summary='开发者中心-填写下线原因并下线技能')
 async def offline(data:OfflineSkillBody,current_user=DependAuth):

@@ -310,8 +310,10 @@ class DeveloperSkillCrud:
 
     async def delete_draft(self,skill_id,user):
         async with in_transaction() as db:
+            await self.lock_name_catalog(db)
             skill=await self.get(skill_id,user,db)
-            if skill.display_status!='DRAFT': raise DeveloperError('只有草稿可以删除')
+            if skill.display_status not in ('DRAFT', 'OFFLINE'):
+                raise DeveloperError('仅草稿或已下线技能可以删除，请先将已上线技能下线')
             skill.state=1
             skill.update_user_login_name=user_login_name(user)
             await skill.save(using_db=db,update_fields=['state','update_user_login_name','updated_time'])

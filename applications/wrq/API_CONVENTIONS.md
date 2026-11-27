@@ -110,7 +110,7 @@ python -m applications.wrq.migrations.skill_class_publish --apply
 | GET | /get-skill | 按 skill_id 查询本人技能及当前知识库引用；只读、不递增修订或改变技能状态 |
 | POST | /create-skill-draft | JSON：DeveloperSkillForm；新建必选所属应用（application_ids 选择一个有效 identify，或 application_paso），缺失/空白返回 application_paso 字段错误；已有历史技能不补写默认应用 |
 | POST | /save-skill | JSON：skill_id + 原表单，包括 expected_revision |
-| POST | /delete-skill-draft | JSON：skill_id；仍仅软删除草稿 |
+| POST | /delete-skill-draft | JSON：skill_id；仅创建者可软删除草稿或已下线技能，保留历史版本及调用记录，释放技能名称 |
 | POST | /offline-skill | JSON：skill_id、reason_code、reason_text |
 | POST | /publish-skill | JSON：skill_id；仍由服务端核验调试结果 |
 | POST | /register-debug-run | JSON：skill_id、run_id、build_id/skill_version_id 及原登记字段 |

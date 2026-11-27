@@ -115,7 +115,7 @@ async def update_skill(
         return FailureResponse(message=f"更新失败: {e}")
 
 
-@skills.post("/delete-skill", summary="技能管理-删除技能草稿")
+@skills.post("/delete-skill", summary="技能管理-软删除本人草稿或已下线技能")
 async def delete_skill(
         data: SkillIdRequest,
         current_user: User = DependAuth,

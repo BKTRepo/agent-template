@@ -10,7 +10,7 @@ from tortoise.transactions import in_transaction
 from applications.user.models.user_model import User
 from applications.wrq.auth import user_login_name
 from applications.wrq.agent.models.agent_model import DeveloperSkillClass, TestStage, Skill, SkillForm, SkillVersion
-from .developer_skill_crud import DeveloperError, DeveloperSkillCrud
+from .developer_skill_crud import DeveloperError, DeveloperSkillCrud, STATUS_TEXT
 
 
 def normalize_class_name(value):
@@ -72,24 +72,38 @@ async def class_options(*, available_only=True):
     return [class_option(row, stages, published=True) for row in await query.order_by('id')]
 
 
-async def implementation_counts(class_ids=None, db=None):
+async def implementation_status_counts(class_ids=None, db=None):
     """Count distinct active implementations, including their currently published class."""
     query = Skill.filter(state=0)
     if db is not None:
         query = query.using_db(db)
-    skills = await query.values('id', 'skill_classes_id', 'current_version_id', 'published_version_id')
+    skills = await query.values('id', 'skill_classes_id', 'current_version_id', 'published_version_id', 'display_status')
     version_ids = {row[field] for row in skills for field in ('current_version_id', 'published_version_id') if row[field]}
     forms = SkillForm.filter(skill_version_id__in=version_ids)
     if db is not None:
         forms = forms.using_db(db)
     versions = {row['skill_version_id']: row['skill_class_id'] for row in await forms.values('skill_version_id', 'skill_class_id')}
-    grouped = defaultdict(set)
+    grouped = defaultdict(lambda: defaultdict(set))
     wanted = set(class_ids) if class_ids is not None else None
     for skill in skills:
         for class_id in {skill['skill_classes_id'], versions.get(skill['current_version_id']), versions.get(skill['published_version_id'])}:
             if class_id is not None and (wanted is None or class_id in wanted):
-                grouped[class_id].add(skill['id'])
-    return {key: len(ids) for key, ids in grouped.items()}
+                status = getattr(skill['display_status'], 'value', skill['display_status'])
+                grouped[class_id][status].add(skill['id'])
+    return {key: {status: len(ids) for status, ids in states.items()} for key, states in grouped.items()}
+
+
+async def implementation_counts(class_ids=None, db=None):
+    return {key: sum(states.values()) for key, states in (await implementation_status_counts(class_ids, db)).items()}
+
+
+def implementation_delete_reason(states):
+    total = sum(states.values())
+    if not total:
+        return None
+    labels = {'ONLINE': '已上线实现', **{key: value for key, value in STATUS_TEXT.items() if key != 'ONLINE'}}
+    details = '、'.join(f'{name} {states[status]} 个' for status, name in labels.items() if states.get(status))
+    return f'该大类下仍有未清理的技能：{details}。请先清理后再删除该大类。'
 
 
 async def online_implementation_counts(class_ids):
@@ -111,7 +125,7 @@ class SkillClassService:
         return {'test_stages': await stage_options(), 'skill_classes': await class_options()}
 
     async def _present(self, rows, user):
-        counts = await implementation_counts([row.id for row in rows])
+        status_counts = await implementation_status_counts([row.id for row in rows])
         online_counts = await online_implementation_counts([row.id for row in rows])
         stages = {row.id: row for row in await TestStage.all()}
         logins = {row.create_user_login_name for row in rows if row.create_user_login_name}
@@ -121,7 +135,8 @@ class SkillClassService:
         result = []
         for row in rows:
             mine = bool(login and row.create_user_login_name == login)
-            count = counts.get(row.id, 0)
+            states = status_counts.get(row.id, {})
+            count = sum(states.values())
             result.append({**class_option(row, stages), 'class_code': f'class-{row.id}',
                 'input_description': row.input_description or '', 'output_description': row.output_description or '',
                 'input_schema': row.input_schema, 'output_schema': row.output_schema, 'template': row.template or '',
@@ -133,7 +148,7 @@ class SkillClassService:
                 'can_publish': mine and row.is_enabled and row.published_revision != row.revision,
                 'can_create_implementation': row.publication_status == 'PUBLISHED' and row.is_enabled,
                 'implementation_count': online_counts.get(row.id, 0), 'is_mine': mine, 'can_edit': mine, 'can_delete': mine and count == 0,
-                'delete_disabled_reason': f'该大类下还有 {count} 个实现，需先清理后才能删除' if count else None})
+                'delete_disabled_reason': implementation_delete_reason(states)})
         return result
 
     async def detail(self, class_id, user=None):
@@ -249,9 +264,9 @@ class SkillClassService:
             # between this reference check and the logical deletion.
             await DeveloperSkillCrud.lock_name_catalog(db)
             row = await self._owned(data.class_id, user, data.expected_revision, db)
-            count = (await implementation_counts([row.id], db)).get(row.id, 0)
-            if count:
-                raise DeveloperError(f'该大类下还有 {count} 个实现，需先清理后才能删除', 409)
+            reason = implementation_delete_reason((await implementation_status_counts([row.id], db)).get(row.id, {}))
+            if reason:
+                raise DeveloperError(reason, 409)
             row.state, row.active_name_key, row.deleted_time = 1, None, now()
             row.revision += 1
             row.update_user_login_name = user_login_name(user)
