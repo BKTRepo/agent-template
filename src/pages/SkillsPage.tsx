@@ -4,6 +4,7 @@ import SkillCatalogGroup from '@/components/skills/SkillCatalogGroup'
 import Dialog from '@/components/developer/Dialog'
 import DebugDialog from '@/components/developer/DebugDialog'
 import SearchSelect from '@/components/developer/SearchSelect'
+import ClearableSelect from '@/components/developer/ClearableSelect'
 import CatalogClassDetailDialog from '@/components/skills/CatalogClassDetailDialog'
 import { useSkillClassCatalog } from '@/stores/skillClassStore'
 import { classesForStage } from '@/lib/skillClass'
@@ -86,8 +87,8 @@ export default function SkillsPage() {
   return <>
     <form className="surface catalog-filters skill-catalog-filters" onSubmit={event => { event.preventDefault(); applyFilters(filters) }}>
       <input aria-label="技能名称模糊搜索" placeholder="名称模糊搜索" value={filters.name} onChange={event => setFilters(previous => ({ ...previous, name: event.target.value }))} />
-      <select aria-label="测试阶段" className={!filters.testStageId ? 'select-placeholder' : undefined} value={filters.testStageId} onChange={event => setFilters(previous => ({ ...previous, testStageId: event.target.value }))}><option value="">测试阶段</option>{options.stages.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select>
-      <select aria-label="技能类" className={!filters.classId ? 'select-placeholder' : undefined} value={filters.classId} onChange={event => setFilters(previous => ({ ...previous, classId: event.target.value }))}><option value="">技能大类</option>{options.classes.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select>
+      <ClearableSelect label="测试阶段" value={filters.testStageId} options={options.stages} placeholder="测试阶段" onChange={value => setFilters(previous => ({ ...previous, testStageId: value }))} />
+      <ClearableSelect label="技能大类" value={filters.classId} options={options.classes} placeholder="技能大类" onChange={value => setFilters(previous => ({ ...previous, classId: value }))} />
       <SearchSelect label="筛选所属应用" value={filters.system} options={metadata.applications.filter(row => row.id !== '*')} placeholder="应用" onChange={value => setFilters(previous => ({ ...previous, system: value }))} />
       <SearchSelect label="维护人" value={filters.maintainer} options={options.maintainers} placeholder="维护人" onChange={value => setFilters(previous => ({ ...previous, maintainer: value }))} />
       <button className="button primary" disabled={loading}>搜索</button><button type="button" className="button" disabled={loading} onClick={() => { setFilters(emptyFilters); applyFilters(emptyFilters) }}>重置</button>

@@ -236,14 +236,15 @@ export default function DeveloperPage() {
     } catch (error) { setMessage((error as Error).message) } finally { setBusy(null) }
   }
   async function removeDraft() {
-    if (!selected || selected.status !== '草稿' || busy) return
+    if (!selected || !['草稿', '已下线'].includes(selected.status) || busy) return
     setBusy('delete'); setMessage('')
     try {
       await deleteDeveloperSkill(selected.id)
       remove(selected.id)
       setPanel(null); setDraftDeletePrompt(false)
-      setNotice('草稿已删除。')
-      await refresh(page).catch(error => setMessage(`草稿已删除，列表刷新失败：${(error as Error).message}`))
+      useSkillClassStore.getState().invalidate()
+      setNotice('技能已删除。')
+      await refresh(page).catch(error => setMessage(`技能已删除，列表刷新失败：${(error as Error).message}`))
     } catch (error) { setMessage((error as Error).message) } finally { setBusy(null) }
   }
   async function build(saveChanges = false) {
@@ -365,16 +366,16 @@ export default function DeveloperPage() {
         title="填写至少一个待润色字段后使用" onClick={() => setPolishOriginal(polishText(form))}><Sparkles size={14} />润色</button>} footer={<>
       {!!validationErrors.length && <div className="form-validation-summary" role="alert"><b>还有 {validationErrors.length} 项需要补充或修正：</b>{validationErrors.map(([key, value]) => <button key={key} type="button" onClick={() => focusField(key)}>{value}</button>)}</div>}
       {message && <p className="form-submit-error" role="alert">{message}</p>}
-        {draftDeletePrompt ? <><span className="delete-confirm" role="alert">确认删除草稿“{selected?.name}”？删除后不可恢复。</span><button className="button" disabled={!!busy} onClick={() => setDraftDeletePrompt(false)}>取消删除</button><button className="button danger" disabled={!!busy} onClick={removeDraft}>{busy === 'delete' ? primaryBusy : '确认删除'}</button></> : <>
+        <>
         <button className="button" disabled={!!busy} onClick={closePanel}>取消</button>
         {readonly ? <button className="button primary" disabled={!!busy || !selected?.buildId} onClick={() => selected && openDebug(selected)}>在线调试</button> : online ? <>
           <button className="button primary" disabled={!!busy} onClick={savePublished}>{busy === 'save' ? primaryBusy : '保存修改'}</button>
           <button className="button danger" disabled={!!busy} onClick={() => { setMessage(''); setOfflineReasonCode(''); setOfflineReasonText(''); setOfflinePrompt(true) }}>下线</button>
         </> : <>
-          {selected?.status === '草稿' && <button className="button danger" disabled={!!busy} onClick={() => { setMessage(''); setDraftDeletePrompt(true) }}>删除草稿</button>}
+          {selected && ['草稿', '已下线'].includes(selected.status) && <button className="button danger" disabled={!!busy} onClick={() => { setMessage(''); setDraftDeletePrompt(true) }}>{selected.status === '草稿' ? '删除草稿' : '删除'}</button>}
           <button className={selected ? 'button primary' : 'button'} disabled={!!busy} onClick={saveDraft}>{selected ? '保存修改' : '保存草稿'}</button>{selected?.status !== '已下线' && <button className="button primary" disabled={!!busy} onClick={requestBuild}>{busy === 'build' ? primaryBusy : selected ? '在线调试' : '调试'}</button>}
         </>}
-      </>}
+      </>
     </>}>
       {readonly && <p className="form-hint">创建者：{selected?.creatorName || '历史创建者'}。仅创建者本人可编辑此实现类。</p>}
       {online && !readonly && <p className="helper-text">保存修改后回到草稿状态，重新调试通过并上线时生成新版本。{selected?.pendingChangedAt && `编辑稿保存于 ${dateText(selected.pendingChangedAt)}。`}</p>}
@@ -399,10 +400,16 @@ export default function DeveloperPage() {
       <p>当前内容有未保存的修改，是否保存修改后进入调试？</p>
     </Dialog>}
 
-    {offlinePrompt && selected && <Dialog title={<>确认下线 · {selected.name}</>} onClose={() => setOfflinePrompt(false)} busy={!!busy} footer={<><button className="button" disabled={!!busy} onClick={() => setOfflinePrompt(false)}>取消下线</button><button className="button danger" disabled={!!busy || !offlineReasonCode || (offlineReasonCode === 'OTHER' && !offlineReasonText.trim())} onClick={offline}>{busy === 'offline' ? primaryBusy : '确认下线'}</button></>}>
+    {draftDeletePrompt && selected && <Dialog title="确认删除技能" busy={!!busy} onClose={() => setDraftDeletePrompt(false)} footer={<><button className="button" disabled={!!busy} onClick={() => setDraftDeletePrompt(false)}>取消</button><button className="button danger" disabled={!!busy} onClick={removeDraft}>{busy === 'delete' ? primaryBusy : '确认删除'}</button></>}>
+      <p className="delete-confirm">确认删除技能“{selected.name}”吗？</p><p className="helper-text">删除后，该技能将从列表中移除，无法继续编辑或重新上线；历史调用与产出记录保留。</p>
+      {message && <p className="error-banner" role="alert">{message}</p>}
+    </Dialog>}
+
+    {offlinePrompt && selected && <Dialog className="skill-offline-dialog" title={<>确认下线 · {selected.name}</>} onClose={() => setOfflinePrompt(false)} busy={!!busy} footer={<><button className="button" disabled={!!busy} onClick={() => setOfflinePrompt(false)}>取消下线</button><button className="button danger" disabled={!!busy || !offlineReasonCode || (offlineReasonCode === 'OTHER' && !offlineReasonText.trim())} onClick={offline}>{busy === 'offline' ? primaryBusy : '确认下线'}</button></>}>
       <p className="delete-confirm" role="alert">下线技能立即从技能中心移除，对话台已加载入口变为不可用；影响历史调用与产出记录保留，重新验证通过后可再次上线。</p>
       <label className="form-field"><span>下线原因 <em>*</em></span><select aria-label="下线原因" value={offlineReasonCode} onChange={event => setOfflineReasonCode(event.target.value)}><option value="">请选择下线原因</option><option value="ABILITY_DEFECT">能力缺陷</option><option value="COMPLIANCE_RISK">合规风险</option><option value="STOP_MAINTENANCE">停止维护</option><option value="OTHER">其他</option></select></label>
-      {offlineReasonCode === 'OTHER' && <input value={offlineReasonText} onChange={event => setOfflineReasonText(event.target.value)} placeholder="请输入下线原因" />}
+      {offlineReasonCode === 'OTHER' && <label className="form-field"><span>具体原因 <em>*</em></span><textarea aria-label="具体下线原因" rows={4} maxLength={500} disabled={!!busy} value={offlineReasonText} onChange={event => setOfflineReasonText(event.target.value)} placeholder="请说明下线原因，例如当前存在的问题、影响范围或停止维护的原因" /><small className="helper-text">{offlineReasonText.length}/500</small></label>}
+      {message && <p className="error-banner" role="alert">{message}</p>}
     </Dialog>}
 
     {panel === 'debug' && selected && <DebugDialog key={selected.id} item={selected} onClose={closePanel} onEdit={!readonly && !['已上线', '已下线'].includes(selected.status) ? () => openForm(selected) : undefined} onPublish={!readonly && !['已上线', '已下线'].includes(selected.status) ? publish : undefined} onSaveDefinition={!readonly ? saveDefinition : undefined} onResult={debug => saveDebugResult(selected.id, debug)} />}

@@ -186,8 +186,10 @@ h1,h2,h3,p { margin:0; }
 .form-field>span,.field-heading label { font-size:12px; font-weight:600; }
 .form-field em { color:#e34d59; font-style:normal; }
 .form-field input,.form-field select,.form-field textarea,.simulation-options select { width:100%; border:1px solid #dbe5f0; border-radius:7px; padding:10px 11px; background:#fff; outline:none; color:var(--platform-text); min-width:0; }
-.form-field .select-placeholder { color:var(--platform-muted); }
+.form-field .select-placeholder { color:var(--platform-placeholder); }
 .form-field .select-placeholder option { color:var(--platform-text); }
+.skill-offline-dialog .delete-confirm { margin-bottom:20px; line-height:1.7; }
+.skill-offline-dialog .form-field textarea { min-height:120px; padding:12px; line-height:1.7; resize:vertical; }
 .form-field input:focus,.form-field select:focus,.form-field textarea:focus { border-color:#6aa8ff; box-shadow:0 0 0 2px #1677ff14; }
 .form-field input[aria-invalid=true],.form-field textarea[aria-invalid=true] { border-color:#e97272; }
 .form-field select[aria-invalid=true] { border-color:#e97272; background:#fff8f8; }
@@ -335,8 +337,11 @@ h1,h2,h3,p { margin:0; }
 .catalog-filters { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:16px; margin-bottom:18px; }
 .catalog-filters input,.catalog-filters select { border:1px solid #dbe5f0; border-radius:7px; padding:10px 12px; color:var(--platform-text); background:#fff; min-width:120px; }
 .catalog-filters.skill-catalog-filters { display:grid; grid-template-columns:minmax(150px,2.1fr) minmax(110px,1.15fr) minmax(120px,1.45fr) minmax(110px,1.3fr) minmax(105px,1fr) 70px 70px; gap:12px; padding:24px; }
-.skill-catalog-filters>input,.skill-catalog-filters>select,.skill-catalog-filters>.search-select { width:100%; min-width:0; max-width:none; }
-.catalog-filters.skill-catalog-filters>input,.catalog-filters.skill-catalog-filters>select,.catalog-filters.skill-catalog-filters>button,.catalog-filters.skill-catalog-filters .search-select-control input[role=combobox] { height:46px; font-family:inherit; font-size:14px; font-weight:400; line-height:1.55; }
+.skill-catalog-filters>input,.skill-catalog-filters>select,.skill-catalog-filters>.search-select,.skill-catalog-filters>.clearable-select { width:100%; min-width:0; max-width:none; }
+.catalog-filters.skill-catalog-filters>input,.catalog-filters.skill-catalog-filters>select,.catalog-filters.skill-catalog-filters .clearable-select select,.catalog-filters.skill-catalog-filters>button,.catalog-filters.skill-catalog-filters .search-select-control input[role=combobox] { height:46px; font-family:inherit; font-size:14px; font-weight:400; line-height:1.55; }
+.clearable-select { position:relative; min-width:0; }
+.catalog-filters .clearable-select select { width:100%; min-width:0; max-width:100%; padding-right:52px; text-overflow:ellipsis; }
+.clearable-select .search-select-clear { position:absolute; right:24px; top:50%; transform:translateY(-50%); }
 .skill-catalog-filters>button { justify-content:center; white-space:nowrap; }
 .catalog-filters.skill-catalog-filters>select.select-placeholder { color:var(--platform-placeholder); }
 .catalog-filters.skill-catalog-filters>select option { color:var(--platform-text); }
@@ -344,12 +349,12 @@ h1,h2,h3,p { margin:0; }
 .catalog-filters.skill-catalog-filters .search-select-control input[role=combobox] { padding-left:12px; padding-right:34px; }
 .catalog-filters.skill-catalog-filters .search-select.is-open input[role=combobox],.catalog-filters.skill-catalog-filters .search-select-control input[role=combobox]:not(:placeholder-shown) { padding-right:54px; }
 .catalog-filters.assistant-picker-filters,.catalog-filters.mount-filters { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:10px; overflow:visible; }
-.catalog-filters.assistant-picker-filters>input,.catalog-filters.assistant-picker-filters>select,.assistant-picker-filters>.search-select,.catalog-filters.mount-filters>input,.catalog-filters.mount-filters>select,.mount-filters>.search-select,.mount-filters>.mount-maintainer { grid-column:span 2; width:100%; min-width:0; max-width:none; }
+.catalog-filters.assistant-picker-filters>input,.catalog-filters.assistant-picker-filters>select,.assistant-picker-filters>.clearable-select,.assistant-picker-filters>.search-select,.catalog-filters.mount-filters>input,.catalog-filters.mount-filters>select,.mount-filters>.search-select,.mount-filters>.mount-maintainer { grid-column:span 2; width:100%; min-width:0; max-width:none; }
 .assistant-picker-filters>button,.mount-filters>button { min-width:0; white-space:nowrap; justify-content:center; }
 .mount-filters .mount-maintainer input { width:100%; min-width:0; }
 .catalog-filters select.select-placeholder { color:var(--platform-placeholder); }
 .catalog-filters select option { color:var(--platform-text); }
-@media(max-width:540px) { .catalog-filters.assistant-picker-filters,.catalog-filters.mount-filters { grid-template-columns:repeat(2,minmax(0,1fr)); } .catalog-filters.assistant-picker-filters>input,.catalog-filters.assistant-picker-filters>select,.assistant-picker-filters>.search-select,.catalog-filters.mount-filters>input,.catalog-filters.mount-filters>select,.mount-filters>.search-select,.mount-filters>.mount-maintainer { grid-column:span 1; min-width:0; } }
+@media(max-width:540px) { .catalog-filters.assistant-picker-filters,.catalog-filters.mount-filters { grid-template-columns:repeat(2,minmax(0,1fr)); } .catalog-filters.assistant-picker-filters>input,.catalog-filters.assistant-picker-filters>select,.assistant-picker-filters>.clearable-select,.assistant-picker-filters>.search-select,.catalog-filters.mount-filters>input,.catalog-filters.mount-filters>select,.mount-filters>.search-select,.mount-filters>.mount-maintainer { grid-column:span 1; min-width:0; } }
 .skill-group { margin-top:16px; overflow:hidden; }
 .skill-group>.developer-pagination { padding:16px 18px; }
 .skill-group-heading { display:grid; grid-template-columns:minmax(170px,240px) max-content minmax(0,1fr) max-content max-content max-content 28px; align-items:center; gap:12px; min-height:90px; padding:18px 24px; }

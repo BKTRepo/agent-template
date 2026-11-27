@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import Dialog from '@/components/developer/Dialog'
 import SearchSelect from '@/components/developer/SearchSelect'
+import ClearableSelect from '@/components/developer/ClearableSelect'
 import ListPagination from '@/components/common/ListPagination'
 import { getCatalogMetadata, listCatalogSkills, type CatalogMetadata } from '@/api/skillCatalog'
 import { listKnowledgeBasesPage } from '@/api/knowledge'
@@ -55,8 +56,8 @@ export default function AssistantResourcePicker({ kind, selected, busy, onSkill,
     footer={<button className="button" disabled={adding} onClick={onClose}>完成</button>}>
     <form className="catalog-filters assistant-picker-filters" onSubmit={event => { event.preventDefault(); search() }}>
       <input aria-label={kind === 'skills' ? '助手技能名称搜索' : '助手知识库名称搜索'} placeholder="名称模糊搜索" value={filters.name} onChange={event => setFilters({ ...filters, name: event.target.value })} />
-      {kind === 'skills' && <select aria-label="助手测试阶段" className={!filters.testStageId ? 'select-placeholder' : undefined} value={filters.testStageId} onChange={event => setFilters(previous => ({ ...previous, testStageId: event.target.value }))}><option value="">测试阶段</option>{options.stages.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select>}
-      {kind === 'skills' && <select aria-label="助手技能大类" className={!filters.classId ? 'select-placeholder' : undefined} value={filters.classId} onChange={event => setFilters(previous => ({ ...previous, classId: event.target.value }))}><option value="">技能大类</option>{options.classes.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select>}
+      {kind === 'skills' && <ClearableSelect label="助手测试阶段" value={filters.testStageId} options={options.stages} placeholder="测试阶段" onChange={value => setFilters(previous => ({ ...previous, testStageId: value }))} />}
+      {kind === 'skills' && <ClearableSelect label="助手技能大类" value={filters.classId} options={options.classes} placeholder="技能大类" onChange={value => setFilters(previous => ({ ...previous, classId: value }))} />}
       <SearchSelect label="助手所属应用" value={filters.application} options={metadata?.applications ?? []} placeholder="应用" onChange={application => setFilters({ ...filters, application })} />
       {kind === 'skills' && <SearchSelect label="助手维护人" value={filters.maintainer} options={options.maintainers} placeholder="维护人" onChange={maintainer => setFilters({ ...filters, maintainer })} />}
       {kind === 'knowledge' && <input aria-label="知识库维护人搜索" placeholder="维护人" value={filters.maintainer} onChange={event => setFilters({ ...filters, maintainer: event.target.value })} />}
