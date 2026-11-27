@@ -35,7 +35,7 @@ class SkillCatalogService:
         if not version or not form:
             raise DeveloperError('发布版本或表单缺失，请联系维护人', 409)
         from .skill_class_service import require_available_class
-        await require_available_class(form.skill_class_id)
+        await require_available_class(form.skill_class_id, published_snapshot=True)
         return skill, version, form
 
     @staticmethod
@@ -85,7 +85,7 @@ class SkillCatalogService:
     async def class_detail(self, class_id):
         from .skill_class_service import class_option, require_available_class, published_content
         from applications.wrq.agent.models.agent_model import TestStage
-        row = await require_available_class(class_id)
+        row = await require_available_class(class_id, published_snapshot=True)
         stages = {stage.id: stage for stage in await TestStage.all()}
         data = published_content(row)
         return {**class_option(row, stages, published=True), **{key: data.get(key) or '' for key in ('input_description', 'output_description', 'template')},
@@ -99,7 +99,7 @@ class SkillCatalogService:
         classes = await class_options(available_only=False)
         if class_id is not None:
             from .skill_class_service import require_available_class
-            await require_available_class(class_id)
+            await require_available_class(class_id, published_snapshot=True)
         if test_stage_id is not None:
             classes = [row for row in classes if row['test_stage_id'] == test_stage_id]
         form_query = form_query.filter(skill_class_id__in=[row['id'] for row in classes])

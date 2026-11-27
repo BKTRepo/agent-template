@@ -183,7 +183,7 @@ class SkillPackageService(LegacySkillPackageService):
                 saved, content = await version_and_form(skill.current_version_id, db)
                 from .skill_class_service import require_available_class
                 if content:
-                    await require_available_class(content.skill_class_id, db)
+                    await require_available_class(content.skill_class_id, db, published_snapshot=True)
                 if not saved or not content or (form.expected_version or None) != (saved.version or None):
                     raise DeveloperError("技能已被修改，请刷新后重试", 409)
                 # multipart 表单中的 skill_class_id 可能被 Pydantic 保留为字符串，

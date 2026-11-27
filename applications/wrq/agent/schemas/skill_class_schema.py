@@ -13,7 +13,7 @@ class SkillClassCreate(BaseModel):
     test_stage_id: ClassId
     description: RequiredText = Field(max_length=500)
     input_description: RequiredText = Field(max_length=200)
-    output_description: Annotated[str, StringConstraints(strip_whitespace=True)] = Field(default="", max_length=200)
+    output_description: RequiredText = Field(max_length=200)
     template: str = Field(min_length=1, max_length=100000)
 
     @field_validator('template')

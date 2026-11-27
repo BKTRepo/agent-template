@@ -4,6 +4,7 @@ import unicodedata
 from collections import defaultdict
 
 from tortoise.exceptions import IntegrityError
+from tortoise.expressions import F, Q
 from tortoise.timezone import now
 from tortoise.transactions import in_transaction
 
@@ -31,17 +32,22 @@ def comparable_class_content(values):
 
 
 def available_classes():
-    return DeveloperSkillClass.filter(state=0, is_enabled=True, publication_status="PUBLISHED")
+    return DeveloperSkillClass.filter(state=0, is_enabled=True, publication_status="PUBLISHED").filter(
+        Q(published_revision__isnull=True) | Q(published_revision=F('revision')))
 
 
-async def require_available_class(class_id, db=None):
+def current_class_published(row):
+    return row.publication_status == 'PUBLISHED' and (row.published_revision is None or row.published_revision == row.revision)
+
+
+async def require_available_class(class_id, db=None, *, published_snapshot=False):
     query = DeveloperSkillClass.filter(state=0, id=class_id)
     if db is not None:
         query = query.using_db(db).select_for_update()
     row = await query.first()
     if not row:
         raise DeveloperError('技能大类不存在、已删除或已停用，请重新选择', 409, 'class_id')
-    if row.publication_status != 'PUBLISHED':
+    if not current_class_published(row) and not (published_snapshot and row.published_revision is not None):
         raise DeveloperError('该技能大类尚未发布', 409, 'class_id')
     if not row.is_enabled:
         raise DeveloperError('技能大类已停用，请重新选择', 409, 'class_id')
@@ -68,7 +74,8 @@ def class_option(row, stages, *, published=False):
 
 async def class_options(*, available_only=True):
     stages = {row.id: row for row in await TestStage.all()}
-    query = available_classes() if available_only else DeveloperSkillClass.filter(state=0, publication_status='PUBLISHED')
+    query = available_classes() if available_only else DeveloperSkillClass.filter(state=0).filter(
+        Q(publication_status='PUBLISHED') | Q(published_revision__isnull=False))
     return [class_option(row, stages, published=True) for row in await query.order_by('id')]
 
 
@@ -143,11 +150,12 @@ class SkillClassService:
                 'creator_login_name': row.create_user_login_name,
                 'maintainer_name': names.get(row.create_user_login_name, row.create_user_login_name or '未填写'),
                 'created_time': row.created_time, 'updated_time': row.updated_time, 'revision': row.revision,
-                'publication_status': row.publication_status, 'published_revision': row.published_revision, 'published_at': row.published_at,
-                'has_unpublished_changes': row.publication_status == 'PUBLISHED' and row.published_revision != row.revision,
+                'publication_status': 'PUBLISHED' if current_class_published(row) else 'DRAFT', 'published_revision': row.published_revision, 'published_at': row.published_at,
+                'has_unpublished_changes': row.published_revision is not None and row.published_revision != row.revision,
                 'can_publish': mine and row.is_enabled and row.published_revision != row.revision,
-                'can_create_implementation': row.publication_status == 'PUBLISHED' and row.is_enabled,
-                'implementation_count': online_counts.get(row.id, 0), 'is_mine': mine, 'can_edit': mine, 'can_delete': mine and count == 0,
+                'can_create_implementation': current_class_published(row) and row.is_enabled,
+                'implementation_count': online_counts.get(row.id, 0), 'dependent_skill_count': count,
+                'is_mine': mine, 'can_edit': mine, 'can_delete': mine and count == 0,
                 'delete_disabled_reason': implementation_delete_reason(states)})
         return result
 
@@ -183,7 +191,7 @@ class SkillClassService:
             rows = rows.exclude(id=exclude_id)
         # Also covers legacy fixtures/data whose normalized key is not populated yet.
         if any(normalize_class_name(row.name) == normalize_class_name(data.name) or
-               (row.publication_status == 'PUBLISHED' and normalize_class_name(published_content(row)['name']) == normalize_class_name(data.name))
+               ((row.publication_status == 'PUBLISHED' or row.published_revision is not None) and normalize_class_name(published_content(row)['name']) == normalize_class_name(data.name))
                for row in await rows.using_db(db)):
             raise DeveloperError('已存在同名大类，请换一个名称', 409, 'name')
 
@@ -221,11 +229,14 @@ class SkillClassService:
                     await self._validate(data, db, row.id)
                     if row.publication_status == 'PUBLISHED' and row.published_content is None:
                         row.published_content = published_content(row)
+                    if row.publication_status == 'PUBLISHED' and row.published_revision is None:
+                        row.published_revision = row.revision
                     for key, value in values.items():
                         setattr(row, key, value)
                     row.active_name_key = class_name_key(data.name)
                     row.update_user_login_name = user_login_name(user)
                     row.revision += 1
+                    row.publication_status = 'DRAFT'
                     await row.save(using_db=db)
         except IntegrityError as exc:
             raise DeveloperError('已存在同名大类，请换一个名称', 409, 'name') from exc

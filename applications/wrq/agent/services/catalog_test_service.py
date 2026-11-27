@@ -86,7 +86,7 @@ async def create_catalog_test(data, documents, user):
             if not skill or skill.display_status != 'ONLINE' or skill.published_version_id != version.id:
                 raise DeveloperError('技能已下线或发布版本已变更，请刷新后重试', 409)
             from .skill_class_service import require_available_class
-            await require_available_class(form.skill_class_id, db)
+            await require_available_class(form.skill_class_id, db, published_snapshot=True)
             current = await SkillVersion.filter(id=version.id, build_id=data.build_id).using_db(db).first()
             if not current:
                 raise DeveloperError('发布构建已变更，请刷新后重试', 409)
